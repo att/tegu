@@ -1,0 +1,74 @@
+
+Tegu is a middle layer that provides the outside world with an interface to the 
+skoogi enhanced, floodlight (or other) SDN controllers.  Tegu also, as a side effect
+provides a request interface that yields a complete network graph (as described
+by floodlight), and the ability to map an IP address, VM name or VM ID to a 
+switch port combination. 
+
+The tegu src is divided into two packages and the main:
+	managers -- functions that are driven as goroutines and thus implement
+				major components of the application (reservation manager,
+				fq manager, etc.).  
+
+	gizmos	--  source files which implement objects, interfaces and the 
+				functions that operate directly on them (link, host, switch, 
+				pledge, etc.).
+
+	main	--  The main 
+
+		
+
+Build tegu by:
+	1) cd main
+	2) go build tegu.go
+
+
+Gizmos:
+	globals.go		constants and a few globals shared by *.go in this directory
+					This module also contains the initialisation function that 
+					sets all globals up. 
+
+	flight_if.go	floodlight interface providing methods that allow queries to the 
+					controller for gathering link and host information. 
+
+	host.go			represents a single host in the network graph and in a path
+
+	link.go			represents a link between switches in the network graph and in a path
+
+	obligation.go	used to manage an obligation of something over time; references may time slices
+
+	path.go			manages a path that has been created with a given amout of bandwith
+
+	pledge.go		used by res_mgr to track reservations in it's inventory
+
+	queue.go   		manages information needed to set individual queues for a reservation
+
+	spq.go      	a very simple object which allows the return of queue information to a caller in 
+					a single bundle (presently, just the struct, no functions exist).
+	switch.go		represents a switch in the network graph
+
+	time_slice.go	a single range of time for which a given amount of bandwith has been allocated
+
+	tools.go		some generic tools but not generic enough to prompte to the forge packages
+
+Managers:
+	http_api.go		provides the http "rest-ish" interface
+	network.go		manages the network graph
+	res_mgr.go		provides the resevation management logic
+	osif.go			openstack interface manager.
+	fqmgr.go		flowmod/queue manager
+
+
+Testing
+	tegu_test.go	run 'go -v test'  to run the tests
+
+
+The tegu source depends on a set of Go packages that were developed along side Tegu, 
+but are general enough to warrent their not being included here.  They are all a part
+of the forge.research.att.com/gopkgs/* package library.  To use them, clone the git 
+project and put it in the go source tree under  forge.research.att.com/gopkgs/. Unfortunately, 
+the Research forge Git isn't organised such that using Go's nice clone feature works 
+cleanly, so make the upper directory, and clone the gopkgs project into it. 
+
+
+
