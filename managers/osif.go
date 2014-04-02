@@ -182,15 +182,17 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			switch msg.Msg_type {
 				case REQ_VM2IP:														// driven by tickler; gen a new vm translation map and push to net mgr
 					m := mapvm2ip( os_refs )
-					count := 0;
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_VM2IP, m, nil )					// send new map to network as it is managed there
-					osif_sheep.Baa( 1, "VM2IP mapping updated from openstack" )
-					for k, v := range m {
-						osif_sheep.Baa( 2, "VM mapped: %s ==> %s", k, *v )
-						count++;
+					if m != nil {
+						count := 0;
+						msg := ipc.Mk_chmsg( )
+						msg.Send_req( nw_ch, nil, REQ_VM2IP, m, nil )					// send new map to network as it is managed there
+						osif_sheep.Baa( 1, "VM2IP mapping updated from openstack" )
+						for k, v := range m {
+							osif_sheep.Baa( 2, "VM mapped: %s ==> %s", k, *v )
+							count++;
+						}
+						osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
 					}
-					osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
 
 				case REQ_CHOSTLIST:
 					if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
