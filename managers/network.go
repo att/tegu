@@ -20,6 +20,9 @@
 
 	Mods:		19 Jan 2014 - Added support for host-any reservations.
 				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link. 
+				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint 
+							loading until after the driver here has been entered and thus we've built
+							the first graph.
 */
 
 package managers
@@ -620,7 +623,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap )					// initial build of network graph
+	act_net = build( nil, sdn_host, max_link_cap )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
 	net_sheep.Baa( 1, "initial network graph has been built" )
 
 	if refresh <= 10 {
@@ -636,6 +639,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 				net_sheep.Baa( 3, "processing request %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
 				switch req.Msg_type {
+					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
+
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )
@@ -674,12 +679,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								for i := 0; i < pcount; i++ {		// set the queues for each path in the list (multiple paths if network is disjoint)
 									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s\n\t%s", i, *h1, *h2, path_list[i].To_str( ) )
 									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out )
-/*
-		original code that set a blanket utilisation for the path
-									if ! path_list[i].Inc_utilisation( commence, expiry, bandw_in, bandw_out ) {
-										net_sheep.Baa( 2, "unable to inc utilisation for path entry" )
-									}
-*/
 								}
 
 								req.Response_data = path_list[:pcount]
@@ -709,9 +708,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 
-						act_net.vm2ip = req.Req_data.( map[string]*string )
-						act_net.ip2vm = act_net.build_ip2vm( )
-						net_sheep.Baa( 2, "vm2ip and ip2vm maps were updated, has %d entries", len( act_net.vm2ip ) )
+						if req.Req_data != nil {
+							act_net.vm2ip = req.Req_data.( map[string]*string )
+							act_net.ip2vm = act_net.build_ip2vm( )
+							net_sheep.Baa( 2, "vm2ip and ip2vm maps were updated, has %d entries", len( act_net.vm2ip ) )
+						} else {
+							net_sheep.Baa( 0, "vm2ip map was nil; not changed" )
+						}
 
 					case REQ_GEN_QMAP:							// generate a new queue setting map
 						ts := req.Req_data.( int64 )			// time stamp for generation
