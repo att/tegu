@@ -171,46 +171,36 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		msg = <- my_chan					// wait for next message from tickler
 		msg.State = nil					// default to all OK
 
-/*
-		if os_refs == nil || len( os_refs ) <= 0 {
-			osif_sheep.Baa( 1, "openstack interface is off, no openstack request processed" )
-			msg.Response_data = nil
-			msg.State = fmt.Errorf( "openstack inteface is off, no openstack data available" )
-		} else {
-*/
-			osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
-			switch msg.Msg_type {
-				case REQ_VM2IP:														// driven by tickler; gen a new vm translation map and push to net mgr
-					m := mapvm2ip( os_refs )
-					if m != nil {
-						count := 0;
-						msg := ipc.Mk_chmsg( )
-						msg.Send_req( nw_ch, nil, REQ_VM2IP, m, nil )					// send new map to network as it is managed there
-						osif_sheep.Baa( 1, "VM2IP mapping updated from openstack" )
-						for k, v := range m {
-							osif_sheep.Baa( 2, "VM mapped: %s ==> %s", k, *v )
-							count++;
-						}
-						osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
+		osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
+		switch msg.Msg_type {
+			case REQ_VM2IP:														// driven by tickler; gen a new vm translation map and push to net mgr
+				m := mapvm2ip( os_refs )
+				if m != nil {
+					count := 0;
+					msg := ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_VM2IP, m, nil )					// send new map to network as it is managed there
+					osif_sheep.Baa( 1, "VM2IP mapping updated from openstack" )
+					for k, v := range m {
+						osif_sheep.Baa( 2, "VM mapped: %s ==> %s", k, *v )
+						count++;
 					}
+					osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
+				}
 
-				case REQ_CHOSTLIST:
-					if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
-						msg.Response_data, msg.State = get_hosts( os_refs )
-					} else {
-						osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
-					}
+			case REQ_CHOSTLIST:
+				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
+					msg.Response_data, msg.State = get_hosts( os_refs )
+				} else {
+					osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
+				}
 
-				default:
-					osif_sheep.Baa( 1, "unknown request: %d", msg.Msg_type )
-					msg.Response_data = nil
-					if msg.Response_ch != nil {
-						msg.State = fmt.Errorf( "osif: unknown request (%d)", msg.Msg_type )
-					} 
-			}
-/*
+			default:
+				osif_sheep.Baa( 1, "unknown request: %d", msg.Msg_type )
+				msg.Response_data = nil
+				if msg.Response_ch != nil {
+					msg.State = fmt.Errorf( "osif: unknown request (%d)", msg.Msg_type )
+				} 
 		}
-*/
 
 		osif_sheep.Baa( 3, "processing request complete: %d", msg.Msg_type )
 		if msg.Response_ch != nil {			// if a reqponse channel was provided
