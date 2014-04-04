@@ -406,7 +406,7 @@ func (l *Link) Queues2str(  ts int64 ) ( s string ) {
 		max capacity (bps)
 */
 func (l *Link) To_str( ) ( s string ) {
-	s = fmt.Sprintf( "link: %s %s/%d %s/%d %d", l.id, *l.sw1, l.port1, *l.sw2, l.port2, l.allotment.Max_capacity )
+	s = fmt.Sprintf( "link: %s %s/%d %s/%d %d", *l.id, *l.sw1, l.port1, *l.sw2, l.port2, l.allotment.Max_capacity )
 	return
 }
 

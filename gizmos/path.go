@@ -11,11 +11,11 @@
 
 				Some ascii art that might help
 			
-				path===>[sw1] ------------LINK1-------- [sw2]---------LINK2--------[sw3]
-			    			^                          ^
-			    			|   link1's                |   link1's
-							--- forward queue           ---backward queue
-			
+				path===> [EP0]---[sw1]-------------LINK1---------[sw2]---------LINK2--------[sw3]---[EP1]
+			    			     ^   ^                          ^
+			    			     |   |    link1's               |   link1's
+			 endpt0's port/queue-+   +--- forward queue         + ---backward queue
+		      <---data flow                dataflow--->              <---dataflow	
 
 				*sw1 is where h1 connects, sw3 is where h2 connects. 
 				*the forward queue location is on the switch/port that sends data on the link in 
@@ -25,9 +25,13 @@
 			
 				The forward/backwards naming convention make sense, but are not obvious
 
+				Endpoints only have 'forward' switches and so when we set their queue we always
+				set the forward queue.
+
 	Date:		26 November 2013
 	Author:		E. Scott Daniels
 
+	Mod:		03 Apr 2014 (sd) - Added support for endpoints
 */
 
 package gizmos
@@ -54,6 +58,7 @@ type Path struct {
 	sidx	int
 	h1		*Host
 	h2		*Host
+	endpts	[]*Link			// virtual links that represent the switch to vm endpoint 'link'
 	is_reverse	bool		// set to indicate that the path was saved in reverse order
 }
 
@@ -70,7 +75,8 @@ func Mk_path( h1 *Host, h2 *Host ) ( p *Path ) {
 		sidx:	0,
 		is_reverse: false,
 	}
-	
+
+	p.endpts = make( []*Link, 2 )
 	p.links = make( []*Link, 32 )
 	p.switches = make( []*Switch, 64 )
 
@@ -91,6 +97,9 @@ func (p *Path) Nuke() {
 	p.switches = nil
 	p.h1 = nil
 	p.h2 = nil
+
+	p.endpts[0] = nil
+	p.endpts[1] = nil
 }
 
 /*
@@ -157,6 +166,30 @@ func (p *Path) Add_switch( s *Switch ) {
 }
 
 /*
+	Adds an endpoint that represents the connection between the switch and the 
+	given host. This allows a queue outbound from the switch to the host to 
+	be set.
+*/
+func ( p *Path) Add_endpoint( l *Link ) {
+	var (
+		idx int = 0
+	)
+
+	if p == nil {
+		return
+	}
+
+	if p.endpts[0] != nil {
+		if p.endpts[1] != nil {
+			p.endpts[0] = p.endpts[1]			// add pushes the endpoint -- should never happen, but allow it
+		}
+		idx = 1
+	}
+		
+	p.endpts[idx] = l
+}
+
+/*
 	Increases the utilisation of the path by adding delta to all links. This assumes that the
 	link has already been tested and indicated it could accept the change. 
 */
@@ -185,6 +218,8 @@ func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
 		2) priority-out the priority queue (1) for date outbound toward host 2
 		3) qid - the queue (n) set on the first link in the path for data flowing outbound
 		4) Rqid - the queue (n) set on the last link in the path for the data flowing from host2 toward host1
+
+	The process of adding a queue to a link increases the obligation (allotment) for that link. 
 */
 func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in int64, amt_out int64 ) (err error) {
 	err = nil
@@ -197,7 +232,7 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 		return
 	}
 
-	if p.lidx == 0 {			// TODO: this is a special case which indicates h1-h2 is on the same switch and needs to be handeled differently
+	if p.lidx == 0 {			// this should _never_ happen
 		obj_sheep.Baa( 0, "set_queue: no links in the path!" )
 		err = fmt.Errorf( "path has no links" )
 		return
@@ -248,18 +283,32 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 		if err != nil { return }
 		if p.lidx > 1 {																				// when just one link there is no priority queue into last switch
 			err = p.links[p.lidx-1].Set_forward_queue( &poutstr, commence, conclude, amt_out )		// and priority for this is the limit out from h1
+			if err != nil { return }
 		}
+	}
+
+	if p.endpts[0] != nil {			// endpoints are added in h1, h2 order regardless of path order, so no need for special handeling here
+		eqid := "E0" + *qid;
+		err = p.endpts[0].Set_forward_queue( &eqid, commence, conclude, amt_in )		// amount back to h1 
+		if err != nil { return }
+	}
+
+	if p.endpts[1] != nil {					
+		eqid := "E1" + *qid;
+		err = p.endpts[1].Set_forward_queue( &eqid, commence, conclude, amt_out )		// amount out from h1 into h2
+		if err != nil { return }
 	}
 
 	return
 }
 
 /*
-	Return the forward link information (switch/port/queue-num) associated with the first link of path.
-	This is the port and queue number used on the first switch in the path to send data _out_ from h1.
-	The data is based on queue ID and the timestamp given (queue numbers can vary over time).
+	Return the forward link information (switch/port/queue-num) associated with the first (ingress) switch 
+	in the path.  This is the port and queue number used on the first switch in the path to send data _out_ 
+	from h1.  The data is based on queue ID and the timestamp given (queue numbers can vary over time).
+	See also Get_endpoint_spq()
 */
-func (p *Path) Get_forward_ep_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
+func (p *Path) Get_ilink_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 	var (
 		idx int = 0
 	)
@@ -278,12 +327,14 @@ func (p *Path) Get_forward_ep_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 }
 
 /*
-	Return the backward link information (switch/port/queue-num) associated with the last link of path.
-	This is the port and queue number on the last switch in the path that is used to send data _back_
+	Return the backward link information (switch/port/queue-num) associated with the egress switch in
+	path. This is the port and queue number on the last switch in the path that is used to send data _back_
 	to h1 (inbound) from h2.
 	The data is based on queue ID and the timestamp given (queue numbers can vary over time).
+
+	See also Get_endpoint_spq()
 */
-func (p *Path) Get_backward_ep_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
+func (p *Path) Get_elink_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 	var (
 		idx int
 	)
@@ -399,6 +450,50 @@ func (p *Path) Get_intermed_spq( tstamp int64 )  ( []*Spq ){
 	}
 
 	return ret_list[:ridx]
+}
+
+/*
+	Returns the pair of switch/port/queue-num objects that are associated with the endpoint
+	links.  An endpoint link is the connection between the ingress/egress switch and the 
+	attached host.  This is _not_ the same as the ingress link and egress link which are
+	the information related to the first true link on the path.
+
+	This function will return nil pointers when both hosts are on the same switch as 
+	that case is managed as a virtual link and not as endpoints (probably should be 
+	changed, but for now that's the way it is).
+
+	Qid is the queue base name that we'll attach E0 and E1 to as a prefix.
+
+	Endpoints are added in h1,h2 order and not in path order, so this function must
+	return them respecitive to the path which may mean inverting them as the caller
+	of this function should expect that e0 is the endpoint at the start of the path. 
+*/
+func (p *Path) Get_endpoint_spq( qid *string, tstamp int64 ) ( e0 *Spq, e1 *Spq ) {
+	var (
+		idx0 int = 0
+		idx1 int = 1
+		pfx0 string = "E0"
+		pfx1 string = "E1"
+	)
+
+	if p.is_reverse {
+		idx0 = 1
+		idx1 = 0
+		pfx0 = "E1"
+		pfx1 = "E0"
+	}
+
+	if p.endpts[idx0] != nil {
+		eqid := pfx0 + *qid 
+		e0 = Mk_spq( p.endpts[idx0].Get_forward_info( &eqid, tstamp ) )
+	}
+
+	if p.endpts[idx1] != nil {
+		eqid := pfx1 + *qid 
+		e1 = Mk_spq( p.endpts[idx1].Get_forward_info( &eqid, tstamp ) )		// end points track things only in forward direction
+	}
+
+	return
 }
 
 /*

@@ -23,6 +23,7 @@
 				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint 
 							loading until after the driver here has been entered and thus we've built
 							the first graph.
+				03 Apr 2014 - Support for endpoints on the path.
 */
 
 package managers
@@ -69,7 +70,7 @@ func mk_network( mk_links bool ) ( n *Network ) {
 	n.hosts = make( map[string]*gizmos.Host, 2048 )
 
 	if mk_links {
-		n.links = make( map[string]*gizmos.Link, 2048 )	// must maintain a list of links so when we rebuild we preserve obligations
+		n.links = make( map[string]*gizmos.Link, 2048 )		// must maintain a list of links so when we rebuild we preserve obligations
 		n.vlinks = make( map[string]*gizmos.Link, 2048 )
 	}
 
@@ -99,84 +100,58 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 	return
 }
 
-
 /*
-	Accepts a map of queue data information (swid/port,res-id,queue,min,max,pri)
-	And adds to that based on the contents of the string if the data isn't already
-	listed in the seen map (prevents dups). Insertion into the map begins at idx
-	allowing this to be called multiple times to build a single map.
+	Accepts a list (strig) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
+	the list based on spaces and adds each information segment to the queue map. 
 
-	Returns both the map and the next insertion point. We must return the map
-	on the off chance that we had to increase it's size and thus it's new. 
-
-	(primarlly support for gen_queue_map and probably nothing else)
+	(Supports gen_queue_map and probably not useful for anything else)
 */
-func qlist2map( qmap []string, qlist *string, idx int, seen map[string]int ) ( []string, int ) {
-
+func qlist2map( qmap map[string]int, qlist *string ) {
 	qdata := strings.Split( *qlist, " " )		// split the list into tokens
 	for i := range qdata {
-		if idx >= len( qmap ) {
-			nqmap := make( []string, len( qmap ) + 128 )
-			copy( nqmap, qmap )
-		}
-
-		if qdata[i] != "" && seen[qdata[i]] == 0 {
-			seen[qdata[i]] = 1
-			qmap[idx] = qdata[i]
-			idx++
+		if qdata[i] != "" {
+			qmap[qdata[i]] = 1;
 		}
 	}
-
-	return qmap, idx
 }
 
 /*
 	Traverses all known links and generates a switch queue map based on the queues set for 
 	the time indicated by the timestamp passed in (ts). 
+
+	TODO:  this needs to return the map, not an array (fqmgr needs to change to accept the map)
 */
 func (n *Network) gen_queue_map( ts int64 ) ( qmap []string, err error ) {
 	var (
-		idx 	int = 0
+		//idx 	int = 0
 	)
 
 	err = nil									// at the moment we always succeed
-	qmap = make( []string, 128 )
 	seen := make( map[string]int, 100 )			// prevent dups which occur because of double links
 
 	for _, link := range n.links {					// for each link in the graph
 		s := link.Queues2str( ts )
-		qmap, idx = qlist2map( qmap, &s, idx, seen )		// add it's set to the map
+		qlist2map( seen, &s )						// add these to the map
 	}
 
 	for _, link := range n.vlinks {					// and do the same for vlinks
 		s := link.Queues2str( ts )
-		qmap, idx = qlist2map( qmap, &s, idx, seen )		// add it's set to the map
+		qlist2map( seen, &s )						// add these to the map
 	}
 
-	qmap = qmap[:idx]
+	qmap = make( []string, len( seen ) )
+	i := 0
+	for data := range seen {
+		qmap[i] = data
+		i++
+	}
+	net_sheep.Baa( 1, "gen_queue_map: added %d queue tokens to the list (len=%d)", i, len( qmap ) )
+	
 	return
 }
 
-
-
 /*
-	DEPRECATED
-	return the maximum value allocated to any link for the given time
-func (n *Network) get_max_link_alloc( utime int64 ) ( max int64 ) {
-	max = 0
-
-	for _, lp := range n.links {
-		if lav := lp.Get_allocation( utime ); lav > max {
-			max = lav
-		}
-	}	
-
-	return
-}
-*/
-
-/*
-	return the ip address associated with the name. The name may indeed be 
+	Returns the ip address associated with the name. The name may indeed be 
 	an IP address which we'll look up in the hosts table to verify first. 
 	If it's not an ip, then we'll search the vm2ip table for it. 
 */
@@ -211,7 +186,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 }
 
 /*
-	given two switch names see if we can find an existing link in the src->dest direction
+	Given two switch names see if we can find an existing link in the src->dest direction
 	if lnk is passed in, that is passed through to Mk_link() to cause lnk's obligation to be
 	'bound' to the link that is created here. 
 
@@ -246,9 +221,22 @@ func (n *Network) find_link( ssw string, dsw string, capacity int64, lnk ...*giz
 	Looks for a virtual link on the switch given between ports 1 and 2.
 	Returns the existing link, or makes a new one if this is the first.
 	New vlinks are stashed into the vlink hash.
+
+	We also create a virtual link on the endpoint between the switch and 
+	the host. In this situation there is only one port (p2 expected to be 
+	negative) and the id is thus just sw.port. 
 */
 func (n Network) find_vlink( sw string, p1 int, p2 int ) ( l *gizmos.Link ) {
-	id := fmt.Sprintf( "%s.%d.%d", sw, p1, p2 )
+	var(
+		id string
+	)
+
+	if p2 < 0 {
+		id = fmt.Sprintf( "%s.%d", sw, p1 )
+	} else {
+		id = fmt.Sprintf( "%s.%d.%d", sw, p1, p2 )
+	}
+
 	l = n.vlinks[id]
 	if l == nil {
 		l = gizmos.Mk_vlink( &sw, p1, p2, int64( 10 * ONE_GIG ) )
@@ -260,10 +248,10 @@ func (n Network) find_vlink( sw string, p1 int, p2 int ) ( l *gizmos.Link ) {
 }
 
 /*
-	build a new graph of the network
-	host is the name/ip:port of the host where floodlight is running
-	old-net is the reference net that we'll attempt to find existing links in.
-	max_capacity is the generic (default) max capacity for each link
+	Build a new graph of the network.
+	Host is the name/ip:port of the host where floodlight is running.
+	Old-net is the reference net that we'll attempt to find existing links in.
+	Max_capacity is the generic (default) max capacity for each link.
 */
 func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) {
 	var (
@@ -472,6 +460,10 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 				path.Set_reverse( true )								// indicate that the path is saved in reverse order 
 				net_sheep.Baa( 2,  "path[%d]: found target on %s (links follow)", plidx, tsw.To_str( ) )
 				
+				lnk = n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1 )		// add endpoint -- a virtual link out from switch to h2
+				lnk.Set_forward( tsw )												// endpoints have only a forward link
+				path.Add_endpoint( lnk )
+
 				for ; tsw != nil ; {
 					if tsw.Prev != nil {								// last node won't have a prev pointer so no link
 						lnk = tsw.Prev.Get_link( tsw.Plink )
@@ -480,6 +472,12 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 					path.Add_switch( tsw )
 
 					net_sheep.Baa( 2, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
+
+					if tsw.Prev == nil {													// last switch in the path, add endpoint 
+						lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1 )		// endpoint is a virt link from switch to h1
+						lnk.Set_forward( tsw )												// endpoints have only a forward link
+						path.Add_endpoint( lnk )
+					}
 					tsw = tsw.Prev
 				}
 
@@ -678,7 +676,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 								for i := 0; i < pcount; i++ {		// set the queues for each path in the list (multiple paths if network is disjoint)
 									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s\n\t%s", i, *h1, *h2, path_list[i].To_str( ) )
-									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out )
+									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out )		// this causes the utilisation to be increased; no explicit Inc_util is needed
 								}
 
 								req.Response_data = path_list[:pcount]
@@ -725,7 +723,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.Response_data, req.State = act_net.name2ip( &s )		// returns ip or nil
 
 					case REQ_GETLMAX:							// request for the max link allocation
-						//req.Response_data = act_net.get_max_link_alloc( req.Req_data.( int64 ) )
 						req.Response_data = nil;
 						req.State = nil;
 

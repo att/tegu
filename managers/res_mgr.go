@@ -18,6 +18,8 @@
 
 				need to check to ensure that a VM's IP address has not changed; repush 
 				reservation if it has and cancel the previous one (when skoogi allows drops)
+
+	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
 */
 
 package managers
@@ -236,7 +238,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 		pushed_count int = 0
 	)
 
-	//ch = make( chan *ipc.Chmsg )
 	fq_data = make( []interface{}, 8 )
 	fq_data[3] = 1						// queue is unchanging for now
 
@@ -247,15 +248,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 				h1, h2, _, expiry, _, _ := p.Get_values( )
 
 				ip1 := name2ip( h1 )
-/*
-	=== new version does not support any to host reservations =====
-				if *h2 == "0.0.0.0" || *h2 == "any" {		// these must be forced as they should never show in name2ip map (DEPRECATED)
-					dup_str := "0.0.0.0"
-					ip2 = &dup_str;
-				} else {
-					ip2 = name2ip( h2 )
-				}
-*/
 				ip2 = name2ip( h2 )
 
 				if ip1 != nil  &&  ip2 != nil {				// good ip addresses so we're good to go
@@ -275,13 +267,27 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						fq_data[FQ_IP2] = *ip2
 
 						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward IE reservations to skoogi: %s h1=%s --> h2=%s exp=%d", rname, *h1, *h2, expiry )
-						fq_data[FQ_SPQ] = plist[i].Get_forward_ep_spq( &rname, timestamp )		// send the res in forward direction
+
+
+						espq0, espq1 := plist[i].Get_endpoint_spq( &rname, timestamp )		// gather endpoint information (nil values are OK)
+
+
+						// ---- push flow-mods in the h1->h2 direction -----------
+						if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
+							fq_data[FQ_SPQ] = espq1
+							fq_sdata = make( []interface{}, len( fq_data ) )
+							copy( fq_sdata, fq_data )
+							msg = ipc.Mk_chmsg()
+							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, fq_sdata, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+						}
+
+						fq_data[FQ_SPQ] = plist[i].Get_ilink_spq( &rname, timestamp )			// send fmod to ingress switch on first link out from h1
 						fq_sdata = make( []interface{}, len( fq_data ) )
 						copy( fq_sdata, fq_data )
 						msg = ipc.Mk_chmsg()
-						msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, fq_sdata, nil )					// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+						msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, fq_sdata, nil )				// queue work to send to skoogi (errors come back asynch, successes do not generate response)
 
-						ilist := plist[i].Get_forward_im_spq( timestamp )		// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
+						ilist := plist[i].Get_forward_im_spq( timestamp )						// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
 						for ii := 0; ii < len( ilist ); ii++ {
 							fq_sdata = make( []interface{}, len( fq_data ) )
 							copy( fq_sdata, fq_data )
@@ -292,12 +298,21 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						}
 
 
+						// ---- push flow-mods in the h2->h1 direction -----------
 						rev_rname := "R" + rname		// the egress link has an R(name) queue name
 						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward IE reservations to skoogi: %s h1=%s <-- h2=%s exp=%d", rev_rname, *h1, *h2, expiry )
 						fq_data[FQ_IP2] = *ip1			// for the egress, and backward intermediate flowmods, the destination host is h1, so reverse these
 						fq_data[FQ_IP1] = *ip2
 
-						fq_data[FQ_SPQ] = plist[i].Get_backward_ep_spq( &rev_rname, timestamp )	// send res in backward direction
+						if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
+							fq_data[FQ_SPQ] = espq0
+							fq_sdata = make( []interface{}, len( fq_data ) )
+							copy( fq_sdata, fq_data )
+							msg = ipc.Mk_chmsg()
+							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, fq_sdata, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+						}
+
+						fq_data[FQ_SPQ] = plist[i].Get_elink_spq( &rev_rname, timestamp )	// send res to egress switch on first link towards h1
 						fq_sdata = make( []interface{}, len( fq_data ) )
 						copy( fq_sdata, fq_data )
 						msg = ipc.Mk_chmsg()

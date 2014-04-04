@@ -201,7 +201,8 @@ func (ts *Time_slice) Get_queue_info( id *string ) ( qnum int, swdata *string ) 
 	if q != nil {
 		qnum = q.Get_num( )
 		swdata = q.Get_eref()			// get the switch data (external reference in queue terms)
-	}
+	} 
+}
 
 	return
 }
@@ -216,10 +217,8 @@ func (ts *Time_slice) Add_queue( qnum int, id *string, swdata *string, amt int64
 	}
 
 	if q := ts.queues[*id]; q != nil {
-		//fmt.Fprintf( os.Stderr, "timeslice:add_queue: inc existing  %d-%d qnum=%d id=%s swdata=%s amt=%dM\n", ts.commence, ts.conclude, qnum, *id, *swdata, amt/1000000 )
 		q.Inc( amt )
 	} else {
-		//fmt.Fprintf( os.Stderr, "timeslice:add_queue: add new %d-%d qnum=%d id=%s swdata=%s amt=%dM\n", ts.commence, ts.conclude, qnum, *id, *swdata, amt/1000000 )
 		if qnum > 0 {						// we allow a queue num of zero as the means to incr an existing queue, but we never create one with 0
 			ts.queues[*id] = Mk_queue( amt, id, qnum, 200, swdata )
 		}

@@ -38,53 +38,15 @@ import (
 	"forge.research.att.com/tegu/gizmos"
 )
 
-//var (
-// NO GLOBALS HERE; use globals.go
-//)
-
-// --------------------------------------------------------------------------------------
-
 // --- Private --------------------------------------------------------------------------
 
-/*
-	This sends a request to network manager for the max link allocation value. 
-	This is an async request and the response should come back to the main 
-	channel so that we don't block. 
-*/
-/*
-DEPRECATED with specific queues
-func req_link_max( rch chan *ipc.Chmsg ) {
-	
-	req := ipc.Mk_chmsg( )
-	req.Send_req( nw_ch, rch, REQ_GETLMAX, time.Now().Unix(), nil )
-}
-*/
 
 /*
-	In the intial 'blanket setting' mode we will set the priority queue on all switches
-	in our domain to reflect the link that has the maximum utilisation commitment. 
-
 	We depend on an external script to actually set the queues so this is pretty simple.
 
 	hlist is the space separated list of hosts that the script should adjust queues on
 	muc is the max utilisation commitment for any link in the network. 
 */
-/*
-DEPRECATED -- original
-*/
-func orig_adjust_queues( cmd_str *string, hlist *string, muc int64 ) ( err error ) {
-	
-	if hlist == nil {
-		err = fmt.Errorf( "cannot adjust queues, no hosts in list" )
-		return
-	}
-
-	fq_sheep.Baa( 1, "adjusting queues on: limit=%dM  %s", muc/1000000, *hlist )
-	cmd := exec.Command( *cmd_str, fmt.Sprintf( "%d", muc ), *hlist )
-	err = cmd.Run()
-
-	return
-}
 
 /*
 	Writes the list of queue adjustment information (we assume from net-mgr) to a randomly named
@@ -209,7 +171,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			fq_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
 	}
-	// ---------------------------------------------------------------------------------
+	// ----- end config file munging ---------------------------------------------------
 
 	//tklr.Add_spot( qcheck_freq, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER );  	// tickle us every few seconds to adjust the ovs queues if needed
 
@@ -227,7 +189,6 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	} 
 
 	fq_sheep.Baa( 1, "flowmod-queue manager is running, sdn host: %s", *sdn_host )
-
 	for {
 		msg = <- my_chan					// wait for next message 
 		msg.State = nil					// default to all OK
@@ -289,30 +250,6 @@ if spq == nil {
 				} else {
 					req_hosts( my_chan )					// send a request to osif for a new host list
 				}
-
-			// CAUTION:   these are response messages resulting from requests that we sent off
-/*
-deprecated with specific path queue setting 
-			case REQ_GETLMAX:								// this should be a response from netmgr with the current link max
-				msg.Response_ch = nil;						// must set this off as it is our channel!!
-
-				if msg.Response_data != nil {				// response data should exist
-					mlu := msg.Response_data.( int64 )
-					if mlu != max_link_used {
-						fq_sheep.Baa( 2, "reset ovs queues needed: from %d to %d", max_link_used, mlu )
-						err := adjust_queues( ssq_cmd, host_list, mlu )	
-						if err != nil {
-							fq_sheep.Baa( 2, "WRN: unable to adjust queues: %s", err )
-						} else {
-							max_link_used = mlu
-						}
-					} else {
-						fq_sheep.Baa( 2, "no ovs queue change is needed: %d == %d", max_link_used, mlu )
-					}
-				} else {
-					fq_sheep.Baa( 2, "GETLMAX msg received on channel without a respose" )
-				}
-*/
 
 			default:
 				fq_sheep.Baa( 1, "unknown request: %d", msg.Msg_type )

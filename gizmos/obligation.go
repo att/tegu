@@ -342,7 +342,7 @@ func (ob *Obligation) Get_queue( qid *string, tstamp int64 ) ( qnum int ) {
 		}
 	}
 
-	if qnum < 0 {			// get_queue_info returns -1 if qid isn't known
+	if qnum <= 0 {			// get_queue_info returns -1 if qid isn't known, flip to 0
 		qnum = 0
 	}
 
