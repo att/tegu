@@ -23,6 +23,7 @@
 				10 Mar 2014 : converted to per-path queue setting (ingress/egress/middle queues)
 				13 Mar 2014 : Corrected 'bug' with setting pledges where both hosts connect to the 
 							same switch. (bug was that it wasn't yet implemented.)
+				03 Apr 2014 : Added endpoint support for reservations and flowmods
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -62,7 +63,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v2.0/13184"
+		version		string = "v2.1/14034"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -116,7 +117,7 @@ func main() {
 	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
 	osif_ch = make( chan *ipc.Chmsg )
 
-	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch )		// set up package environment
+	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err ); 
 		os.Exit( 1 )
@@ -129,6 +130,9 @@ func main() {
 		my_chan := make( chan *ipc.Chmsg )
 		req := ipc.Mk_chmsg( )
 	
+		req.Send_req( nw_ch, my_chan, managers.REQ_NOOP, nil, nil )		// 'ping' network manager; it will respond after initial build
+		req = <- my_chan												// block until we have a response back
+
 		req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, chkpt_file, nil )
 		req = <- my_chan												// block until the file is loaded
 
