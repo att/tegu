@@ -202,7 +202,6 @@ func (ts *Time_slice) Get_queue_info( id *string ) ( qnum int, swdata *string ) 
 		qnum = q.Get_num( )
 		swdata = q.Get_eref()			// get the switch data (external reference in queue terms)
 	} 
-}
 
 	return
 }
