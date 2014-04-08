@@ -39,7 +39,7 @@ const (
 	REQ_GEN_QMAP	int = 19	// network - generate queue info needed by external process to set queues
 	REQ_IE_RESERVE	int	= 20	// fq-manager send ingress/egress reservations to skoogi
 
-	ONE_GIG		int = 1024 * 1024 * 1024
+	ONE_GIG		int64 = 1024 * 1024 * 1024
 
 	version 	string = "v2.0/13174"
 )
