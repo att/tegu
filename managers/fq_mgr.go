@@ -94,6 +94,32 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	}
 }
 
+
+/*
+	new -- works with the new skoogi that drives agents
+	Builds a single buffer with the queue adjustent information (assume from netmgr) int a single
+	buffer and then send that buffer off to skoogi.  Skoogi now manages queues and if not directly
+	with the switches, then passes this data along to the agents.  We build an array with each 
+	element containing a queue adjustment string and then pass that into the floodlight/skoogi 
+	interface for proper json bundling and transmission to skoogi.
+*/
+func new_adjust_queues( uri *string, qlist []string ) {
+	var (
+		qdata	[]string
+		i		int
+	)
+
+	qdata = make( []string, 4096 )
+	fq_sheep.Baa( 2, "adjusting queues:  %d queue setting items",  len( qlist ) );
+
+	for i = range qlist {
+		fq_sheep.Baa( 2, "queue info: %s", qlist[i] )
+		qdata[i] = fmt.Sprintf( "%s", qlist[i] )
+	}
+
+	gizmos.SK_set_queues( uri, qdata[0:i] )		// send to skoogi listing at uri
+}
+
 /*
 	send a request to openstack interface for a host list. We will _not_ wait on it 
 	and will handle the response in the main loop. 
@@ -198,10 +224,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			case REQ_IE_RESERVE:							// the new proactive ingress/egress reservation format
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, *Spq
 				spq := data[FQ_SPQ].( *gizmos.Spq )
-if spq == nil {
-	fq_sheep.Baa( 0, "WRN: spq is nil in IE RESERVE call probably h1 and h2 on same switch" )
-	msg.Response_ch = nil
-} else {
+
 				if uri_prefix != "" {
 					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 
@@ -219,7 +242,6 @@ if spq == nil {
 						uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 					msg.Response_ch = nil
 				}
-}
 
 			case REQ_RESERVE:								// send a reservation to skoogi
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, queue h1/2 must be IP addresses
@@ -231,9 +253,9 @@ if spq == nil {
 				}
 
 			case REQ_SETQUEUES:								// request from reservation manager which indicates something changed and queues need to be reset
-				//req_link_max( my_chan )					// send request to network manager to get the max link utilisation
 				qlist := msg.Req_data.( []interface{} )[0].( []string )
 				adjust_queues( qlist, ssq_cmd, host_list ) 
+				//new_adjust_queues( &uri_prefix, qlist )
 
 			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
 				msg.Response_ch = nil;						// regardless of source, we should not reply to this request
