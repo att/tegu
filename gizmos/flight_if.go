@@ -6,6 +6,8 @@
 	Abstract:	Interface to the floodlight environment (including skoogi).
 	Date:		24 Octoberr 2013
 	Authors:	E. Scott Daniels, Matti Hiltnuen, Kaustubh Joshi
+
+	Modifed:	19 Apr 2014 : Added generic Skoogi request. 
 ------------------------------------------------------------------------------------------------
 */
 
@@ -230,6 +232,76 @@ func FL_links( host_port *string ) ( llist []FL_link_json ) {
 		llist = nil
 		return
 	}
+
+	return
+}
+
+
+/*
+	Sends a generic API request via the put body which skoogi expects to be json with the 
+	encapsulating syntax of:
+		{ ctype: "action_list", action_list: [ { action: "<command>", ... }, ... { action: "<command>", ... } ] }
+
+	which is passed in the body of the request and supplied to this function as the request
+	string (req).  The objects in the array have one manditory element, the action, and 
+	the remainder of the elements are supplied as needed/required by skoogi with respect
+	to carying out the action. 
+
+	/wm/skapi/txt"?action=jdata"
+*/
+func SK_send_generic(  flhost *string, req string ) ( err error ) { 
+	var (
+		uri	string
+		body	*bytes.Buffer
+		resp	*http.Response
+	)
+
+	body = bytes.NewBufferString( req )			// skoogi doesn't accept data yet; all parms tacked onto the url
+	err = nil
+
+	uri = fmt.Sprintf( "%s/wm/skapi/txt?action=jdata", *flhost )
+
+	obj_sheep.Baa( 1, "sending generic request to skoogi: %s", uri )
+	resp, err = http.Post( uri, "plain/text", body )
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	rbody, err := ioutil.ReadAll( resp.Body )
+	if err == nil {
+		obj_sheep.Baa( 1, "SKgeneric: skoogi response: %s", rbody )
+	} else {
+		obj_sheep.Baa( 0, "SKgeneric: skoogi request error: %s", err )
+	}
+
+	return
+}
+
+/*
+	Accepts a list of queue configuration strings and builds a setqueue action 
+	object to send to skoogi. The format required is:
+		{ ctype: "action_list", actions: [ { atype: "setqueues", qdata: [ "qstring1", ..., "qstringn" ] } ] }
+
+	where each queue string is the corresponding element in the qlist array passed in. 
+*/
+func SK_set_queues( flhost *string, qlist []string ) ( err error ) {
+	var (
+		json string
+		sep string = ""
+	)
+
+	json = `{ "ctype": "action_list",  "actions": [ { "atype": "setqueues", qdata: [`
+
+	for i := 0; i < len( qlist ); i++ {
+		json += fmt.Sprintf( "%s%q", sep, qlist[i] )
+		sep = ","
+	}
+
+	json += " ] } ] }"					// button everything up nicely
+
+	obj_sheep.Baa( 1, "sending set queue json off: %s", json )
+	err = SK_send_generic( flhost, json )				// bleat is done in generic so no need to log here
 
 	return
 }
