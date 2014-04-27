@@ -67,7 +67,7 @@ func mapvm2ip( os_refs []*ostack.Ostack ) ( m  map[string]*string ) {
 	m = nil
 	for i := 0; i < len( os_refs ); i++ {
 		osif_sheep.Baa( 1, "mapping VMs from: %s", os_refs[i].To_str( ) )
-		m, err = os_refs[i].Vm2ip( m )
+		m, err = os_refs[i].Mk_vm2ip( m )
 		if err != nil {
 			osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s", err )
 		}
