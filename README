@@ -33,6 +33,11 @@ Gizmos:
 
 	host.go			represents a single host in the network graph and in a path
 
+	light.go		functions that were implemented quickly to support tegu-lite. These
+					probably should be moved to separate files, or likely into tools, but
+					during the hasty implementation of -lite it was easier to keep them 
+					bunched here. 
+
 	link.go			represents a link between switches in the network graph and in a path
 
 	obligation.go	used to manage an obligation of something over time; references may time slices
