@@ -100,10 +100,10 @@ type FL_host_json struct {
 
 // ...wm/topology/links/json generates one struct
 type FL_link_json struct {
-	Src_switch string
-	Src_port int
-	Dst_switch string
-	Dst_port int
+	Src_switch string	`json:"Src-switch"`			// bloody python programmers using - in names; gack
+	Src_port int		`json:"Src-port"`
+	Dst_switch string	`json:"Dst-switch"`
+	Dst_port int		`json:"Dst-port"`
 	Type string
 	Direction string
 }
@@ -217,13 +217,13 @@ func FL_links( host_port *string ) ( llist []FL_link_json ) {
 
 
 	uri := fmt.Sprintf( "http://%s/wm/topology/links/json", *host_port )
-	jdata, err := get_flinfo( &uri, CVT_DASHES ) 
+	//jdata, err := get_flinfo( &uri, CVT_DASHES ) 
+	jdata, err := get_flinfo( &uri, NO_CVT ) 
 	if err != nil {
 		obj_sheep.Baa( 0, "WRN: FL_links: error during api get call: %s", err )
 		llist = nil
 		return
 	}
-
 
 	llist = make( []FL_link_json, 4096 )
 	err = json.Unmarshal( jdata, &llist )			// unpack the json into the host list

@@ -28,7 +28,7 @@ const (
 	REQ_LOAD		int = 8		// load checkpoint file data (res_mgr)
 	REQ_NETUPDATE	int = 9		// new network graph is attached (network)
 	REQ_LISTCONNS	int = 10	// user request a port list for named host	(network)
-	REQ_VM2IP		int = 11	// map VM names and IDs to IP addresses (osif)
+	REQ_GENMAPS		int = 11	// generate VM maps (osif) and send out
 	REQ_GETIP		int = 12	// look up the VM name or ID and return the IP address
 	REQ_PUSH		int = 13	// generic push depending on receiver
 	REQ_LIST		int = 14	// generic list depending on receiver
@@ -38,6 +38,11 @@ const (
 	REQ_HOSTLIST	int = 18	// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
 	REQ_GEN_QMAP	int = 19	// network - generate queue info needed by external process to set queues
 	REQ_IE_RESERVE	int	= 20	// fq-manager send ingress/egress reservations to skoogi
+	REQ_VM2IP		int = 21	// xlate map VM name | VM ID to IP map is in the request
+	REQ_VMID2IP		int = 22	// xlate map VM-ID to ip is in request
+	REQ_IP2VMID		int = 23	// xlate map IP address to VM-ID
+	REQ_VMID2PHOST	int = 24	// xlate map VM-ID to physical host name
+	REQ_IP2MAC		int = 25	// xlate map IP address to mac
 
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 

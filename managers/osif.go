@@ -14,8 +14,7 @@
 
 				The trick with openstack is that there may be more than one project
 				(tenant) that we need to find VMs in.  We will depend on the config
-				file data (global) which should contain a list of each openstack 
-				section defined in the config, and for each section we expect it
+				file data (global) which should contain a list of each openstack section defined in the config, and for each section we expect it
 				to contain:
 
 					url 	the url for the authorisation e.g. "http://135.197.225.209:5000/"
@@ -46,6 +45,7 @@ import (
 	//"time"
 
 	"forge.research.att.com/gopkgs/bleater"
+	"forge.research.att.com/gopkgs/clike"
 	"forge.research.att.com/gopkgs/ipc"
 	"forge.research.att.com/gopkgs/ostack"
 	"forge.research.att.com/gopkgs/token"
@@ -123,6 +123,47 @@ func get_hosts( os_refs []*ostack.Ostack ) ( s *string, err error ) {
 	return
 }
 
+/*
+	Added for qos-light
+	Build all vm translation maps -- requires two actual calls out to openstack
+*/
+func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) ( 
+		vmid2ip map[string]*string, 
+		ip2vmid map[string]*string, 
+		vm2ip map[string]*string, 
+		vmid2host map[string]*string, 
+		ip2mac map[string]*string, 
+		rerr error ) {
+	
+	var (
+		err error
+	)
+
+	vmid2ip = nil				// shouldn't need, but safety never hurts
+	ip2vmid = nil
+	vm2ip = nil
+	vmid2host = nil
+	ip2mac = nil
+
+	for i := 0; i < len( os_refs ); i++ {
+		osif_sheep.Baa( 1, "creating VM maps from: %s", os_refs[i].To_str( ) )
+		vmid2ip, ip2vmid, vm2ip, vmid2host, err = os_refs[i].Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
+		if err != nil {
+			osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os_refs[i].To_str( ), err )
+			rerr = err
+		}
+	}
+
+	ip2mac, _, err = os_refs[0].Mk_mac_maps( nil, nil, inc_tenant )	// only need to get once -- ostack sends back all network things in one batch
+	if err != nil {
+		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs[0].To_str( ), err )
+		rerr = err
+	}
+
+	return
+}
+
+
 // --- Public ---------------------------------------------------------------------------
 
 
@@ -137,15 +178,37 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_list string = ""
 		os_sects	[]string
 		os_refs		[]*ostack.Ostack			// reference to each openstack project we need to query
+		inc_tenant	bool = false
+		refresh_delay	= 180					// config file can override
 	)
 
 	osif_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
 	osif_sheep.Set_prefix( "osif_mgr" )
 	tegu_sheep.Add_child( osif_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
-	if p := cfg_data["default"]["ostack_list"]; p != nil {
+	// ---- pick up configuration file things of interest --------------------------
+	if p := cfg_data["osif"]["include_tenant"]; p != nil {
+		if *p == "true" {
+			inc_tenant = true
+		}
+	} 
+
+	if p := cfg_data["osif"]["refresh"]; p != nil {
+		refresh_delay = clike.Atoi( *p ); 			
+		if refresh_delay < 30 {
+			osif_sheep.Baa( 1, "WRN osif:resresh was too small (%ds), setting to 30s", refresh_delay )
+			refresh_delay = 30
+		}
+	} 
+
+	p := cfg_data["osif"]["ostack_list"] 				// preferred placement in osif section
+	if p == nil {
+		p = cfg_data["default"]["ostack_list"] 			// originally in default, so backwards compatable
+	}
+	if p != nil {
 		os_list = *p
 	} 
+
 	if os_list == " " || os_list == "" || os_list == "off" {
 		osif_sheep.Baa( 0, "WRN: osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )
 	} else {
@@ -162,17 +225,43 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			os_refs[i] = ostack.Mk_ostack( cfg_data[os_sects[i]]["url"], cfg_data[os_sects[i]]["usr"], cfg_data[os_sects[i]]["passwd"], cfg_data[os_sects[i]]["project"] )
 		}
 	}
+	// ---------------- end config parsing ----------------------------------------
 
-	tklr.Add_spot( 3, my_chan, REQ_VM2IP, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us every 180s 
-	tklr.Add_spot( 180, my_chan, REQ_VM2IP, nil, ipc.FOREVER );  	
+
+	tklr.Add_spot( 3, my_chan, REQ_GENMAPS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us every 180s 
+	tklr.Add_spot( 180, my_chan, REQ_GENMAPS, nil, ipc.FOREVER );  	
 
 	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
 	for ;; {
 		msg = <- my_chan					// wait for next message from tickler
-		msg.State = nil					// default to all OK
+		msg.State = nil						// default to all OK
 
 		osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
 		switch msg.Msg_type {
+			case REQ_GENMAPS:							// driven by tickler; gen a new set of VM translation maps and pass them to network manager
+				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, err := map_all( os_refs, inc_tenant )
+				if err == nil {
+					msg := ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
+	
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_VMID2IP, vmid2ip, nil )					
+	
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_IP2VMID, ip2vmid, nil )				
+	
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_VMID2PHOST, vmid2host, nil )		
+	
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
+	
+					osif_sheep.Baa( 1, "VM maps were updated from openstack" )
+				} else {
+					osif_sheep.Baa( 0, "ERR: fetching VM maps failed: %s", err )
+				}
+
+	/* ---- before lite ----
 			case REQ_VM2IP:														// driven by tickler; gen a new vm translation map and push to net mgr
 				m := mapvm2ip( os_refs )
 				if m != nil {
@@ -186,6 +275,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					}
 					osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
 				}
+	*/
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
