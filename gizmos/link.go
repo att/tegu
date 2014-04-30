@@ -30,6 +30,8 @@
 	Date:		22 November 2013
 	Author:		E. Scott Daniels
 
+	Mods:		29 Apr 2014 - Changes to support Tegu-lite
+
 */
 
 package gizmos
@@ -54,6 +56,7 @@ type Link struct {
 	backward	*Switch				// switch in the reverse direction
 	port1		int					// the port on sw1 in the direction of sw2
 	port2		int					// the port on sw2 in the direction of sw1
+	lbport		*string				// latebinding port ident (used in place of port in Tegu-lite mode)
 	id			*string				// reference id for the link	
 	sw1			*string				// human name for forward switch
 	sw2			*string				// human name for backward switch
@@ -232,6 +235,17 @@ func (l *Link) Get_sw_ports( ) ( int, int ) {
 }
 
 /*
+	Return the latebinding port.
+*/
+func (l *Link) Get_lb_port( ) ( *string ) {
+	if l == nil {
+		return nil
+	}
+
+	return l.lbport
+}
+
+/*
 	Returns true if the link connects to the swtich (in either direction).
 */
 func (l *Link) Connects( sw *Switch ) ( bool ) {
@@ -313,9 +327,22 @@ func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( r 
 	information that are needed for reservations and thus is probably the reservation ID or 
 	some derivation, but is up to the user of the link.
 */
-func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( error ) {
+func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( err error ) {
+	var (
+		swdata string
+	)
 
-	swdata := fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
+	if l == nil {
+		err = fmt.Errorf( "link: null pointer passed in" )
+		return
+	}
+		
+	if l.port1 == 0 {
+		swdata = fmt.Sprintf( "%s/%s", *l.sw1, *l.lbport )			// if port is 0 then we'll return the latebinding port value
+	} else {
+		swdata = fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
+	}
+
 	return l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
 }
 
@@ -374,6 +401,17 @@ func (l *Link) Get_backward_info( qid *string, tstamp int64 ) ( swid string, por
 	queue = l.allotment.Get_queue( qid, tstamp )
 
 	return
+}
+
+/*
+	Add a late binding port string.
+*/
+func (l *Link) Add_lbp( s string ) {
+	if l == nil {
+		return
+	}
+
+	l.lbport = &s
 }
 
 // -------- human and/or interface output generation -------------------------------------------------------------

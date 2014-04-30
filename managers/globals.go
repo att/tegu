@@ -43,10 +43,14 @@ const (
 	REQ_IP2VMID		int = 23	// xlate map IP address to VM-ID
 	REQ_VMID2PHOST	int = 24	// xlate map VM-ID to physical host name
 	REQ_IP2MAC		int = 25	// xlate map IP address to mac
+	REQ_GEN_EPQMAP	int = 30	// generate queue map for end points only (no intermediate queues are generated)
+	REQ_SENDALL		int = 31	// send message to all
+	REQ_SENDONE		int = 32	// send message to one
+	REQ_IP2MACMAP	int = 33	// generate an ip to mac translation table and return to requestor
 
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v2.0/13174"
+	version 	string = "v3.0/14304"
 )
 
 
@@ -77,6 +81,7 @@ var (
 	rmgr_ch		chan	*ipc.Chmsg		// reservation manager 
 	osif_ch		chan	*ipc.Chmsg		// openstack interface
 	fq_ch		chan	*ipc.Chmsg		// flow and queue manager
+	am_ch		chan	*ipc.Chmsg		// agent manager channel
 
 	tklr	*ipc.Tickler					// tickler that will drive periodic things like checkpointing
 
@@ -87,6 +92,7 @@ var (
 
 	tegu_sheep	*bleater.Bleater			// parent sheep that controls the 'master' bleating volume and is used by 'library' functions
 	net_sheep	*bleater.Bleater			// indivual sheep for each goroutine
+	am_sheep	*bleater.Bleater
 	fq_sheep	*bleater.Bleater
 	osif_sheep	*bleater.Bleater
 	rm_sheep	*bleater.Bleater
@@ -100,7 +106,7 @@ var (
 	CAUTION:  this is not implemented as an init() function as we must pass information from the 
 			main to here.  
 */
-func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg ) (err error)  {
+func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
 
 	err = nil
 
@@ -108,6 +114,7 @@ func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, 
 	rmgr_ch = rmch
 	osif_ch = osifch
 	fq_ch = fqch
+	am_ch = amch
 
 	tegu_sheep = bleater.Mk_bleater( 1, os.Stderr )		// the main (parent) bleater used by libraries and as master 'volume' control
 	tegu_sheep.Set_prefix( "tegu" )

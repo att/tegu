@@ -61,6 +61,11 @@ func Mk_switch( id *string ) ( s *Switch ) {
 		lidx: 0,
 	}
 
+	if id == nil {
+		dup_str := "no_id_given"
+		id = &dup_str
+	} 
+
 	s.links = make( []*Link, 32 )
 	s.hosts = make( map[string]bool, 64 )
 	s.hport = make( map[string]int, 64 )

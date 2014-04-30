@@ -190,6 +190,16 @@ func ( p *Path) Add_endpoint( l *Link ) {
 }
 
 /*
+	Reverses the endpoints. The expectation is that they are in h1, h2 order, but if they were 
+	pushed backwards then this allows that to be corrected by the user.
+*/
+func (p *Path) Flip_endpoints( ) {
+	ep := p.endpts[0]
+	p.endpts[0] =  p.endpts[1]
+	p.endpts[1] =  ep
+}
+
+/*
 	Increases the utilisation of the path by adding delta to all links. This assumes that the
 	link has already been tested and indicated it could accept the change. 
 */

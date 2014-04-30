@@ -124,16 +124,16 @@ func get_hosts( os_refs []*ostack.Ostack ) ( s *string, err error ) {
 }
 
 /*
-	Added for qos-light
+	Tegu-lite
 	Build all vm translation maps -- requires two actual calls out to openstack
 */
 func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) ( 
-		vmid2ip map[string]*string, 
-		ip2vmid map[string]*string, 
-		vm2ip map[string]*string, 
-		vmid2host map[string]*string, 
-		ip2mac map[string]*string, 
-		rerr error ) {
+			vmid2ip map[string]*string, 
+			ip2vmid map[string]*string, 
+			vm2ip map[string]*string, 
+			vmid2host map[string]*string, 
+			ip2mac map[string]*string, 
+			rerr error ) {
 	
 	var (
 		err error
@@ -158,6 +158,15 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 	if err != nil {
 		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs[0].To_str( ), err )
 		rerr = err
+	}
+
+	return
+}
+
+func get_ip2mac( os_refs []*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
+	m, _, err = os_refs[0].Mk_mac_maps( nil, nil, inc_tenant )	
+	if err != nil {
+		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs[0].To_str( ), err )
 	}
 
 	return
@@ -276,6 +285,13 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
 				}
 	*/
+
+			case REQ_IP2MACMAP:													// generate an ip to mac map for the caller and write on the channel
+				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
+					msg.Response_data, msg.State = get_ip2mac( os_refs, inc_tenant )
+				} else {
+					osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
+				}
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list

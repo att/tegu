@@ -173,8 +173,16 @@ func (h *Host) To_str( ) ( s string ) {
 	if h.cidx > 0 {
 		s += fmt.Sprintf( " connections [ " )
 		for i := 0; i < h.cidx; i++ {
-			s += fmt.Sprintf( "%s ", *(h.conns[i].Get_id()) )
+			if h.conns[i] != nil {
+				id := h.conns[i].Get_id()
+				if id != nil {
+					s += fmt.Sprintf( "%s ", *id )
+				}
+			} else {
+				s += "==nil-connection== "
+			}
 		}
+		s += "]"
 	}
 
 	return

@@ -17,6 +17,8 @@
 	Date:		29 December 2013
 	Author:		E. Scott Daniels
 
+	Mods:		30 Apr 2014 (sd) - Changes to support pushing flow-mods and reservations to an agent. Tegu-lite
+
 */
 
 package managers
@@ -29,7 +31,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	//"strings"
+	"strings"
 	"time"
 
 	"forge.research.att.com/gopkgs/bleater"
@@ -53,6 +55,8 @@ import (
 	file in /tmp. Then we invoke the command passed in via cmd_base giving it the file name
 	as the only parameter.  The command is expected to delete the file when finished with 
 	it.  See netmgr for a description of the items in the list. 
+
+	This is old school and probably will be deprecated soon. 
 */
 func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	var (
@@ -96,39 +100,94 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 
 /*
-	new -- works with the new skoogi that drives agents
-	Builds a single buffer with the queue adjustent information (assume from netmgr) int a single
-	buffer and then send that buffer off to skoogi.  Skoogi now manages queues and if not directly
-	with the switches, then passes this data along to the agents.  We build an array with each 
-	element containing a queue adjustment string and then pass that into the floodlight/skoogi 
-	interface for proper json bundling and transmission to skoogi.
+	Builds a set of json to send to the agent. 
+	TODO: split the work across the agents giving each a subset of the hosts.
 */
-func new_adjust_queues( uri *string, qlist []string ) {
+func adjust_queues_agent( qlist []string, hlist *string ) {
 	var (
-		qdata	[]string
-		i		int
+		qjson	string
+		sep = ""
 	)
 
-	qdata = make( []string, 4096 )
-	fq_sheep.Baa( 2, "adjusting queues:  %d queue setting items",  len( qlist ) );
+	qjson = `{ "ctype": "action_list", "actions": [ { "atype": "setqueues", "qdata": [ `
+	fq_sheep.Baa( 1, "adjusting queues:  sending %d queue setting items to agents",  len( qlist ) );
 
-	for i = range qlist {
+	for i := range qlist {
 		fq_sheep.Baa( 2, "queue info: %s", qlist[i] )
-		qdata[i] = fmt.Sprintf( "%s", qlist[i] )
+		qjson += fmt.Sprintf( "%s%q", sep, qlist[i] )
+		sep = ", "
 	}
 
-	gizmos.SK_set_queues( uri, qdata[0:i] )		// send to skoogi listing at uri
+	qjson += ` ], "hosts": [ `
+
+	hosts := strings.Split( *hlist, " " )
+	sep = ""
+	for i := range hosts {
+		qjson += fmt.Sprintf( "%s%q", sep, hosts[i] )
+		sep = ", "
+	}
+
+	qjson += ` ] } ] }`
+
+	tmsg := ipc.Mk_chmsg( )
+	tmsg.Send_req( am_ch, nil, REQ_SENDALL, qjson, nil )		// push json to all agents
 }
 
 /*
-	send a request to openstack interface for a host list. We will _not_ wait on it 
+	Send a flow-mod request to the agent. If send_all is false, then only ingress/egress
+	flow-mods are set; those indicateing queue 1 are silently skipped. This is controlled
+	by the queue_type setting in the config file. 
+*/
+func send_fmod_agent( ip1 string, ip2 string, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, diffserv int, send_all bool ) {
+	var (
+		host string
+	)
+
+	if send_all || qnum != 1 {					// ignore if skipping intermediate and this isn't ingress/egress
+		m1 := ip2mac[ip1]						// set with mac addresses
+		m2 := ip2mac[ip2]
+		timeout := expiry - time.Now().Unix()	// figure the timeout and skip if too small
+		if timeout > 15 {
+			if port <= 0 {						// we'll assume that the switch is actually the phy host and br-int is what needs to be set
+				host = sw
+				sw = "br-int"
+			} else {							// port known, so switch must ben known too
+				host = "all"
+			}
+	
+			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+
+			fq_sheep.Baa( 1, "flow-mod: -h %s -t %d -p 400 --match -s %s -d %s  --action  -q %d -T %d add 0xdead %s", host, timeout, *m1, *m2, qnum, diffserv, sw )
+			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -s %s -d %s  --action  -q %d -T %d add 0xdead %s"`, host, timeout, *m1, *m2, qnum, diffserv, sw )
+
+			qjson += ` ] } ] }`
+
+			tmsg := ipc.Mk_chmsg( )
+			tmsg.Send_req( am_ch, nil, REQ_SENDONE, qjson, nil )		// push json to all agents
+		}
+	}
+}
+
+/*
+	Send a request to openstack interface for a host list. We will _not_ wait on it 
 	and will handle the response in the main loop. 
 */
 func req_hosts(  rch chan *ipc.Chmsg ) {
-	fq_sheep.Baa( 1, "requesting host list from osif" )
+	fq_sheep.Baa( 2, "requesting host list from osif" )
 
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, rch, REQ_CHOSTLIST, nil, nil )
+}
+
+/*
+	Send a request to openstack interface for an ip to mac map. We will _not_ wait on it 
+	and will handle the response in the main loop. 
+*/
+func req_ip2mac(  rch chan *ipc.Chmsg ) {
+	fq_sheep.Baa( 2, "requesting host list from osif" )
+
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, rch, REQ_IP2MACMAP, nil, nil )
 }
 
 
@@ -150,8 +209,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		qcheck_freq	int64 = 5
 		hcheck_freq	int64 = 180
 		host_list	*string					// current set of openstack real hosts
+		ip2mac		map[string]*string		// translation from ip address to mac
 		switch_hosts *string				// from config file and overrides openstack list if given (mostly testing)
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
+		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
+		diffserv	int = 0x40
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
 	)
@@ -161,20 +223,29 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	tegu_sheep.Add_child( fq_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 	// -------------- pick up config file data if there --------------------------------
-	if *sdn_host == "" {					// if no sdn host supplied on command line use config file, or default
-		if sdn_host = cfg_data["default"]["sdn_host"];  sdn_host == nil {
-			sdn_host = &default_sdn
+	if *sdn_host == "" {													// not supplied on command line, pull from config	
+		if sdn_host = cfg_data["default"]["sdn_host"];  sdn_host == nil {	// no default; when not in config, then it's turned off and we send to agent
+			sdn_host = &empty_str
 		}
 	}
 
-	if cfg_data["fqmgr"] != nil {
+	if cfg_data["default"]["queue_type"] != nil {					
+		if *cfg_data["default"]["queue_type"] == "endpoint" {
+			send_all = false
+		} else {
+			send_all = true
+		}
+	}
+
+	if cfg_data["fqmgr"] != nil {								// pick up things in our specific setion
 		if dp := cfg_data["fqmgr"]["ssq_cmd"]; dp != nil {		// set switch queue command
 			ssq_cmd = dp
-		} else {
-			p := "/opt/app/bin/set_switch_queues"
-			ssq_cmd = &p;										// note -- we _can_ take the address of the local var and have it outside of the block!
 		}
 	
+		if p := cfg_data["fqmgr"]["diffserv"]; p != nil {
+			diffserv = clike.Atoi( *p )
+		}
+
 		if p := cfg_data["fqmgr"]["queue_check"]; p != nil {		// queue check frequency from the control file
 			qcheck_freq = clike.Atoi64( *p )
 			if qcheck_freq < 5 {
@@ -210,7 +281,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		fq_sheep.Baa( 0, "static host list from config used for setting OVS queues: %s", *host_list )
 	}
 
-	if *sdn_host != "" {
+	if sdn_host != nil  &&  *sdn_host != "" {
 		uri_prefix = fmt.Sprintf( "http://%s", *sdn_host )
 	} 
 
@@ -225,7 +296,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, *Spq
 				spq := data[FQ_SPQ].( *gizmos.Spq )
 
-				if uri_prefix != "" {
+				if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled
 					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 
 					if msg.State == nil {				// no error, we are silent
@@ -238,8 +309,9 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 					}
 				} else {
-					fq_sheep.Baa( 2,  "proactive reservation not sent, no sdn-host defined: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
-						uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
+					//fq_sheep.Baa( 2,  "proactive reservation not sent, no sdn-host defined: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
+						//uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
+					send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, diffserv, send_all )
 					msg.Response_ch = nil
 				}
 
@@ -254,23 +326,37 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 			case REQ_SETQUEUES:								// request from reservation manager which indicates something changed and queues need to be reset
 				qlist := msg.Req_data.( []interface{} )[0].( []string )
-				adjust_queues( qlist, ssq_cmd, host_list ) 
-				//new_adjust_queues( &uri_prefix, qlist )
+				if ssq_cmd != nil {
+					adjust_queues( qlist, ssq_cmd, host_list ) 	// if writing to a file and driving a local script
+				} else {
+					adjust_queues_agent( qlist, host_list )		// if sending json to an agent
+				}
 
 			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
 				msg.Response_ch = nil;						// regardless of source, we should not reply to this request
 
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
-					if  msg.Response_data != nil {
-						if  msg.Response_data.( *string ) != nil {
-							host_list = msg.Response_data.( *string )
-							fq_sheep.Baa( 1, "host list received from osif: %s", *host_list )
-						} else {
-							fq_sheep.Baa( 0, "WRN: no host data from openstack" )
-						}
+					if  msg.Response_data.( *string ) != nil {
+						host_list = msg.Response_data.( *string )
+						fq_sheep.Baa( 1, "host list received from osif: %s", *host_list )
+					} else {
+						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string" )
 					}
 				} else {
-					req_hosts( my_chan )					// send a request to osif for a new host list
+					req_hosts( my_chan )					// send requests to osif for data
+					req_ip2mac( my_chan )
+				}
+
+			case REQ_IP2MACMAP:								// caution: this  comes as a response; the request is generated by chostlist processing so we need 1 tickle
+				msg.Response_ch = nil;						// regardless of source, we should not reply to this request
+
+				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
+					if  msg.Response_data != nil {
+						ip2mac = msg.Response_data.( map[string]*string )
+						fq_sheep.Baa( 1, "ip2mac tralation received from osif: %d elements", len( ip2mac ) )
+					} else {
+						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected ip2mac translation map" )
+					}
 				}
 
 			default:

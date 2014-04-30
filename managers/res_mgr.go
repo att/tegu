@@ -20,6 +20,7 @@
 				reservation if it has and cancel the previous one (when skoogi allows drops)
 
 	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
+				30 Apr 2014 (sd) : Enhancements to send flow-mods and reservation request to agents (Tegu-light)
 */
 
 package managers
@@ -266,10 +267,9 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						fq_data[FQ_IP1] = *ip1					// forward first, from h1 -> h2
 						fq_data[FQ_IP2] = *ip2
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward IE reservations to skoogi: %s h1=%s --> h2=%s exp=%d", rname, *h1, *h2, expiry )
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward IE reservation flow-mods: %s h1=%s --> h2=%s exp=%d", rname, *h1, *h2, expiry )
 
-
-						espq0, espq1 := plist[i].Get_endpoint_spq( &rname, timestamp )		// gather endpoint information (nil values are OK)
+						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
 
 						// ---- push flow-mods in the h1->h2 direction -----------
@@ -300,7 +300,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 
 						// ---- push flow-mods in the h2->h1 direction -----------
 						rev_rname := "R" + rname		// the egress link has an R(name) queue name
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward IE reservations to skoogi: %s h1=%s <-- h2=%s exp=%d", rev_rname, *h1, *h2, expiry )
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward IE reservation flow-mods: %s h1=%s <-- h2=%s exp=%d", rev_rname, *h1, *h2, expiry )
 						fq_data[FQ_IP2] = *ip1			// for the egress, and backward intermediate flowmods, the destination host is h1, so reverse these
 						fq_data[FQ_IP1] = *ip2
 
@@ -552,6 +552,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		msg	*ipc.Chmsg
 		ckptd	string
 		last_qcheck	int64				// time that the last queue check was made to set window
+		queue_gen_type = REQ_GEN_EPQMAP
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -560,13 +561,24 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	rm_sheep.Set_prefix( "res_mgr" )
 	tegu_sheep.Add_child( rm_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
-	if cdp := cfg_data["resmgr"]["chkpt_dir"]; cdp == nil {
+	p := cfg_data["default"]["queue_type"]				// lives in default b/c used by fq-mgr too
+	if p != nil {
+		if *p == "endpoint" {
+			queue_gen_type = REQ_GEN_EPQMAP
+		} else {
+			queue_gen_type = REQ_GEN_QMAP
+		}
+	}
+
+	cdp := cfg_data["resmgr"]["chkpt_dir"] 
+	if cdp == nil {
 		ckptd = "/var/lib/tegu/resmgr"							// default directory and prefix
 	} else {
 		ckptd = *cdp + "/resmgr"							// add prefix to directory in config
 	}
 
-	if p := cfg_data["resmgr"]["verbose"]; p != nil {
+	p = cfg_data["resmgr"]["verbose"]
+	if p != nil {
 		rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 	}
 
@@ -620,7 +632,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
 					rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
 					tmsg := ipc.Mk_chmsg( )
-					tmsg.Send_req( nw_ch, my_chan, REQ_GEN_QMAP, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr
+					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr
 				}
 				last_qcheck = now
 
@@ -636,6 +648,9 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				inv.failed_push( msg )			// suss out the pledge and mark it unpushed
 
 			case REQ_GEN_QMAP:							// response caries the queue map that now should be sent to fq-mgr to drive a queue update
+				fallthrough
+
+			case REQ_GEN_EPQMAP:
 				rm_sheep.Baa( 1, "received queue map from network manager" )
 				msg.Response_ch = nil					// immediately disable to prevent loop
 				fq_data := make( []interface{}, 1 )

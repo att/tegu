@@ -63,7 +63,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v2.1/14034"
+		version		string = "v3.0/14304"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -76,7 +76,8 @@ func main() {
 		nw_ch	chan *ipc.Chmsg		// network graph manager 
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager 
 		osif_ch chan *ipc.Chmsg		// openstack interface
-		fq_ch chan *ipc.Chmsg			// flow queue manager
+		fq_ch chan *ipc.Chmsg		// flow queue manager
+		am_ch chan *ipc.Chmsg		// agent manager channel
 
 		wgroup	sync.WaitGroup
 	)
@@ -114,18 +115,23 @@ func main() {
 
 	nw_ch = make( chan *ipc.Chmsg )					// create the channels that the threads will listen to
 	fq_ch = make( chan *ipc.Chmsg, 128 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
+	am_ch = make( chan *ipc.Chmsg, 128 )			// agent manager channel
 	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
 	osif_ch = make( chan *ipc.Chmsg )
 
-	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch )		// specific things that must be initialised with data from main so init() doesn't work
+	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err ); 
 		os.Exit( 1 )
 	}
 
 	go managers.Res_manager( rmgr_ch, super_cookie ); 						// manage the reservation inventory
+	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
 	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph
 
+	//TODO:  chicken and egg -- we need to block until network has a good graph, but we need the network reading from it's channel
+	//       first so that if we are in Tegu-lite mode (openstack providing the graph) it can send the data to network manager 
+	//		 must implement a 'have data' ping in network and loop here until the answer is yes.
 	if *chkpt_file != "" {
 		my_chan := make( chan *ipc.Chmsg )
 		req := ipc.Mk_chmsg( )
@@ -143,7 +149,7 @@ func main() {
 	}
 
 	go managers.Fq_mgr( fq_ch, fl_host ); 
-	go managers.Osif_mgr( osif_ch )										// openstack interface
+	go managers.Agent_mgr( am_ch )
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// finally, turn on the HTTP interface after _everything_ else is running.
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)
