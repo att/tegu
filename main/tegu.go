@@ -24,6 +24,8 @@
 				13 Mar 2014 : Corrected 'bug' with setting pledges where both hosts connect to the 
 							same switch. (bug was that it wasn't yet implemented.)
 				03 Apr 2014 : Added endpoint support for reservations and flowmods
+				05 May 2014 : Changes to support merging gateways into the graph and for receiving
+							responses back from the agent.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -48,13 +50,12 @@ import (
 	"forge.research.att.com/gopkgs/bleater"
 	"forge.research.att.com/gopkgs/ipc"
 	"forge.research.att.com/tegu/managers"
-	"forge.research.att.com/tegu/gizmos"
+	//"forge.research.att.com/tegu/gizmos"
 )
 
 var (
 	sheep *bleater.Bleater
 )
-
 
 func usage( version string ) {
 	fmt.Fprintf( os.Stdout, "tegu %s\n", version )
@@ -63,7 +64,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/14304"
+		version		string = "v3.0/14304b"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -72,7 +73,7 @@ func main() {
 		super_cookie *string
 		chkpt_file	*string
 
-		// various comm channels for threads
+		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager 
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager 
 		osif_ch chan *ipc.Chmsg		// openstack interface
@@ -83,8 +84,7 @@ func main() {
 	)
 
 	sheep = bleater.Mk_bleater( 1, os.Stderr )
-	sheep.Set_prefix( "tegu-main" )
-	sheep.Add_child( gizmos.Get_sheep( ) )			// since we don't directly initialise the gizmo environment we ask for its sheep
+	sheep.Set_prefix( "main/3.0b" )
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 

@@ -8,6 +8,8 @@
 	Authors:	E. Scott Daniels, Matti Hiltnuen, Kaustubh Joshi
 
 	Modifed:	19 Apr 2014 : Added generic Skoogi request. 
+				05 May 2014 : Added function to build a FL_host_json from raw data rather
+					than from json response data (supports running w/o floodlight).
 ------------------------------------------------------------------------------------------------
 */
 
@@ -146,6 +148,26 @@ func post_flreq( uri *string ) (rstring string, err error) {
 
 
 // --------------------- public functions --------------------------------------------------
+
+/*
+	Create a FL_host entry when needing to simulate the return list from a FL_hosts() call.
+*/
+func FL_mk_host( ipv4 string, ipv6 string, mac string, swname string, port int ) ( flhost FL_host_json ) {
+
+	flhost  = FL_host_json { }			// new struct
+	flhost.Mac = make( []string, 1 )
+	flhost.Ipv4 = make( []string, 1 )
+	flhost.Ipv6 = make( []string, 1 )
+	flhost.Mac[0] = mac
+	flhost.Ipv4[0] = ipv4
+	flhost.Ipv6[0] = ipv6
+
+	flhost.AttachmentPoint = make( []FL_attachment_json, 1 ) 
+	flhost.AttachmentPoint[0].SwitchDPID = swname
+	flhost.AttachmentPoint[0].Port = port
+
+	return
+}
 
 /*
 	  make the necessary get api calls to floodlight (listening on host_port)

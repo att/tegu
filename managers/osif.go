@@ -31,6 +31,8 @@
 	Date:		28 December 2013
 	Author:		E. Scott Daniels
 
+	Mods:		05 May 2014 : Changes to support digging the various maps out of openstack
+					that are needed when we are not using floodlight.
 */
 
 package managers
@@ -133,6 +135,7 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 			vm2ip map[string]*string, 
 			vmid2host map[string]*string, 
 			ip2mac map[string]*string, 
+			gwmap map[string]*string,
 			rerr error ) {
 	
 	var (
@@ -144,6 +147,7 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 	vm2ip = nil
 	vmid2host = nil
 	ip2mac = nil
+	gwmap = nil				// mac2ip for all gateway "boxes"
 
 	for i := 0; i < len( os_refs ); i++ {
 		osif_sheep.Baa( 1, "creating VM maps from: %s", os_refs[i].To_str( ) )
@@ -159,6 +163,9 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs[0].To_str( ), err )
 		rerr = err
 	}
+
+	
+	gwmap, _, err = os_refs[0].Mk_gwmaps( inc_tenant )
 
 	return
 }
@@ -248,7 +255,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
 		switch msg.Msg_type {
 			case REQ_GENMAPS:							// driven by tickler; gen a new set of VM translation maps and pass them to network manager
-				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, err := map_all( os_refs, inc_tenant )
+				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, err := map_all( os_refs, inc_tenant )
 				if err == nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
@@ -264,6 +271,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	
 					msg = ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
+	
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_GWMAP, gwmap, nil )		
 	
 					osif_sheep.Baa( 1, "VM maps were updated from openstack" )
 				} else {

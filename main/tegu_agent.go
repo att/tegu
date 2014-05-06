@@ -8,7 +8,8 @@
 	Date:		30 April 2014
 	Author:		E. Scott Daniels
 
-	Mods:		
+	Mods:		05 May 2014 : Added ability to support the map_mac2phost request
+					which generaets data back to tegu.
 */
 
 package main
@@ -39,6 +40,7 @@ import (
 
 // globals
 var (
+	version		string = "v1.0/14304"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
@@ -58,6 +60,17 @@ type json_action struct {
 type json_request struct {
 	Ctype	string
 	Actions	[]json_action
+}
+
+/*
+	Structure of message to send to tegu
+*/
+type agent_msg struct {
+	Ctype	string			// command type -- should be response, ack, nack etc.
+	Rtype	string			// type of response (e.g. map_mac2phost, or specific id for ack/nack)
+	Rdata	[]string		// response data
+	State	int				// if an ack/nack some state information 
+	Vinfo	string			// agent version info for debugging
 }
 //----------------------------------------------------------------------------------------------------
 
@@ -94,23 +107,27 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 */
 func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
     var (
-		cmd_str string = `map_mac2phost -h "`
+		cmd_str string = `map_mac2phost`
     )
 
-	sheep.Baa( 1, "running mac_map2phost" )
-
     for i := range req.Hosts {
-		cmd_str += req.Hosts[i] + " "
+		cmd_str += " " + req.Hosts[i] 
     }
-	cmd_str += `"`
+	cmd_str += ``
 
-	jout, err = extcmd.Cmd2json( cmd_str, "map_mac2phost" ) 		// execute command and packae output as a json in response format
+	msg := agent_msg{}
+	msg.Ctype = "response"
+	msg.Rtype = "map_mac2phost"
+	msg.Vinfo = version
+	msg.State, msg.Rdata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
+	sheep.Baa( 1, "map_mac2pdata completed: state=%d respone data had %d elements", msg.State, len( msg.Rdata ) )
 
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to execute: %s: %s", cmd_str, err )
 		jout = nil
 	}
 
+	jout, err = json.Marshal( msg )
 	return
 }
 
@@ -155,7 +172,6 @@ func do_setqueues( req json_action ) {
         	sheep.Baa( 1, "queues adjusted succesfully" )
     	}
 	}
-
 }
 
 /*
@@ -263,7 +279,6 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v1.0/14304"
 		verbose 	*bool
 		log_dir		*string
 		needs_help 	*bool
@@ -320,7 +335,7 @@ func main() {
 						connect2tegu( smgr, tegu_host, sess_mgr )
 						
 					case connman.ST_DATA:
-						sheep.Baa( 1, "data: [%s]  %d bytes received", sreq.Id, len( sreq.Buf ) )
+						sheep.Baa( 2, "data: [%s]  %d bytes received", sreq.Id, len( sreq.Buf ) )
 						jc.Add_bytes( sreq.Buf )
 						jblob := jc.Get_blob()		// get next blob if ready
 						for ; jblob != nil ; {

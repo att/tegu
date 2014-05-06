@@ -15,6 +15,7 @@
 	Date:		20 November 2013 (broken out of initial test on 2 Dec)
 	Author:		E. Scott Daniels
 
+	Mods:		05 May 2014 : Added agent manager to the verbose change list.
 */
 
 package managers
@@ -291,13 +292,16 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 							case "net", "network":
 								net_sheep.Set_level( nv )
 								
+							case "agent":
+								am_sheep.Set_level( nv )
+
 							case "tegu", "master":
 								tegu_sheep.Set_level( nv )
 
 							default:
 								state = "ERROR"
 								http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
-								jreason = fmt.Sprintf( "\"unrecognsed subsystem name given; must be one of: osif, resmgr, http, fqmgr, or net" )
+								jreason = fmt.Sprintf( "\"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net" )
 						}
 
 						http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )

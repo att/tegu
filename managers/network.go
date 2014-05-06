@@ -24,6 +24,7 @@
 							loading until after the driver here has been entered and thus we've built
 							the first graph.
 				03 Apr 2014 - Support for endpoints on the path.
+				05 May 2014 - Added support for merging gateways into the host list when not using floodlight.
 */
 
 package managers
@@ -61,6 +62,8 @@ type Network struct {						// defines a network
 	ip2vmid		map[string]*string			// ip to vm-id translation	Tegu-lite
 	vmid2phost	map[string]*string			// vmid to physical host name	Tegu-lite
 	vmid2ip		map[string]*string			// vmid to ip address	Tegu-lite
+	mac2phost	map[string]*string			// mac to phost map generated from OVS agent data (needed to include gateways in graph)
+	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
 }
 
 // ------------ private -------------------------------------------------------------------------------------
@@ -89,31 +92,65 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 	i := 0
 	if n != nil && n.ip2mac != nil {								// first time round we might not have any data
-		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + 1 )
+		gw_count := 0	
+		if n.gwmap != nil {	
+			gw_count = len( n.gwmap )
+		}
+		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
 
-		for ip, mac := range n.ip2mac {
+		for ip, mac := range n.ip2mac {				// add in regular VMs
 			vmid := n.ip2vmid[ip]
 			if vmid != nil {						// skip if we don't find a vmid
-				swname := *n.vmid2phost[*vmid]		// use the hostname as the switch name assuming one br-int/physical host
-
-				hlist[i] = gizmos.FL_host_json { }		// new struct
-				hlist[i].Mac = make( []string, 1 )
-				hlist[i].Ipv4 = make( []string, 1 )
-				hlist[i].Mac[0] = *mac
-				hlist[i].Ipv4[0] = ip
-				hlist[i].AttachmentPoint = make( []gizmos.FL_attachment_json, 1 ) 
-				hlist[i].AttachmentPoint[0].SwitchDPID = swname
-				hlist[i].AttachmentPoint[0].Port = -128
-
+				net_sheep.Baa( 2, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+				hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
 				i++
 			}
 		}
+
+		if n.gwmap != nil {						// add in the gateways which are not reported by openstack
+			for mac, ip := range n.gwmap {
+				if n.mac2phost[mac] == nil {
+					net_sheep.Baa( 1, "WRN:  build_hlist: unable to find mac in gw list: mac=%s  ip=%s", mac, *ip )
+				} else {
+					if ip != nil {
+						net_sheep.Baa( 2, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
+						hlist[i] = gizmos.FL_mk_host( *ip, "", mac, *(n.mac2phost[mac]), -128 ) 		// use phys host collected from OVS as switch
+						i++
+					} else {
+						net_sheep.Baa( 1, "WRN:  build_hlist: ip was nil for mac: %s", mac )
+					}
+				}
+			}
+		} else {
+			net_sheep.Baa( 1, "WRN: no gateway map" )
+		}
+
+		hlist = hlist[0:i]
 	} else {
 		hlist = make( []gizmos.FL_host_json,  1 )			// must have empty list to return if net is nil
 	}
 
-	hlist = hlist[0:i]
 	return
+}
+
+/*
+	Tegu-lite
+	Takes a set of strings of the form <hostname><space><mac> and adds them to the mac2phost table
+	This is needed to map gateway hosts to physical hosts since openstack does not return the gateways
+	with the same info as it does VMs
+*/
+func (n *Network) update_mac2phost( list []string ) {
+	if n.mac2phost == nil {
+		n.mac2phost = make( map[string]*string )
+	}
+
+	for i := range list {
+		toks := strings.Split( list[i], " " )
+		dup_str := toks[0]
+		n.mac2phost[toks[1]] = &dup_str
+	}
+
+	net_sheep.Baa( 1, "mac2phost map updated; has %d elements (list had %d elements)", len( n.mac2phost ), len( list ) )
 }
 
 /*
@@ -323,7 +360,7 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 		links = gizmos.FL_links( flhost )					// request the current set of links from floodlight
 		hlist = gizmos.FL_hosts( flhost )					// get a current host list from floodlight
 	} else {
-		hlist = old_net.build_hlist()						// build hosts from the stash of openstack vm maps
+		hlist = old_net.build_hlist()						// simulate output from floodlight by building the host list from openstack maps
 		links, err = gizmos.Read_json_links( *flhost )
 		if err != nil {
 			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s", *flhost, err )
@@ -348,6 +385,10 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 	}
 
 	for i := range links {							// parse all links returned from the controller
+		if links[i].Capacity <= 0 {
+			links[i].Capacity = max_capacity			// default if it didn't come from the source
+		}
+
 		ssw = n.switches[links[i].Src_switch]; 
 		if ssw == nil {
 			ssw = gizmos.Mk_switch( &links[i].Src_switch )
@@ -360,14 +401,15 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 			n.switches[links[i].Dst_switch] = dsw
 		}
 
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, max_capacity )		// omitting the link causes reuse of the link if it existed so that obligations are kept
+		//lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, max_capacity )		// omitting the link causes reuse of the link if it existed so that obligations are kept
+		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, links[i].Capacity )		// omitting the link causes reuse of the link if it existed so that obligations are kept
 		lnk.Set_forward( dsw )
 		lnk.Set_backward( ssw )
 		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
 		lnk.Set_port( 2, links[i].Dst_port )		// port on dest to src
 		ssw.Add_link( lnk )
 
-		lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, max_capacity, lnk )	// including the link causes its obligation to be shared in this direction
+		lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, links[i].Capacity, lnk )	// including the link causes its obligation to be shared in this direction
 		lnk.Set_forward( ssw )
 		lnk.Set_backward( dsw )
 		lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
@@ -380,7 +422,7 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
 			if len( hlist[i].Ipv4 ) > 0 {
-				ip4 = hlist[i].Ipv4[0]; 
+				ip4 = hlist[i].Ipv4[0]; 		//TODO: we need to associated all ips with the host; for now just the first
 			} else {
 				ip4 = ""
 			}
@@ -392,27 +434,25 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 
 			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
 
-			//if len( hlist[i].AttachmentPoint ) > 0 {
-				//for j := 0; j < len( hlist[i].AttachmentPoint ); j++ {
-				for j := range hlist[i].AttachmentPoint {
-					h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
-					ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
-					if ssw != nil {							// it should always be known, but no chances
-						ssw.Add_host( &hlist[i].Mac[0], hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
-						net_sheep.Baa( 3, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
-					}
+			for j := range hlist[i].AttachmentPoint {
+				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
+				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
+				if ssw != nil {							// it should always be known, but no chances
+					ssw.Add_host( &hlist[i].Mac[0], hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
+					net_sheep.Baa( 3, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
 				}
-			//}
+			}
 
 			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 2, "build: saving host as mac: %s", hlist[i].Mac[0] )
-			if len( hlist[i].Ipv4 ) > 0 && hlist[i].Ipv4[0] != "" {
-				net_sheep.Baa( 3, "build: saving host as ip4: %s", hlist[i].Ipv4[0] )
-				n.hosts[hlist[i].Ipv4[0]] = h
+			net_sheep.Baa( 2, "build: saving host ip4=%s as mac: %s", ip4, hlist[i].Mac[0] )
+			if ip4 != "" {
+				n.hosts[ip4] = h
 			}
-			if len( hlist[i].Ipv6 ) > 0 && hlist[i].Ipv6[0] != "" {
-				n.hosts[hlist[i].Ipv4[0]] = h
+			if ip6 != "" {
+				n.hosts[ip6] = h
 			}
+		} else {
+			net_sheep.Baa( 2, "skipping host in list (i=%d) attachement points=%d", len( hlist[i].Mac ) )
 		}
 	}
 
@@ -831,6 +871,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							net_sheep.Baa( 0, "ip2mac map was nil; not changed" )
 						}
 
+					case REQ_GWMAP:									// Tegu-lite
+						if req.Req_data != nil {
+							act_net.gwmap = req.Req_data.( map[string]*string )
+						} else {
+							net_sheep.Baa( 0, "ip2mac map was nil; not changed" )
+						}
+
 
 					case REQ_GEN_QMAP:							// generate a new queue setting map
 						ts := req.Req_data.( int64 )			// time stamp for generation
@@ -858,6 +905,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							ip2vmid_map := act_net.ip2vmid
 							vmid2phost_map := act_net.vmid2phost	
 							ip2mac_map := act_net.ip2mac
+							mac2phost := act_net.mac2phost
+							gwmap := act_net.gwmap
 
 							act_net = new_net
 
@@ -867,6 +916,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							act_net.ip2vmid = ip2vmid_map 
 							act_net.vmid2phost	 = vmid2phost_map
 							act_net.ip2mac = ip2mac_map
+							act_net.mac2phost = mac2phost
+							act_net.gwmap = gwmap
 
 							net_sheep.Baa( 1, "network graph rebuild completed" )		// timing during debugging
 						} else {
@@ -911,6 +962,11 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								}
 							}
 						}
+
+					// --------------------- agent things -------------------------------------------------------------
+					case REQ_MAC2PHOST:
+						req.Response_ch = nil			// we don't respond to these
+						act_net.update_mac2phost(  req.Req_data.( []string ) )
 
 					default:
 						net_sheep.Baa( 1,  "unknown request received on channel: %d", req.Msg_type )
