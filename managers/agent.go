@@ -38,6 +38,18 @@ import (
 	//"forge.research.att.com/tegu/gizmos"
 )
 
+// ----- structs used to bundle into json commands
+
+type action struct {			// specific action
+	Atype	string				// something like map_mac2phost, or intermed_queues
+	Hosts	[]string			// list of hosts to apply the action to
+}
+
+type agent_cmd struct {			// overall command
+	Ctype	string
+	Actions []action
+}
+
 /*
 	Manage things associated with a specific agent
 */
@@ -83,6 +95,16 @@ func (ad *agent_data) Mk_agent( aid string ) ( na *agent ) {
 func (ad *agent_data) send2one( smgr *connman.Cmgr,  msg string ) {
 	for id := range ad.agents {
 		smgr.Write( id, []byte( msg ) )
+		return
+	}
+}
+
+/*
+	Send the bytes to one agent.
+*/
+func (ad *agent_data) sendbytes2one( smgr *connman.Cmgr,  msg []byte ) {
+	for id := range ad.agents {
+		smgr.Write( id,  msg )
 		return
 	}
 }
@@ -169,6 +191,37 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 	ad.send2one( smgr, req_str )
 }
 
+/*
+	Build a request to cause the agent to drive the setting of queues and fmods on intermediate bridges.
+*/
+func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string ) {
+	if hlist == nil || *hlist == "" {
+		return
+	}
+	
+	msg := &agent_cmd{ Ctype: "action_list" }				// create command struct then convert to json
+	msg.Actions = make( []action, 1 )
+	msg.Actions[0].Atype = "intermed_queues"
+	msg.Actions[0].Hosts = strings.Split( *hlist, " " )
+	jmsg, err := json.Marshal( msg )
+
+	//req_str := `{ "ctype": "action_list", "actions": [ { "atype": "intermed_queues", "hosts": [ `
+	//toks := strings.Split( *hlist, " " )
+	//sep := " "
+	//for i := range toks {
+		//req_str += sep + `"` + toks[i] +`"`
+		//sep = ", "
+	//}
+
+	//req_str += ` ] } ] }`
+
+	if err == nil {
+		am_sheep.Baa( 1, "sending intermediate queue setup request: %s", string( jmsg ) )
+		ad.sendbytes2one( smgr, jmsg )
+	} else {
+		am_sheep.Baa( 1, "creating json intermedq command failed: %s", err )
+	}
+}
 // ---------------- main agent goroutine -----------------------------------------------------------
 
 func Agent_mgr( ach chan *ipc.Chmsg ) {
@@ -202,6 +255,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
 	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// recurring tickle to get host mapping 
+	tklr.Add_spot( refresh * 2, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// recurring tickle to ensure intermediate switches are properly set
 
 	sess_chan := make( chan *connman.Sess_data, 1024 )		// channel for comm from agents (buffers, disconns, etc)
 	smgr := connman.NewManager( port, sess_chan );
@@ -236,6 +290,13 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						if req.Req_data != nil {
 							host_list = *(req.Req_data.( *string ))
 						}
+
+					case REQ_INTERMEDQ:
+						req.Response_ch = nil
+						if host_list != "" {
+							adata.send_intermedq( smgr, &host_list )
+						}
+
 				}
 
 				am_sheep.Baa( 3, "processing request finished %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
@@ -253,6 +314,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						am_sheep.Baa( 1, "new agent: %s [%s]", a.id, sreq.Data )
 						if host_list != "" {											// immediate request for this 
 							adata.send_mac2phost( smgr, &host_list )
+							adata.send_intermedq( smgr, &host_list )
 						}
 				
 					case connman.ST_DISC:

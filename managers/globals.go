@@ -52,6 +52,7 @@ const (
 	REQ_SENDONE					// send message to one
 	REQ_IP2MACMAP				// generate an ip to mac translation table and return to requestor
 	REQ_MAC2PHOST				// request contains mac to physical host data
+	REQ_INTERMEDQ				// setup queues and flowmods on intermediate switches
 )
 
 const (

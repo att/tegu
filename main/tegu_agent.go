@@ -10,6 +10,7 @@
 
 	Mods:		05 May 2014 : Added ability to support the map_mac2phost request
 					which generaets data back to tegu.
+				06 May 2014 : Added support to drive setup_ovs_intermed script.
 */
 
 package main
@@ -132,12 +133,33 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 }
 
 /*
+	Executes the setup_ovs_intermed script on each host listed.
+*/
+func do_intermedq( req json_action ) {
+    var (
+        err error
+    )
+
+	sheep.Baa( 1, "running intermediate switch queue/fmod setup" )
+
+	for i := range req.Hosts {
+    	sheep.Baa( 1, "executing: %s setup_ovs_intermed -h %s", shell_cmd, req.Hosts[i] )
+    	cmd := exec.Command( shell_cmd, "setup_ovs_intermed", "-h", req.Hosts[i] )
+    	err = cmd.Run()
+    	if err != nil  {
+        	sheep.Baa( 0, "ERR: unable to execute set queue command: on %s: %s", req.Hosts[i], err )
+    	} else {
+        	sheep.Baa( 1, "queues adjusted succesfully" )
+    	}
+	}
+}
+
+/*
 	Execute a create_ovs_queues for each host in the list
 */
 func do_setqueues( req json_action ) {
     var (
         err error
-        cmd_str string          // final command string (with data file name)
     )
 
 	sheep.Baa( 1, "running set queue adjustment" )
@@ -167,9 +189,9 @@ func do_setqueues( req json_action ) {
     	cmd := exec.Command( shell_cmd, "create_ovs_queues", "-h", req.Hosts[i],  fname )
     	err = cmd.Run()
     	if err != nil  {
-        	sheep.Baa( 0, "ERR: unable to execute set queue command: %s: %s", cmd_str, err )
+        	sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s", req.Hosts[i], fname, err )
     	} else {
-        	sheep.Baa( 1, "queues adjusted succesfully" )
+        	sheep.Baa( 1, "queues adjusted succesfully on: %s", req.Hosts[i] )
     	}
 	}
 }
@@ -244,18 +266,21 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 
 	for i := range req.Actions {
 		switch( req.Actions[i].Atype ) {
-			case "setqueues":	
+			case "setqueues":								// set queues
 					do_setqueues( req.Actions[i] )
 
-			case "flowmod":		
+			case "flowmod":									// set a flow mod
 					do_fmod( req.Actions[i] )
 
-			case "map_mac2phost":
+			case "map_mac2phost":							// run script to generate mac to physical host mappings 
 					p, err := do_map_mac2phost( req.Actions[i] )
 					if err == nil {
 						resp[ridx] = p
 						ridx++
 					}
+
+			case "intermed_queues":							// run script to set up intermediate queues
+					do_intermedq(  req.Actions[i] )
 
 			default:
 				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
