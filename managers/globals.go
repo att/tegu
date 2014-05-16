@@ -1,3 +1,19 @@
+/*
+	Mnemonic:	globals.go
+	Abstract:	Global things shared by all managers.  Use caution when modifying or adding to iota lists order
+				might be important and note where new cosntant blocks are started as the reason is likely
+				that iota needs to be reset!
+
+				There is also one initialisation function that is managed here. We cannot make use of the 
+				automatic package initialisation mechanism because the inititalisation requires specific
+				information from the main which is passed into the init function.  
+
+	Date:		02 December 2013
+	Author:		E. Scott Daniels
+
+	Mods:
+*/
+
 package managers
 
 import (
@@ -11,10 +27,6 @@ import (
 
 	"forge.research.att.com/tegu/gizmos"
 )
-
-// global constants and variables -- no such thing as protected or compile unit static it seems, so by 
-// putting the globals in a separate module it should be more obvious that these are shared across all
-// package members (as though all tegu source was in the same file).
 
 const (
 	// message types (requests) that are placed into channel messages. Primary reciver of each type is
@@ -62,16 +74,19 @@ const (
 )
 
 
-// fq_mgr constants
+// fq_mgr constants	(resets iota)
 const (
 				// offsets into the array of data passed to fq_mgr on requests
-	FQ_IP1		int = 0			// ip address of host 1					(ie proactive reservation request)
-	FQ_IP2		int = 1			// ip address of host 2
-	FQ_EXPIRY	int = 2			// reservation expiry time 
-	FQ_SPQ		int = 3			// queue to map traffic to
-	FQ_ID		int	= 4			// id used if reporting error asynch
+	FQ_IP1		int = iota		// ip address of host 1					(ie proactive reservation request)
+	FQ_IP2						// ip address of host 2
+	FQ_EXPIRY					// reservation expiry time 
+	FQ_SPQ						// queue to map traffic to
+	FQ_ID						// id used if reporting error asynch
+	FQ_DIR_IN					// bool flag that indicates whether the flowmod direction is into switch or out of switch
+	FQ_DSCP						// user supplied dscp that the data should have on egress
+	FQ_SIZE						// this must be LAST as it indicates the size of the array needed
 
-	FQ_QLIST	int = 0			// the list of curren queue settings 	(set queues)
+	FQ_QLIST	int = 0			// the list of current queue settings 	(set queues)
 )
 
 var (
@@ -83,7 +98,7 @@ var (
 	cfg_data	map[string]map[string]*string			// things read from the configuration file
 
 	/* 
-		channels that various goroutines listen to. 
+		Channels that various goroutines listen to. Global so that all goroutines have access to them.
 	*/
 	nw_ch		chan	*ipc.Chmsg		// network 
 	rmgr_ch		chan	*ipc.Chmsg		// reservation manager 
@@ -91,15 +106,15 @@ var (
 	fq_ch		chan	*ipc.Chmsg		// flow and queue manager
 	am_ch		chan	*ipc.Chmsg		// agent manager channel
 
-	tklr	*ipc.Tickler					// tickler that will drive periodic things like checkpointing
+	tklr	*ipc.Tickler				// tickler that will drive periodic things like checkpointing
 
 	pid int = 0							// process id for use in generating reservation names uniqueue across invocations
 	res_nmseed	int = 0					// reservation name sequential value
 
-	super_cookie	*string; 				// the 'admin cookie' that the super user can use to manipulate a reservation
+	super_cookie	*string; 			// the 'admin cookie' that the super user can use to manipulate a reservation
 
-	tegu_sheep	*bleater.Bleater			// parent sheep that controls the 'master' bleating volume and is used by 'library' functions
-	net_sheep	*bleater.Bleater			// indivual sheep for each goroutine
+	tegu_sheep	*bleater.Bleater		// parent sheep that controls the 'master' bleating volume and is used by 'library' functions (allocated in init below)
+	net_sheep	*bleater.Bleater		// indivual sheep for each goroutine (each is responsible for allocating their own sheep)
 	am_sheep	*bleater.Bleater
 	fq_sheep	*bleater.Bleater
 	osif_sheep	*bleater.Bleater
@@ -156,20 +171,12 @@ func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, 
 		cfg_data = nil
 	}
 
-	tegu_sheep.Add_child( gizmos.Get_sheep( ) )			// since we don't directly initialise the gizmo environment we ask for its sheep
-/*
-	if *log_dir  != "stderr" {							// allow it to stay on stderr
-		lfn := mk_logfile_nm( log_dir, 86400 )
-		tegu_sheep.Baa( 1, "switching to log file: %s", *lfn )
-		tegu_sheep.Append_target( *lfn, false )						// switch bleaters to the log file rather than stderr
-		go sheep_herder( log_dir, 86400 )						// start the function that will roll the log now and again
-	}
-*/
+	tegu_sheep.Add_child( gizmos.Get_sheep( ) )						// since we don't directly initialise the gizmo environment we ask for its sheep
 	if *log_dir  != "stderr" {										// if overriden in config
 		lfn := tegu_sheep.Mk_logfile_nm( log_dir, 86400 )
 		tegu_sheep.Baa( 1, "switching to log file: %s", *lfn )
 		tegu_sheep.Append_target( *lfn, false )						// switch bleaters to the log file rather than stderr
-		go tegu_sheep.Sheep_herder( log_dir, 86400 )						// start the function that will roll the log now and again
+		go tegu_sheep.Sheep_herder( log_dir, 86400 )				// start the function that will roll the log now and again
 	}
 
 	return

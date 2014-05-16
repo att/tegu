@@ -20,6 +20,7 @@
 	Mods:		30 Apr 2014 (sd) - Changes to support pushing flow-mods and reservations to an agent. Tegu-lite
 				05 May 2014 (sd) - Now sends the host list to the agent manager in addition to keeping a copy
 					for it's personal use. 
+				12 May 2014 (sd) - Reverts dscp values to 'original' at the egress switch
 
 */
 
@@ -30,6 +31,7 @@ import (
 	//"errors"
 	"fmt"
 	//"io"
+	"math"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -139,10 +141,15 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 	Send a flow-mod request to the agent. If send_all is false, then only ingress/egress
 	flow-mods are set; those indicateing queue 1 are silently skipped. This is controlled
 	by the queue_type setting in the config file. 
+
+	mdscp is the dscp to match; a value of 0 causes no dscp value to be matched
+	wdscp is the dscp value that should be written on the outgoing datagram.
+
+	DSCP values are assumed to NOT have been shifted!
 */
-func send_fmod_agent( ip1 string, ip2 string, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, diffserv int, send_all bool ) {
+func send_fmod_agent( ip1 string, ip2 string, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
 	var (
-		host string
+		host	string
 	)
 
 	if send_all || qnum != 1 {					// ignore if skipping intermediate and this isn't ingress/egress
@@ -159,8 +166,13 @@ func send_fmod_agent( ip1 string, ip2 string, expiry int64, qnum int, sw string,
 	
 			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-			fq_sheep.Baa( 1, "flow-mod: -h %s -t %d -p 400 --match -s %s -d %s --action -q %d -T %d add 0xdead %s", host, timeout, *m1, *m2, qnum, diffserv, sw )
-			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -s %s -d %s --action -q %d -T %d add 0xdead %s"`, host, timeout, *m1, *m2, qnum, diffserv, sw )
+			//fq_sheep.Baa( 1, "flow-mod: -h %s -t %d -p 400 --match -s %s -d %s --action -q %d -T %d add 0xdead %s", host, timeout, *m1, *m2, qnum, dscp, sw )
+			fq_sheep.Baa( 1, "flow-mod: pri=400 to=%d src=%s dest=%s host=%s q=%d mdscp=%d wdscp=%d sw=%s", timeout, *m1, *m2, host, qnum, mdscp, wdscp, sw )
+
+			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -s %s -d %s -T %d `, host, timeout, *m1, *m2, mdscp ) // MUST always match a dscp value to prevent loops on resubmit
+
+			//qjson += fmt.Sprintf( `--action -q %d -T  -T %d  add 0xdead %s"`, qnum, wdscp << 2, sw )
+			qjson += fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  add 0xdead %s"`, qnum, wdscp << 2, sw )			// set queue and dscp value, then resub table 0 to match openstack fmod
 
 			qjson += ` ] } ] }`
 
@@ -209,6 +221,11 @@ func req_ip2mac(  rch chan *ipc.Chmsg ) {
 	reservation manager, and from a tickler that causes us to evaluate the need to resize 
 	ovs queues.
 
+	DSCP values:  Dscp values range from 0-64 decimal, but when described on or by 
+		flow-mods are shifted two bits to the left. The send flow mod function will
+		do the needed shifting so all values outside of that one funciton should assume/use
+		decimal values in the range of 0-64.
+
 */
 func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
@@ -223,7 +240,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		switch_hosts *string				// from config file and overrides openstack list if given (mostly testing)
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
 		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
-		diffserv	int = 0x40
+		dscp		int = 42	 			// generic diffserv value used to mark packets as priority
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
 	)
@@ -252,8 +269,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			ssq_cmd = dp
 		}
 	
-		if p := cfg_data["fqmgr"]["diffserv"]; p != nil {
-			diffserv = clike.Atoi( *p )
+		if p := cfg_data["fqmgr"]["default_dscp"]; p != nil {		// this is a single value and should not be confused with the dscp list in the default section of the config
+			dscp = clike.Atoi( *p )
 		}
 
 		if p := cfg_data["fqmgr"]["queue_check"]; p != nil {		// queue check frequency from the control file
@@ -310,8 +327,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 
 					if msg.State == nil {				// no error, we are silent
-						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
-									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
+						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d dscp=%d",  
+									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, data[FQ_DSCP].(int) )
 						msg.Response_ch = nil
 					} else {
 						// do we need to suss out the id and mark it failed, or set a timer on it,  so as not to flood reqmgr with errors?
@@ -321,9 +338,27 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				} else {
 					//fq_sheep.Baa( 2,  "proactive reservation not sent, no sdn-host defined: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
 						//uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
-					send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, diffserv, send_all )
+					// three flowmods 
+					if data[FQ_DIR_IN].(bool)  {			// inbound to this switch we need to revert from our settings to the 'origianal' settings
+						udscp := math.Abs( float64( data[FQ_DSCP].(int) ) )
+						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, int( udscp ), send_all )
+						//send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, math.Abs( data[FQ_DSCP].(int) ), send_all )
+						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 40, 32, send_all )
+						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 41, 46, send_all )
+					} else {								// outbound from this switch we need to translate dscp values to our values
+						dscp := 0							// if DSCP is > 0 it's an 'exit' value that we leave set and translate 0 to dscp; if < 0 we assume we must match the abs() value
+						if data[FQ_DSCP].(int) < 0 {
+							dscp = -data[FQ_DSCP].(int)
+						}
+						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, data[FQ_DSCP].(int), dscp, send_all )
+						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 32, 40, send_all )
+						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 46, 41, send_all )
+					}
 					msg.Response_ch = nil
 				}
+
+
+//TODO: need to write rules that off the bit or revert it bock to 32/46
 
 			case REQ_RESERVE:								// send a reservation to skoogi
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, queue h1/2 must be IP addresses

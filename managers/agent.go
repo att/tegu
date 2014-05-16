@@ -13,6 +13,7 @@
 	Mods:		05 May 2014 : Added ability to receive and process json data from the agent
 					and the function needed to process the output from a map_mac2phost request.
 					Added ability to send the map_mac2phost request to the agent. 
+				13 May 2014 : Added support for exit-dscp value.
 */
 
 package managers
@@ -21,7 +22,7 @@ import (
 	//"bufio"
 	"encoding/json"
 	//"flag"
-	//"fmt"
+	"fmt"
 	//"io/ioutil"
 	//"html"
 	//"net/http"
@@ -43,6 +44,7 @@ import (
 type action struct {			// specific action
 	Atype	string				// something like map_mac2phost, or intermed_queues
 	Hosts	[]string			// list of hosts to apply the action to
+	Dscps	string				// space separated list of dscp values
 }
 
 type agent_cmd struct {			// overall command
@@ -169,6 +171,8 @@ func ( a *agent ) process_input( buf []byte ) {
 	return
 }
 
+//-------- request builders -----------------------------------------------------------------------------------------
+
 /*
 	Build a request to have the agent generate a mac to phost list and send it to one agent.
 */
@@ -177,6 +181,7 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 		return
 	}
 	
+/*
 	req_str := `{ "ctype": "action_list", "actions": [ { "atype": "map_mac2phost", "hosts": [ `
 	toks := strings.Split( *hlist, " " )
 	sep := " "
@@ -186,15 +191,27 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 	}
 
 	req_str += ` ] } ] }`
+*/
 
-	am_sheep.Baa( 3, "sending mac2phost request: %s", req_str )
-	ad.send2one( smgr, req_str )
+	msg := &agent_cmd{ Ctype: "action_list" }				// create command struct then convert to json
+	msg.Actions = make( []action, 1 )
+	msg.Actions[0].Atype = "map_mac2phost"
+	msg.Actions[0].Hosts = strings.Split( *hlist, " " )
+	jmsg, err := json.Marshal( msg )			// bundle into a json string
+
+	if err == nil {
+		am_sheep.Baa( 3, "sending mac2phost request: %s", jmsg )
+		ad.sendbytes2one( smgr, jmsg )
+	} else {
+		am_sheep.Baa( 1, "WRN: unable to bundle map2phost request into json: %s", err )
+		am_sheep.Baa( 2, "offending json: %s", jmsg )
+	}
 }
 
 /*
 	Build a request to cause the agent to drive the setting of queues and fmods on intermediate bridges.
 */
-func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string ) {
+func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *string ) {
 	if hlist == nil || *hlist == "" {
 		return
 	}
@@ -203,17 +220,9 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string ) {
 	msg.Actions = make( []action, 1 )
 	msg.Actions[0].Atype = "intermed_queues"
 	msg.Actions[0].Hosts = strings.Split( *hlist, " " )
-	jmsg, err := json.Marshal( msg )
+	msg.Actions[0].Dscps = *dscp
 
-	//req_str := `{ "ctype": "action_list", "actions": [ { "atype": "intermed_queues", "hosts": [ `
-	//toks := strings.Split( *hlist, " " )
-	//sep := " "
-	//for i := range toks {
-		//req_str += sep + `"` + toks[i] +`"`
-		//sep = ", "
-	//}
-
-	//req_str += ` ] } ] }`
+	jmsg, err := json.Marshal( msg )			// bundle into a json string
 
 	if err == nil {
 		am_sheep.Baa( 1, "sending intermediate queue setup request: %s", string( jmsg ) )
@@ -222,6 +231,27 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string ) {
 		am_sheep.Baa( 1, "creating json intermedq command failed: %s", err )
 	}
 }
+// ---------------- utility ------------------------------------------------------------------------
+
+/*
+	Accepts a string of space separated dscp values and returns a string with the values
+	approprately shifted so that they can be used by the agent in a flow-mod command.  E.g.
+	a dscp value of 40 is shifted to 160. 
+*/
+func shift_values( list string ) ( new_list string ) {
+	new_list = ""
+	sep := ""
+	toks := strings.Split( list, " " )
+	
+	for i := range toks {
+		n := clike.Atoi( toks[i] )
+		new_list += fmt.Sprintf( "%s%d", sep, n<<2 )
+		sep = " "
+	}
+
+	return
+}
+
 // ---------------- main agent goroutine -----------------------------------------------------------
 
 func Agent_mgr( ach chan *ipc.Chmsg ) {
@@ -229,6 +259,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		port	string = "29055"						// port we'll listen on for connections
 		adata	*agent_data
 		host_list string = ""
+		dscp_list string = "40 41 42"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
 		refresh int64 = 60
 	)
 
@@ -240,24 +271,34 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	tegu_sheep.Add_child( am_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 														// suss out config settings from our section
-	if p := cfg_data["agent"]["port"]; p != nil {
-		port = *p
+	if cfg_data["agent"] != nil {
+		if p := cfg_data["agent"]["port"]; p != nil {
+			port = *p
+		}
+		if p := cfg_data["agent"]["verbose"]; p != nil {
+			am_sheep.Set_level( uint( clike.Atoi( *p ) ) )
+		}
+		if p := cfg_data["agent"]["refresh"]; p != nil {
+			refresh = int64( clike.Atoi( *p ) )
+		}
 	}
-	if p := cfg_data["agent"]["verbose"]; p != nil {
-		am_sheep.Set_level( uint( clike.Atoi( *p ) ) )
+	if cfg_data["default"] != nil {						// we pick some things from the default section too
+		if p := cfg_data["default"]["pri_dscp"]; p != nil {			// list of dscp (diffserv) values that match for priority promotion
+			dscp_list = *p
+		}
 	}
-	if p := cfg_data["agent"]["refresh"]; p != nil {
-		refresh = int64( clike.Atoi( *p ) )
-	}
+	
+	dscp_list = shift_values( dscp_list )				// must shift values before giving to agent
 
 														// enforce some sanity on config file settings
 	net_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
+net_sheep.Baa( 1, "dscp priority list for intermedate bridges: %s", dscp_list )
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
-	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// recurring tickle to get host mapping 
-	tklr.Add_spot( refresh * 2, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// recurring tickle to ensure intermediate switches are properly set
+	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping 
+	tklr.Add_spot( refresh * 2, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// reocurring tickle to ensure intermediate switches are properly set
 
-	sess_chan := make( chan *connman.Sess_data, 1024 )		// channel for comm from agents (buffers, disconns, etc)
+	sess_chan := make( chan *connman.Sess_data, 1024 )					// channel for comm from agents (buffers, disconns, etc)
 	smgr := connman.NewManager( port, sess_chan );
 	
 
@@ -269,7 +310,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 				am_sheep.Baa( 3, "processing request %d", req.Msg_type )
 
 				switch req.Msg_type {
-					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
+					case REQ_NOOP:						// just ignore -- acts like a ping if there is a return channel
 
 					case REQ_SENDALL:
 						if req.Req_data != nil {
@@ -281,12 +322,12 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							adata.send2one( smgr,  req.Req_data.( string ) )
 						}
 
-					case REQ_MAC2PHOST:			// send a request for agent to generate  mac to phost map
+					case REQ_MAC2PHOST:					// send a request for agent to generate  mac to phost map
 						if host_list != "" {
 							adata.send_mac2phost( smgr, &host_list )
 						}
 
-					case REQ_CHOSTLIST:			// a host list from fq-manager
+					case REQ_CHOSTLIST:					// a host list from fq-manager
 						if req.Req_data != nil {
 							host_list = *(req.Req_data.( *string ))
 						}
@@ -294,7 +335,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 					case REQ_INTERMEDQ:
 						req.Response_ch = nil
 						if host_list != "" {
-							adata.send_intermedq( smgr, &host_list )
+							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
 
 				}
@@ -314,7 +355,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						am_sheep.Baa( 1, "new agent: %s [%s]", a.id, sreq.Data )
 						if host_list != "" {											// immediate request for this 
 							adata.send_mac2phost( smgr, &host_list )
-							adata.send_intermedq( smgr, &host_list )
+							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
 				
 					case connman.ST_DISC:

@@ -10,6 +10,7 @@
 	Mods:		08 Jan 2014 - Corrected bug that wasn't rejecting a pledge if the expiry time was < 0.
 				11 Feb 2014 - Added better doc to some functions and we now save the queue id in 
 							the checkpoint file.
+				13 May 2014 - Added support to enable an exit dscp value on a reservation. 
 */
 
 package gizmos
@@ -36,6 +37,7 @@ type Pledge struct {
 	expiry		int64
 	bandw_in	int64		// bandwidth to reserve inbound to host1
 	bandw_out	int64		// bandwidth to reserve outbound from host1
+	dscp		int			// dscp value that should be propigated
 	id			*string		// name that the client can use to manage (modify/delete)
 	qid			*string		// name that we'll assign to the queue which allows us to look up the pledge's queues
 	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
@@ -54,6 +56,7 @@ type Json_pledge struct {
 	Expiry		int64
 	Bandwin		int64
 	Bandwout	int64
+	Dscp		int
 	Id			*string
 	Qid			*string
 	Usrkey		*string
@@ -67,7 +70,7 @@ type Json_pledge struct {
 	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward 
 	(to the current time) if it is less than the current time.
 */
-func Mk_pledge( host1 *string, host2 *string, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string ) ( p *Pledge, err error ) {
+func Mk_pledge( host1 *string, host2 *string, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int ) ( p *Pledge, err error ) {
 	now := time.Now().Unix()
 
 	err = nil
@@ -101,6 +104,7 @@ func Mk_pledge( host1 *string, host2 *string, commence int64, expiry int64, band
 		bandw_in:	bandw_in,
 		bandw_out:	bandw_out,
 		id: id,
+		dscp: dscp,
 	}
 
 	if *usrkey != "" {
@@ -141,6 +145,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	p.commence = jp.Commence
 	p.expiry = jp.Expiry
 	p.id = jp.Id
+	p.dscp = jp.Dscp
 	p.usrkey = jp.Usrkey
 	p.qid = jp.Qid
 	p.bandw_out = jp.Bandwout
@@ -432,6 +437,17 @@ func (p *Pledge) Get_values( ) ( *string, *string, int64, int64, int64, int64 ) 
 	}
 
 	return p.host1, p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out 
+}
+
+/*
+	Return the dscp that was submitted with the resrrvation
+*/
+func (p *Pledge) Get_dscp( ) ( int ) {
+	if p == nil {
+		return 0
+	}
+
+	return p.dscp;
 }
 
 /*

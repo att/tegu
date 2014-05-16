@@ -13,6 +13,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		10 Mar 2014 - We allow a target to be either a switch or host when looking for a path. 
+				13 May 2014 - Corrected bug in debug string. 
 */
 
 package gizmos
@@ -179,7 +180,7 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 					fsw.Plink = i								// using its ith link
 				}
 
-				obj_sheep.Baa( 2, "compare: (%s) (%s)", target, fsw.Get_id() )
+				obj_sheep.Baa( 2, "compare: (%s) (%s)", *target, *(fsw.Get_id()) )
 				if fsw.Has_host( target ) || *(fsw.Get_id()) == *target {			// target is attahced to this switch, or the target is a swtich that is the forward switch
 					fsw.Prev = s
 					fsw.Plink = i

@@ -9,6 +9,7 @@
 	Date:		10 March 2014
 	Author:		E. Scott Daniels
 
+	Mods:		13 May 2014 -- Added toks2map function.
 */
 
 package gizmos
@@ -87,6 +88,24 @@ func Str2host1_host2( tok string ) ( h1 string, h2 string ) {
 		} else {
 			h1 = tok
 			h2 = "any"
+		}
+	}
+
+	return
+}
+
+/*
+	Parse a set of tokens passed in, assuming they are name=value pairs, and generate a map. 
+	Tokens that are not of the form key=value are ignored.
+*/
+func Toks2map( toks []string ) ( m map[string]*string ) {
+	m = make( map[string]*string )
+
+	for i := range toks {
+		t := strings.SplitN( toks[i], "=", 2 )
+		
+		if len( t ) == 2 {
+			m[t[0]] = &t[1]
 		}
 	}
 

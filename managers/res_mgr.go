@@ -21,6 +21,7 @@
 
 	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
 				30 Apr 2014 (sd) : Enhancements to send flow-mods and reservation request to agents (Tegu-light)
+				13 May 2014 (sd) : Changed to support exit dscp value in reservation.
 */
 
 package managers
@@ -239,13 +240,14 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 		pushed_count int = 0
 	)
 
-	fq_data = make( []interface{}, 8 )
-	fq_data[3] = 1						// queue is unchanging for now
+	fq_data = make( []interface{}, FQ_SIZE )
+	fq_data[FQ_SPQ] = 1						// queue is unchanging for now
 
 	rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
+				fq_data[FQ_DSCP] = p.Get_dscp()
 				h1, h2, _, expiry, _, _ := p.Get_values( )
 
 				ip1 := name2ip( h1 )
@@ -274,6 +276,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 
 						// ---- push flow-mods in the h1->h2 direction -----------
 						if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
+							fq_data[FQ_DIR_IN] = true										// inbound to last host from egress switch
 							fq_data[FQ_SPQ] = espq1
 							fq_sdata = make( []interface{}, len( fq_data ) )
 							copy( fq_sdata, fq_data )
@@ -282,6 +285,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						}
 
 						fq_data[FQ_SPQ] = plist[i].Get_ilink_spq( &rname, timestamp )			// send fmod to ingress switch on first link out from h1
+						fq_data[FQ_DIR_IN] = false
 						fq_sdata = make( []interface{}, len( fq_data ) )
 						copy( fq_sdata, fq_data )
 						msg = ipc.Mk_chmsg()
@@ -305,6 +309,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						fq_data[FQ_IP1] = *ip2
 
 						if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
+							fq_data[FQ_DIR_IN] = true
 							fq_data[FQ_SPQ] = espq0
 							fq_sdata = make( []interface{}, len( fq_data ) )
 							copy( fq_sdata, fq_data )
@@ -313,6 +318,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						}
 
 						fq_data[FQ_SPQ] = plist[i].Get_elink_spq( &rev_rname, timestamp )	// send res to egress switch on first link towards h1
+						fq_data[FQ_DIR_IN] = false											// the rest are outbound 
 						fq_sdata = make( []interface{}, len( fq_data ) )
 						copy( fq_sdata, fq_data )
 						msg = ipc.Mk_chmsg()
