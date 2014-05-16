@@ -26,7 +26,7 @@ import (
 	//"net/http"
 	"os"
 	"os/exec"
-	//"strings"
+	"strings"
 	//"sync"
 	"time"
 
@@ -52,10 +52,11 @@ var (
 	struture set into which all types of requests can be unpacked.
 */
 type json_action struct {
-	Atype	string
-	Qdata	[]string
-	Fdata	[]string
-	Hosts	[]string
+	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
+	Qdata	[]string			// queue parms 
+	Fdata	[]string			// flow-mod parms
+	Hosts	[]string			// hosts to execute on if a multihost command
+	Dscps	string				// space separated list of dscp values
 }
 
 type json_request struct {
@@ -108,13 +109,11 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 */
 func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
     var (
-		cmd_str string = `map_mac2phost`
+		cmd_str string  
     )
 
-    for i := range req.Hosts {
-		cmd_str += " " + req.Hosts[i] 
-    }
-	cmd_str += ``
+	cmd_str = strings.Join( req.Hosts, " " )
+	cmd_str = "map_mac2phost " + cmd_str
 
 	msg := agent_msg{}
 	msg.Ctype = "response"
@@ -136,21 +135,23 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 	Executes the setup_ovs_intermed script on each host listed.
 */
 func do_intermedq( req json_action ) {
-    var (
-        err error
-    )
 
 	sheep.Baa( 1, "running intermediate switch queue/fmod setup" )
 
 	for i := range req.Hosts {
-    	sheep.Baa( 1, "executing: %s setup_ovs_intermed -h %s", shell_cmd, req.Hosts[i] )
-    	cmd := exec.Command( shell_cmd, "setup_ovs_intermed", "-h", req.Hosts[i] )
-    	err = cmd.Run()
-    	if err != nil  {
-        	sheep.Baa( 0, "ERR: unable to execute set queue command: on %s: %s", req.Hosts[i], err )
-    	} else {
+		cmd_str := fmt.Sprintf( `setup_ovs_intermed -h %s -d "%s"`, req.Hosts[i], req.Dscps )
+
+    	sheep.Baa( 1, "executing: %s", cmd_str )
+
+		state, rdata, err := extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a set of strings
+		if state != 0 {
+			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s", err )
+			for i := range rdata {
+				sheep.Baa( 0, "  %s", rdata[i] )
+			}
+		} else {
         	sheep.Baa( 1, "queues adjusted succesfully" )
-    	}
+		}
 	}
 }
 
