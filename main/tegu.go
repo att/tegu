@@ -18,14 +18,16 @@
 	Date:		20 November 2013
 	Author:		E. Scott Daniels
 
-	Mods:		20 Jan 2014 : added support to allow a single VM in a reservation (VMname,any)
+	Mods:		20 Jan 2014 : Added support to allow a single VM in a reservation (VMname,any)
 							+nnn time now supported on reservation request.
-				10 Mar 2014 : converted to per-path queue setting (ingress/egress/middle queues)
+				10 Mar 2014 : Converted to per-path queue setting (ingress/egress/middle queues).
 				13 Mar 2014 : Corrected 'bug' with setting pledges where both hosts connect to the 
 							same switch. (bug was that it wasn't yet implemented.)
-				03 Apr 2014 : Added endpoint support for reservations and flowmods
+				03 Apr 2014 : Added endpoint support for reservations and flowmods.
 				05 May 2014 : Changes to support merging gateways into the graph and for receiving
 							responses back from the agent.
+				13 May 2014 : Changes to support dscp-exit value supplied on reservation.
+				16 May 2014 : Corrected bug with specifying the "exit" dscp value.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -64,7 +66,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/14304b"
+		version		string = "v3.0/14304d"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
