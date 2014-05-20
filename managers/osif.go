@@ -33,6 +33,7 @@
 
 	Mods:		05 May 2014 : Changes to support digging the various maps out of openstack
 					that are needed when we are not using floodlight.
+				19 May 2014 : Changes to support floating ip translation map generation.
 */
 
 package managers
@@ -136,6 +137,8 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 			vmid2host map[string]*string, 
 			ip2mac map[string]*string, 
 			gwmap map[string]*string,
+			ip2fip map[string]*string,
+			fip2ip map[string]*string,
 			rerr error ) {
 	
 	var (
@@ -148,10 +151,18 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 	vmid2host = nil
 	ip2mac = nil
 	gwmap = nil				// mac2ip for all gateway "boxes"
+	fip2ip = nil
+	ip2fip = nil
 
 	for i := 0; i < len( os_refs ); i++ {
 		osif_sheep.Baa( 1, "creating VM maps from: %s", os_refs[i].To_str( ) )
 		vmid2ip, ip2vmid, vm2ip, vmid2host, err = os_refs[i].Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
+		if err != nil {
+			osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os_refs[i].To_str( ), err )
+			rerr = err
+		}
+
+		ip2fip, fip2ip, err = os_refs[i].Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
 		if err != nil {
 			osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os_refs[i].To_str( ), err )
 			rerr = err
@@ -166,6 +177,10 @@ func map_all( os_refs []*ostack.Ostack, inc_tenant bool  ) (
 
 	
 	gwmap, _, err = os_refs[0].Mk_gwmaps( inc_tenant )
+	if err != nil {
+		osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s", os_refs[0].To_str( ), err )
+	}
+
 
 	return
 }
@@ -195,7 +210,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_sects	[]string
 		os_refs		[]*ostack.Ostack			// reference to each openstack project we need to query
 		inc_tenant	bool = false
-		refresh_delay	= 180					// config file can override
+		refresh_delay	int = 15					// config file can override
 	)
 
 	osif_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
@@ -209,9 +224,13 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 	} 
 
+	if cfg_data["osif"] == nil {
+		cfg_data["osif"] = make( map[string]*string, 1 )
+	}
+
 	if p := cfg_data["osif"]["refresh"]; p != nil {
 		refresh_delay = clike.Atoi( *p ); 			
-		if refresh_delay < 30 {
+		if refresh_delay < 15 {
 			osif_sheep.Baa( 1, "WRN osif:resresh was too small (%ds), setting to 30s", refresh_delay )
 			refresh_delay = 30
 		}
@@ -245,7 +264,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 
 	tklr.Add_spot( 3, my_chan, REQ_GENMAPS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us every 180s 
-	tklr.Add_spot( 180, my_chan, REQ_GENMAPS, nil, ipc.FOREVER );  	
+	tklr.Add_spot( int64( refresh_delay ), my_chan, REQ_GENMAPS, nil, ipc.FOREVER );  	
 
 	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
 	for ;; {
@@ -255,30 +274,49 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
 		switch msg.Msg_type {
 			case REQ_GENMAPS:							// driven by tickler; gen a new set of VM translation maps and pass them to network manager
-				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, err := map_all( os_refs, inc_tenant )
-				if err == nil {
+				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, ip2fip, fip2ip, _ := map_all( os_refs, inc_tenant )
+				// ignore errors as a bad entry for one ostack credential shouldn't spoil the rest of the info gathering; we send only non-nil maps
+				if vm2ip != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
+				}
 	
+				if vmid2ip != nil {
 					msg = ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2IP, vmid2ip, nil )					
+				}
 	
+				if ip2vmid != nil {
 					msg = ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2VMID, ip2vmid, nil )				
+				}
 	
+				if vmid2host != nil {
 					msg = ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2PHOST, vmid2host, nil )		
+				}
 	
+				if ip2mac != nil {
 					msg = ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
+				}
 	
+				if gwmap != nil {
 					msg = ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_GWMAP, gwmap, nil )		
-	
-					osif_sheep.Baa( 1, "VM maps were updated from openstack" )
-				} else {
-					osif_sheep.Baa( 0, "ERR: fetching VM maps failed: %s", err )
 				}
+
+				if ip2fip != nil {
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_IP2FIP, ip2fip, nil )		
+				}
+
+				if fip2ip != nil {
+					msg = ipc.Mk_chmsg( )
+					msg.Send_req( nw_ch, nil, REQ_FIP2IP, fip2ip, nil )		
+				}
+	
+				osif_sheep.Baa( 1, "VM maps were updated from openstack" )
 
 	/* ---- before lite ----
 			case REQ_VM2IP:														// driven by tickler; gen a new vm translation map and push to net mgr

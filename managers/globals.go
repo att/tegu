@@ -65,6 +65,8 @@ const (
 	REQ_IP2MACMAP				// generate an ip to mac translation table and return to requestor
 	REQ_MAC2PHOST				// request contains mac to physical host data
 	REQ_INTERMEDQ				// setup queues and flowmods on intermediate switches
+	REQ_IP2FIP					// request contains a translation of tenant/ip to floating ip
+	REQ_FIP2IP					// request contains a translation of floating ip to tenant/ip
 )
 
 const (
@@ -84,6 +86,8 @@ const (
 	FQ_ID						// id used if reporting error asynch
 	FQ_DIR_IN					// bool flag that indicates whether the flowmod direction is into switch or out of switch
 	FQ_DSCP						// user supplied dscp that the data should have on egress
+	FQ_EXTIP					// an external IP that is needed to setup flow mods when session traveling through a gateway
+	FQ_EXTTY					// external IP type used in fmod command (either -D or -S)
 	FQ_SIZE						// this must be LAST as it indicates the size of the array needed
 
 	FQ_QLIST	int = 0			// the list of current queue settings 	(set queues)

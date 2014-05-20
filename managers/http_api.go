@@ -196,50 +196,38 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 				}
 				
 			case "reserve":
-				tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
-				if len( tmap ) < 1  {
-					if ntokens < 4  {		
-						nerrors++
-						reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1>[,<host2>] cookie dscp; received: %s", ntokens-1, recs[i] ); 
-						break
-					} 
+					tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
+					if len( tmap ) < 1  {
+						if ntokens < 4  {		
+							nerrors++
+							reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1>[,<host2>] cookie dscp; received: %s", ntokens-1, recs[i] ); 
+							break
+						} 
 
-					tmap["bandw"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
-					tmap["window"] = &tokens[2]
-					tmap["hosts"] = &tokens[3]
-					tmap["cookie"] = &empty_str
-					dup_str := "0"
-					tmap["dscp"] = &dup_str
-					if ntokens > 4 {					// optional, cookie must be supplied if dscp is supplied
-						tmap["cookie"] = &tokens[4]
-						if ntokens > 5 {
-							tmap["dscp"] = &tokens[5]
-						}
-					} 
-				}
+						tmap["bandw"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
+						tmap["window"] = &tokens[2]
+						tmap["hosts"] = &tokens[3]
+						tmap["cookie"] = &empty_str
+						dup_str := "0"
+						tmap["dscp"] = &dup_str
+						if ntokens > 4 {					// optional, cookie must be supplied if dscp is supplied
+							tmap["cookie"] = &tokens[4]
+							if ntokens > 5 {
+								tmap["dscp"] = &tokens[5]
+							}
+						} 
+					}
 
-				if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
-					subtokens := strings.Split( *tmap["bandw"], "," )
-					bandw_in = clike.Atoll( subtokens[0] )
-					bandw_out = clike.Atoll( subtokens[1] )
-				} else {
-					bandw_in = clike.Atoll( *tmap["bandw"] )				// no comma, so single value applied to each
-					bandw_out = bandw_in
-				}
-
-/*
-					if strings.Index( tokens[1], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
-						subtokens := strings.Split( tokens[1], "," )
+					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
+						subtokens := strings.Split( *tmap["bandw"], "," )
 						bandw_in = clike.Atoll( subtokens[0] )
 						bandw_out = clike.Atoll( subtokens[1] )
 					} else {
-						bandw_in = clike.Atoll( tokens[1] )				// no comma, so single value applied to each
+						bandw_in = clike.Atoll( *tmap["bandw"] )				// no comma, so single value applied to each
 						bandw_out = bandw_in
 					}
-*/
 
-					//startt, endt = gizmos.Str2start_end( tokens[2] )			// split time token into start/end timestamps
-					//h1, h2 = gizmos.Str2host1_host2( tokens[3] )			// split host token into individual names
+
 					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
 					h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split host token into individual names
 					dscp := 0

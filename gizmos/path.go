@@ -59,6 +59,7 @@ type Path struct {
 	h1		*Host
 	h2		*Host
 	endpts	[]*Link			// virtual links that represent the switch to vm endpoint 'link'
+	extip	*string			// external IP address to be added to the flow mod when needed
 	is_reverse	bool		// set to indicate that the path was saved in reverse order
 }
 
@@ -215,6 +216,16 @@ func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
 	return
 }
 
+/*
+	Accept a new external ip address associated with the path.
+*/
+func (p *Path) Set_extip( extip *string ) {
+	if p == nil {
+		return
+	}
+
+	p.extip = extip
+}
 
 /*
 	Add the necessary queues to the path that increase the utilisation of the links in the path.
@@ -310,6 +321,31 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 	}
 
 	return
+}
+
+/*
+	Return the external IP address or nil.
+*/
+func (p *Path) Get_extip( ) ( *string ) {
+	if p != nil {
+		return p.extip
+	}
+
+	return nil
+}
+
+/* 
+	Return pointer to host. 
+*/
+func (p *Path) Get_h1( ) ( *Host ) {
+	return p.h1
+}
+
+/* 
+	Return pointer to host. 
+*/
+func (p *Path) Get_h2( ) ( *Host ) {
+	return p.h2
 }
 
 /*

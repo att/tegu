@@ -28,6 +28,7 @@
 							responses back from the agent.
 				13 May 2014 : Changes to support dscp-exit value supplied on reservation.
 				16 May 2014 : Corrected bug with specifying the "exit" dscp value.
+				18 May 2014 : Now supports cross tenant reservations.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -35,24 +36,14 @@
 package main
 
 import (
-	//"bufio"
-	//"encoding/json"
 	"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
-	//"strings"
 	"sync"
-	//"time"
 
-	//"forge.research.att.com/gopkgs/clike"
-	//"forge.research.att.com/gopkgs/token"
 	"forge.research.att.com/gopkgs/bleater"
 	"forge.research.att.com/gopkgs/ipc"
 	"forge.research.att.com/tegu/managers"
-	//"forge.research.att.com/tegu/gizmos"
 )
 
 var (
@@ -66,7 +57,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/14304d"
+		version		string = "v3.0/15184"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -130,6 +121,7 @@ func main() {
 	go managers.Res_manager( rmgr_ch, super_cookie ); 						// manage the reservation inventory
 	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
 	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph
+	go managers.Agent_mgr( am_ch )
 
 	//TODO:  chicken and egg -- we need to block until network has a good graph, but we need the network reading from it's channel
 	//       first so that if we are in Tegu-lite mode (openstack providing the graph) it can send the data to network manager 
@@ -151,7 +143,6 @@ func main() {
 	}
 
 	go managers.Fq_mgr( fq_ch, fl_host ); 
-	go managers.Agent_mgr( am_ch )
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// finally, turn on the HTTP interface after _everything_ else is running.
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)

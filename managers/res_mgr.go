@@ -22,6 +22,8 @@
 	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
 				30 Apr 2014 (sd) : Enhancements to send flow-mods and reservation request to agents (Tegu-light)
 				13 May 2014 (sd) : Changed to support exit dscp value in reservation.
+				18 May 2014 (sd) : Changes to allow cross tenant reservations.
+				19 May 2014 (sd) : Changes to support using destination floating IP address in flow mod.
 */
 
 package managers
@@ -265,11 +267,22 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 					fq_data[FQ_ID] = rname
 					timestamp := time.Now().Unix() + 16			// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
-					for i := 0; i < len( plist ); i++ {			// for each path in the list, send fmod requests for each endpoint and each intermediate link, both forwards and backwards
-						fq_data[FQ_IP1] = *ip1					// forward first, from h1 -> h2
-						fq_data[FQ_IP2] = *ip2
+					//for i := 0; i < len( plist ); i++ {			// for each path in the list, send fmod requests for each endpoint and each intermediate link, both forwards and backwards
+					for i := range plist {
+						extip := plist[i].Get_extip()
+						if extip != nil {
+							fq_data[FQ_EXTIP] = *extip
+						} else {
+							fq_data[FQ_EXTIP] = ""
+						}
+						fq_data[FQ_EXTTY] = "-D"					// external reference is the destination for forward component
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward IE reservation flow-mods: %s h1=%s --> h2=%s exp=%d", rname, *h1, *h2, expiry )
+						epip, _ := plist[i].Get_h1().Get_addresses()					// forward first, from h1 -> h2 (must use info from path as it might be split)
+						fq_data[FQ_IP1] = *epip
+						epip, _ = plist[i].Get_h2().Get_addresses()
+						fq_data[FQ_IP2] = *epip
+
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s h1=%s --> h2=%s ip1/2= %s/%s exp=%d", i, rname, *h1, *h2, fq_data[FQ_IP1], fq_data[FQ_IP2], expiry )
 
 						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
@@ -304,9 +317,15 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 
 						// ---- push flow-mods in the h2->h1 direction -----------
 						rev_rname := "R" + rname		// the egress link has an R(name) queue name
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward IE reservation flow-mods: %s h1=%s <-- h2=%s exp=%d", rev_rname, *h1, *h2, expiry )
-						fq_data[FQ_IP2] = *ip1			// for the egress, and backward intermediate flowmods, the destination host is h1, so reverse these
-						fq_data[FQ_IP1] = *ip2
+
+						fq_data[FQ_EXTTY] = "-S"							// external reference is the source for backward component
+						epip, _ = plist[i].Get_h1().Get_addresses() 		// for egress and backward intermediates the dest is h1, so reverse them
+						fq_data[FQ_IP2] = *epip
+
+						epip, _ = plist[i].Get_h2().Get_addresses()
+						fq_data[FQ_IP1] = *epip
+
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s %s %s exp=%d", i, rev_rname, *h1, *h2, fq_data[FQ_IP1], fq_data[FQ_IP2], fq_data[FQ_EXTTY], fq_data[FQ_EXTIP], expiry )
 
 						if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
 							fq_data[FQ_DIR_IN] = true
