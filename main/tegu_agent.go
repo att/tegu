@@ -41,7 +41,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.0/14304"
+	version		string = "v1.0/15214"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
@@ -300,28 +300,31 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 
 func usage( version string ) {
 	fmt.Fprintf( os.Stdout, "tegu_agent %s\n", version )
-	fmt.Fprintf( os.Stdout, "usage: tegu_agent [-l log-dir] [-p tegu-port] [-v]\n" )
+	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-l log-dir] [-p tegu-port] [-v]\n" )
 }
 
 func main() {
 	var (
-		verbose 	*bool
-		log_dir		*string
-		needs_help 	*bool
-		jc			*jsontools.Jsoncache		// where we stash input until a complete blob is read
+		//jc			*jsontools.Jsoncache		// where we stash input until a complete blob is read
 	)
 
 
-	sheep = bleater.Mk_bleater( 1, os.Stderr )
-	sheep.Set_prefix( "tegu-agent" )
 
-	needs_help = flag.Bool( "?", false, "show usage" )
+	needs_help := flag.Bool( "?", false, "show usage" )
 
-	log_dir = flag.String( "l", "stderr", "log_dir" )
+	id := flag.Int( "i", 0, "id" )
+	log_dir := flag.String( "l", "stderr", "log_dir" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
-	verbose = flag.Bool( "v", false, "verbose" )
-
+	verbose := flag.Bool( "v", false, "verbose" )
 	flag.Parse()									// actually parse the commandline
+
+	if *id <= 0 {
+		fmt.Fprintf( os.Stderr, "ERR: must enter -i id (number) on command line\n" )
+		os.Exit( 1 )
+	}
+
+	sheep = bleater.Mk_bleater( 1, os.Stderr )
+	sheep.Set_prefix( fmt.Sprintf( "agent-%d", *id ) )		// append the pid so that if multiple agents are running they'll use different log files
 
 	if *needs_help {
 		usage( version )
@@ -341,7 +344,7 @@ func main() {
 	sheep.Baa( 1, "tegu_agent %s started", version )
 	sheep.Baa( 1, "will contact tegu on port: %s", *tegu_host )
 
-	jc = jsontools.Mk_jsoncache( )							// create json cache to buffer tegu datagram input
+	jc := jsontools.Mk_jsoncache( )							// create json cache to buffer tegu datagram input
 	sess_mgr := make( chan *connman.Sess_data, 1024 )		// session management to create tegu connections with and drive the session listener(s)
 	smgr := connman.NewManager( "", sess_mgr );				// get a manager, but no listen port opened
 	
