@@ -378,7 +378,7 @@ func (i *Inventory) write_chkpt( ) {
 
 	err := i.chkpt.Create( )
 	if err != nil {
-		rm_sheep.Baa( 0, "ERR: resmgr: unable to create checkpoint file: %s", err )
+		rm_sheep.Baa( 0, "CRI: resmgr: unable to create checkpoint file: %s", err )
 		return
 	}
 
@@ -391,7 +391,7 @@ func (i *Inventory) write_chkpt( ) {
 
 	ckpt_name, err := i.chkpt.Close( )
 	if err != nil {
-		rm_sheep.Baa( 0, "ERR: resmgr: checkpoint write failed: %s: %s", ckpt_name, err )
+		rm_sheep.Baa( 0, "CRI: resmgr: checkpoint write failed: %s: %s", ckpt_name, err )
 	} else {
 		rm_sheep.Baa( 1, "resmgr: checkpoint successful: %s", ckpt_name )
 	}

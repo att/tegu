@@ -17,6 +17,7 @@
 
 	Mods:		05 May 2014 : Added agent manager to the verbose change list.
 				13 May 2014 : Added support for exit-dscp value in reservation.
+				22 May 2014 : Now forces a checkpoint after a successful reservation.
 */
 
 package managers
@@ -252,6 +253,8 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 							req = <- my_ch										// wait for completion
 
 							if req.State == nil {
+								ckptreq := ipc.Mk_chmsg( )
+								ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 								state = "OK"
 								reason = fmt.Sprintf( "reservation accepted; reservation path has %d entries", len( path_list ) )
 								jreason =  res.To_json()

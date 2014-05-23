@@ -61,12 +61,14 @@ const (
 	REQ_IP2MAC					// xlate map IP address to mac
 	REQ_GEN_EPQMAP				// generate queue map for end points only (no intermediate queues are generated)
 	REQ_SENDALL					// send message to all
-	REQ_SENDONE					// send message to one
+	REQ_SENDSHORT				// send a long running request to a single agent (uses only one agent to handle all long running requests
+	REQ_SENDLONG				// send a short running request to a single agent (will round robin between all attached agents)
 	REQ_IP2MACMAP				// generate an ip to mac translation table and return to requestor
 	REQ_MAC2PHOST				// request contains mac to physical host data
 	REQ_INTERMEDQ				// setup queues and flowmods on intermediate switches
 	REQ_IP2FIP					// request contains a translation of tenant/ip to floating ip
 	REQ_FIP2IP					// request contains a translation of floating ip to tenant/ip
+	REQ_STATE					// generate some kind of state data back to message sender
 )
 
 const (

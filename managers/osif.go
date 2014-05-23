@@ -231,7 +231,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	if p := cfg_data["osif"]["refresh"]; p != nil {
 		refresh_delay = clike.Atoi( *p ); 			
 		if refresh_delay < 15 {
-			osif_sheep.Baa( 1, "WRN osif:resresh was too small (%ds), setting to 30s", refresh_delay )
+			osif_sheep.Baa( 1, "resresh was too small (%ds), setting to 30s", refresh_delay )
 			refresh_delay = 30
 		}
 	} 

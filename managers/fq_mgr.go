@@ -105,43 +105,50 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 
 /*
-	Builds a set of json to send to the agent. 
-	TODO: split the work across the agents giving each a subset of the hosts.
+	Builds one setqueue json request per host and sends it to the agent. If there are 
+	multiple agents attached, the individual messages will be fanned out across the 
+	available agents, otherwise the agent will just process them sequentially which
+	would be the case if we put all hosts into the same message.
 */
 func adjust_queues_agent( qlist []string, hlist *string ) {
 	var (
-		qjson	string
+		qjson	string			// final full json blob
+		qjson_pfx	string		// static prefix
 		sep = ""
 	)
 
-	qjson = `{ "ctype": "action_list", "actions": [ { "atype": "setqueues", "qdata": [ `
 	fq_sheep.Baa( 1, "adjusting queues:  sending %d queue setting items to agents",  len( qlist ) );
+
+	qjson_pfx = `{ "ctype": "action_list", "actions": [ { "atype": "setqueues", "qdata": [ `
 
 	for i := range qlist {
 		fq_sheep.Baa( 2, "queue info: %s", qlist[i] )
-		qjson += fmt.Sprintf( "%s%q", sep, qlist[i] )
+		qjson_pfx+= fmt.Sprintf( "%s%q", sep, qlist[i] )
 		sep = ", "
 	}
 
-	qjson += ` ], "hosts": [ `
+	qjson_pfx+= ` ], "hosts": [ `
 
 	hosts := strings.Split( *hlist, " " )
 	sep = ""
-	for i := range hosts {
+	for i := range hosts {			// build one request per host and send to agents -- multiple ageents then these will fan out
+		qjson = qjson_pfx			// seed the next request with the constant prefix
 		qjson += fmt.Sprintf( "%s%q", sep, hosts[i] )
-		sep = ", "
+
+		qjson += ` ] } ] }`
+	
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send this as a short request to one agent
 	}
-
-	qjson += ` ] } ] }`
-
-	tmsg := ipc.Mk_chmsg( )
-	tmsg.Send_req( am_ch, nil, REQ_SENDALL, qjson, nil )		// push json to all agents
 }
 
 /*
 	Send a flow-mod request to the agent. If send_all is false, then only ingress/egress
 	flow-mods are set; those indicateing queue 1 are silently skipped. This is controlled
 	by the queue_type setting in the config file. 
+
+	act_type is either "add" or "del" as this can be used to delete flow-mods when a 
+	reservation is canceled. 
 
 	destip is the IP address of the destination if different than either ip1 or ip2. 
 	This is used in the case of a split path where there are gateways between and 
@@ -154,7 +161,7 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 
 	DSCP values are assumed to NOT have been shifted!
 */
-func send_fmod_agent( ip1 string, ip2 string, extip string, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
+func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
 	var (
 		host	string
 	)
@@ -177,16 +184,16 @@ func send_fmod_agent( ip1 string, ip2 string, extip string, expiry int64, qnum i
 
 			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp, *m1, *m2 ) // MUST always match a dscp value to prevent loops on resubmit
 			if extip != "" {
-				qjson += fmt.Sprintf( `%s `,  extip )	
+				qjson += fmt.Sprintf( `%s `,  extip )		// external IP is assumed to be prefixed with the correct -S or -D flag
 			}
 
-			qjson += fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  add 0xdead %s"`, qnum, wdscp << 2, sw )			// set queue and dscp value, then resub table 0 to match openstack fmod
+			qjson += fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  %s 0xdead %s"`, qnum, wdscp << 2, act_type, sw )			// set queue and dscp value, then resub table 0 to match openstack fmod
 
 			qjson += ` ] } ] }`
 
 			tmsg := ipc.Mk_chmsg( )
 fq_sheep.Baa( 2, ">>>> %s", qjson )
-			tmsg.Send_req( am_ch, nil, REQ_SENDONE, qjson, nil )		// push json to all agents
+			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
 		}
 	}
 }
@@ -355,24 +362,20 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 					if data[FQ_DIR_IN].(bool)  {			// inbound to this switch we need to revert from our settings to the 'origianal' settings
 						udscp := math.Abs( float64( data[FQ_DSCP].(int) ) )
-						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, int( udscp ), send_all )
-						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 40, 32, send_all )
-						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 41, 46, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, int( udscp ), send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 40, 32, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 41, 46, send_all )
 					} else {								// outbound from this switch we need to translate dscp values to our values
 						udscp := 0							// if DSCP is > 0 it's an 'exit' value that we leave set and translate 0 to dscp; if < 0 we assume we must match the abs() value
 						if data[FQ_DSCP].(int) < 0 {
 							udscp = -data[FQ_DSCP].(int)
 						}
-						//send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, data[FQ_DSCP].(int), dscp, send_all )
-						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, udscp, dscp, send_all )
-						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 32, 40, send_all )
-						send_fmod_agent( data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 46, 41, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, udscp, dscp, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 32, 40, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 46, 41, send_all )
 					}
 					msg.Response_ch = nil
 				}
-
-
-//TODO: need to write rules that off the bit or revert it bock to 32/46
 
 			case REQ_RESERVE:								// send a reservation to skoogi
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, queue h1/2 must be IP addresses
@@ -403,6 +406,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string" )
 					}
 				} else {
+					fq_sheep.Baa( 2, "requesting lists from osif" )
 					req_hosts( my_chan )					// send requests to osif for data
 					req_ip2mac( my_chan )
 				}

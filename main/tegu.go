@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"forge.research.att.com/gopkgs/bleater"
 	"forge.research.att.com/gopkgs/ipc"
@@ -57,7 +58,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/15184"
+		version		string = "v3.0/15224a"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -122,6 +123,7 @@ func main() {
 	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
 	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph
 	go managers.Agent_mgr( am_ch )
+	go managers.Fq_mgr( fq_ch, fl_host ); 
 
 	//TODO:  chicken and egg -- we need to block until network has a good graph, but we need the network reading from it's channel
 	//       first so that if we are in Tegu-lite mode (openstack providing the graph) it can send the data to network manager 
@@ -130,9 +132,20 @@ func main() {
 		my_chan := make( chan *ipc.Chmsg )
 		req := ipc.Mk_chmsg( )
 	
-		req.Send_req( nw_ch, my_chan, managers.REQ_NOOP, nil, nil )		// 'ping' network manager; it will respond after initial build
-		req = <- my_chan												// block until we have a response back
+		for {
+			req.Response_data = 0
+			req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
+			req = <- my_chan												// block until we have a response back
 
+			if req.Response_data.(int) == 2 {								// wait until we have everything in the network
+				break
+			}
+
+			sheep.Baa( 1, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
+			time.Sleep( 5 * time.Second )
+		}
+
+		sheep.Baa( 1, "network initialised, sending chkpt load request" )
 		req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, chkpt_file, nil )
 		req = <- my_chan												// block until the file is loaded
 
@@ -142,7 +155,6 @@ func main() {
 		}
 	}
 
-	go managers.Fq_mgr( fq_ch, fl_host ); 
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// finally, turn on the HTTP interface after _everything_ else is running.
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)

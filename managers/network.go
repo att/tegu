@@ -598,7 +598,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 	if h1nm == nil || h2nm == nil {			// this has never happened, but be parinoid
 		pcount = 0
 		path_list = nil
-		net_sheep.Baa( 0, "find-path: internal error: either 1hnm or h2nm was nil after get mac" )
+		net_sheep.Baa( 0, "CRI: find-path: internal error: either 1hnm or h2nm was nil after get mac" )
 		return
 	}
 
@@ -607,7 +607,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 
 	for {									// we'll break after we've looked at all of the connection points for h1 
 		if plidx >= len( path_list ) {
-			net_sheep.Baa( 0,  "find-path: internal error -- unable to find a path between hosts, loops in the graph? Edges exceeded number of total links." )
+			net_sheep.Baa( 0,  "CRI: find-path: internal error -- unable to find a path between hosts, loops in the graph? Edges exceeded number of total links." )
 			return
 		}
 
@@ -616,7 +616,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 		if ssw == nil {
 			pcount = plidx
 			if pcount <= 0 || swidx == 0 {
-				net_sheep.Baa( 1, "find-path: earl exit? no switch port returned for h1 (%s) at index %d", *h1nm, swidx )
+				net_sheep.Baa( 1, "find-path: early exit? no switch port returned for h1 (%s) at index %d", *h1nm, swidx )
 			}
 			path_list = path_list[0:pcount]					// slice it down to size
 			return
@@ -810,7 +810,7 @@ func (n *Network) host_list( ) ( jstr string ) {
 			}
 		}
 	} else {
-		net_sheep.Baa( 0, "host_list: n is nil (%v) or n.hosts is nil", n == nil )
+		net_sheep.Baa( 0, "ERR: host_list: n is nil (%v) or n.hosts is nil", n == nil )
 	}
 
 	jstr += ` ]`			// end of hosts array
@@ -918,6 +918,24 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 				switch req.Msg_type {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
+					case REQ_STATE:
+							state := 0
+							if act_net.vm2ip != nil  && act_net.ip2vm != nil { 		// non q-lite oriented things 
+								state = 1
+							}
+							if act_net.vmid2ip != nil  && 						
+									act_net.ip2vmid != nil  && 
+									act_net.vmid2phost	 != nil  && 
+									act_net.ip2mac != nil  && 
+									act_net.mac2phost != nil  && 
+									act_net.gwmap != nil  && 
+									act_net.fip2ip != nil  && 
+									act_net.ip2fip != nil  {
+								state = 2
+							}
+net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != nil  , act_net.ip2vmid != nil  , act_net.vmid2phost	 != nil  , act_net.ip2mac != nil  , act_net.mac2phost != nil  , act_net.gwmap != nil  , act_net.fip2ip != nil, state  )
+							req.Response_data = state
+
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )
@@ -992,7 +1010,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							act_net.ip2vm = act_net.build_ip2vm( )
 							net_sheep.Baa( 2, "vm2ip and ip2vm maps were updated, has %d entries", len( act_net.vm2ip ) )
 						} else {
-							net_sheep.Baa( 0, "vm2ip map was nil; not changed" )
+							net_sheep.Baa( 1, "vm2ip map was nil; not changed" )
 						}
 
 
@@ -1000,49 +1018,49 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						if req.Req_data != nil {
 							act_net.vmid2ip = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "vmid2ip map was nil; not changed" )
+							net_sheep.Baa( 1, "vmid2ip map was nil; not changed" )
 						}
 
 					case REQ_IP2VMID:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2vmid = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "ip2vmid map was nil; not changed" )
+							net_sheep.Baa( 1, "ip2vmid map was nil; not changed" )
 						}
 
 					case REQ_VMID2PHOST:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.vmid2phost = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "vmid2phost map was nil; not changed" )
+							net_sheep.Baa( 1, "vmid2phost map was nil; not changed" )
 						}
 
 					case REQ_IP2MAC:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2mac = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "ip2mac map was nil; not changed" )
+							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
 						}
 
 					case REQ_GWMAP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.gwmap = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "ip2mac map was nil; not changed" )
+							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
 						}
 
 					case REQ_IP2FIP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2fip = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "ip2fip map was nil; not changed" )
+							net_sheep.Baa( 1, "ip2fip map was nil; not changed" )
 						}
 
 					case REQ_FIP2IP:
 						if req.Req_data != nil {
 							act_net.fip2ip = req.Req_data.( map[string]*string )
 						} else {
-							net_sheep.Baa( 0, "fip2ip map was nil; not changed" )
+							net_sheep.Baa( 1, "fip2ip map was nil; not changed" )
 						}
 
 

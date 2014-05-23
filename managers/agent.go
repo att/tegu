@@ -61,7 +61,9 @@ type agent struct {
 }
 
 type agent_data struct {
-	agents	map[string]*agent					// hash for direct index
+	agents	map[string]*agent					// hash for direct index (based on ID string given to the session) 
+	agent_list []*agent							// sequential index into map that allows easier round robin access for sendone
+	aidx	int									// next spot in index for round robin sends 
 }
 
 /*
@@ -75,6 +77,22 @@ type agent_msg struct {
 	Vinfo	string			// agent verion (dbugging mostly)
 }
 
+/*
+	Build the agent list from the map. The agent list is a 'sequential' list of all currently 
+	connected agents which affords us an easy means to roundrobin through them. 
+*/
+func (ad *agent_data) build_list( ) {
+	ad.agent_list = make( []*agent, len( ad.agents ) )
+	i := 0
+	for _, a := range ad.agents {
+		ad.agent_list[i] = a
+		i++
+	}
+
+	if ad.aidx >= i {			// wrap if list shrank and we point beyond it
+		ad.aidx = 0
+	}
+}
 
 /*
 	Build an agent and add to our list of agents.
@@ -86,34 +104,85 @@ func (ad *agent_data) Mk_agent( aid string ) ( na *agent ) {
 	na.jcache = jsontools.Mk_jsoncache()
 
 	ad.agents[na.id] = na
+	ad.build_list( )
 
 	return
 }
 
 /*
-	Send the message to one agents.
-	TODO: randomise this a bit. 
+	Send the message to one agent. The agent is selected using the current 
+	index in the agent_data so that it effectively does a round robin.
 */
 func (ad *agent_data) send2one( smgr *connman.Cmgr,  msg string ) {
-	for id := range ad.agents {
-		smgr.Write( id, []byte( msg ) )
+	l := len( ad.agents ) 
+	if l <= 0 {
 		return
+	}
+
+	smgr.Write( ad.agent_list[ad.aidx].id, []byte( msg ) )
+	ad.aidx++
+	if ad.aidx >= l {
+		if l > 1 {
+			ad.aidx = 1		// skip the long running agent if more than one agent connected
+		} else {
+			ad.aidx = 0
+		}
 	}
 }
 
 /*
-	Send the bytes to one agent.
+	Send the message to one agent. The agent is selected using the current 
+	index in the agent_data so that it effectively does a round robin.
 */
 func (ad *agent_data) sendbytes2one( smgr *connman.Cmgr,  msg []byte ) {
-	for id := range ad.agents {
-		smgr.Write( id,  msg )
+	l := len( ad.agents ) 
+	if l <= 0 {
 		return
 	}
+	
+	smgr.Write( ad.agent_list[ad.aidx].id,  msg )
+	ad.aidx++
+	if ad.aidx >= l {
+		if l > 1 {
+			ad.aidx = 1		// skip the long running agent if more than one agent connected
+		} else {
+			ad.aidx = 0
+		}
+	}
+}
+/*
+	Send the message to the designated 'long running' agent (lra); the
+	agent that has been designated to handle all long running tasks
+	that are not time sensitive (such as intermediate queue setup/checking).
+	
+*/
+func (ad *agent_data) sendbytes2lra( smgr *connman.Cmgr,  msg []byte ) {
+	l := len( ad.agents ) 
+	if l <= 0 {
+		return
+	}
+	
+	smgr.Write( ad.agent_list[0].id,  msg )
+}
+
+/*
+	Send the message to the designated 'long running' agent (lra); the
+	agent that has been designated to handle all long running tasks
+	that are not time sensitive (such as intermediate queue setup/checking).
+	
+*/
+
+func (ad *agent_data) send2lra( smgr *connman.Cmgr,  msg string ) {
+	l := len( ad.agents ) 
+	if l <= 0 {
+		return
+	}
+	
+	smgr.Write( ad.agent_list[0].id,  []byte( msg ) )
 }
 
 /*
 	Send the message to all agents.
-	TODO: split the hosts list and give each agent a subset of the list
 */
 func (ad *agent_data) send2all( smgr *connman.Cmgr,  msg string ) {
 	am_sheep.Baa( 2, "sending %d bytes", len( msg ) )
@@ -178,6 +247,7 @@ func ( a *agent ) process_input( buf []byte ) {
 */
 func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 	if hlist == nil || *hlist == "" {
+		am_sheep.Baa( 2, "no host list, cannot request mac2phost" )
 		return
 	}
 	
@@ -201,9 +271,9 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 
 	if err == nil {
 		am_sheep.Baa( 3, "sending mac2phost request: %s", jmsg )
-		ad.sendbytes2one( smgr, jmsg )
+		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
-		am_sheep.Baa( 1, "WRN: unable to bundle map2phost request into json: %s", err )
+		am_sheep.Baa( 1, "WRN: unable to bundle mac2phost request into json: %s", err )
 		am_sheep.Baa( 2, "offending json: %s", jmsg )
 	}
 }
@@ -225,12 +295,13 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 	jmsg, err := json.Marshal( msg )			// bundle into a json string
 
 	if err == nil {
-		am_sheep.Baa( 1, "sending intermediate queue setup request: %s", string( jmsg ) )
-		ad.sendbytes2one( smgr, jmsg )
+		am_sheep.Baa( 1, "sending intermediate queue setup request: hosts=%s dscp=%s", *hlist, *dscp )
+		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
-		am_sheep.Baa( 1, "creating json intermedq command failed: %s", err )
+		am_sheep.Baa( 0, "WRN: creating json intermedq command failed: %s", err )
 	}
 }
+
 // ---------------- utility ------------------------------------------------------------------------
 
 /*
@@ -292,7 +363,6 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 
 														// enforce some sanity on config file settings
 	net_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
-net_sheep.Baa( 1, "dscp priority list for intermedate bridges: %s", dscp_list )
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
 	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping 
@@ -312,12 +382,17 @@ net_sheep.Baa( 1, "dscp priority list for intermedate bridges: %s", dscp_list )
 				switch req.Msg_type {
 					case REQ_NOOP:						// just ignore -- acts like a ping if there is a return channel
 
-					case REQ_SENDALL:
+					case REQ_SENDALL:					// send request to all agents
 						if req.Req_data != nil {
 							adata.send2all( smgr,  req.Req_data.( string ) )
 						}
 
-					case REQ_SENDONE:
+					case REQ_SENDLONG:					// send a long request to one agent
+						if req.Req_data != nil {
+							adata.send2one( smgr,  req.Req_data.( string ) )
+						}
+
+					case REQ_SENDSHORT:					// send a short request to one agent (round robin)
 						if req.Req_data != nil {
 							adata.send2one( smgr,  req.Req_data.( string ) )
 						}
@@ -365,6 +440,7 @@ net_sheep.Baa( 1, "dscp priority list for intermedate bridges: %s", dscp_list )
 						} else {
 							am_sheep.Baa( 1, "did not find an agent with the id: %s", sreq.Id )
 						}
+						adata.build_list()			// rebuild the list to drop the agent
 						
 					case connman.ST_DATA:
 						if _, not_nil := adata.agents[sreq.Id]; not_nil {
