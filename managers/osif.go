@@ -224,9 +224,13 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 	} 
 
-	if cfg_data["osif"] == nil {
+	if cfg_data["osif"] == nil {							// ensure it exists -- elim big if
 		cfg_data["osif"] = make( map[string]*string, 1 )
 	}
+
+	def_passwd := cfg_data["osif"]["passwd"]				// defaults applied if non-section given in list, or info omitted from the section
+	def_usr := cfg_data["osif"]["usr"]
+	def_url := cfg_data["osif"]["url"]
 
 	if p := cfg_data["osif"]["refresh"]; p != nil {
 		refresh_delay = clike.Atoi( *p ); 			
@@ -257,7 +261,27 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_refs = make( []*ostack.Ostack, len( os_sects ) )
 		for i := 0; i < len( os_sects ); i++ {
 			osif_sheep.Baa( 1, "creating openstack interface for %s", os_sects[i] )
-			os_refs[i] = ostack.Mk_ostack( cfg_data[os_sects[i]]["url"], cfg_data[os_sects[i]]["usr"], cfg_data[os_sects[i]]["passwd"], cfg_data[os_sects[i]]["project"] )
+			url := def_url
+			usr := def_usr
+			passwd := def_passwd
+			project := &os_sects[i]
+
+			if cfg_data[os_sects[i]] != nil {						// section name supplied, override defaults with information from the section
+				if cfg_data[os_sects[i]]["url"] != nil {
+					url = cfg_data[os_sects[i]]["url"]
+				}
+				if cfg_data[os_sects[i]]["usr"] != nil {
+					usr = cfg_data[os_sects[i]]["usr"]
+				} 
+				if cfg_data[os_sects[i]]["passwd"] != nil {
+					passwd = cfg_data[os_sects[i]]["passwd"]
+				} 
+				if cfg_data[os_sects[i]]["project"] != nil {
+					project = cfg_data[os_sects[i]]["project"]
+				} 
+			} 
+			//os_refs[i] = ostack.Mk_ostack( cfg_data[os_sects[i]]["url"], cfg_data[os_sects[i]]["usr"], cfg_data[os_sects[i]]["passwd"], cfg_data[os_sects[i]]["project"] )
+			os_refs[i] = ostack.Mk_ostack( url, usr, passwd, project )
 		}
 	}
 	// ---------------- end config parsing ----------------------------------------
