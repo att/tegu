@@ -26,6 +26,7 @@
 				03 Apr 2014 - Support for endpoints on the path.
 				05 May 2014 - Added support for merging gateways into the host list when not using floodlight.
 				18 May 2014 - Changes to allow cross tenant reservations.
+				30 May 2014 - Corrected typo in error message
 */
 
 package managers
@@ -598,7 +599,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 	if h1nm == nil || h2nm == nil {			// this has never happened, but be parinoid
 		pcount = 0
 		path_list = nil
-		net_sheep.Baa( 0, "CRI: find-path: internal error: either 1hnm or h2nm was nil after get mac" )
+		net_sheep.Baa( 0, "CRI: find-path: internal error: either h1nm or h2nm was nil after get mac" )
 		return
 	}
 
