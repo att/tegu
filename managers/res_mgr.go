@@ -373,6 +373,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 
 /*
 	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.  
+	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
+	seconds).
 */
 func (i *Inventory) write_chkpt( ) {
 
@@ -382,10 +384,15 @@ func (i *Inventory) write_chkpt( ) {
 		return
 	}
 
-	for key := range i.cache {
-		s := i.cache[key].To_chkpt();		
+	for key, p := range i.cache {
+		s := p.To_chkpt();		
 		if s != "expired" {
 			fmt.Fprintf( i.chkpt, "%s\n", s ); 		// we'll check the overall error state on close
+		} else {
+			if p.Is_extinct( 120 ) {
+				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
+				delete( i.cache, key )
+			}
 		}
 	} 
 
@@ -499,8 +506,8 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 		return
 	}
 
-	if p.Is_valid_cookie( cookie ) { // &&  *cookie != *super_cookie {
-		rm_sheep.Baa( 2, "resgmgr: denied fetch of reservation: %s pledge-cookie != %s", *name, *cookie )
+	if ! p.Is_valid_cookie( cookie ) &&  *cookie != *super_cookie {
+		rm_sheep.Baa( 2, "resgmgr: denied fetch of reservation: cookie supplied (%s) didn't match that on pledge %s", *cookie, *name )
 		p = nil
 		state = fmt.Errorf( "not authorised to access or delete reservation: %s", *name )
 		return
@@ -513,6 +520,9 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 /*
 	Looks for the named reservation and deletes it if found. The cookie must be either the 
 	supper cookie, or the cookie that the user supplied when the reservation was created.
+	Deletion is affected by reetting the expiry time on the pledge to now + a few seconds. 
+	This will cause a new set of flow-mods to be sent out with an expiry time that will
+	take them out post haste and without the need to send "delete" flow-mods out. 
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 	var (
@@ -524,7 +534,8 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", p.To_str() )
 		state = nil
 		//inv.cache[*name] = nil							// this may be unneeded since we
-		delete( inv.cache, *name )
+		//delete( inv.cache, *name )
+		p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
 	} else {
 		rm_sheep.Baa( 2, "resgmgr: unable to  delete reservation: %s", *name )
 	}
@@ -611,9 +622,9 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )
 
 	last_qcheck = time.Now().Unix()
-	tklr.Add_spot( 15, my_chan, REQ_PUSH, nil, ipc.FOREVER )		// push reservations to skoogi just before they go live
-	tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
+	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )		// push reservations to skoogi just before they go live
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
+	tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for ;; {

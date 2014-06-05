@@ -170,7 +170,7 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, exp
 		m1 := ip2mac[ip1]						// set with mac addresses
 		m2 := ip2mac[ip2]
 		timeout := expiry - time.Now().Unix()	// figure the timeout and skip if too small
-		if timeout > 15 {
+		if timeout > 10 {
 			if port <= 0 {						// we'll assume that the switch is actually the phy host and br-int is what needs to be set
 				host = sw
 				sw = "br-int"

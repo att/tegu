@@ -23,7 +23,7 @@ import (
 	//"io/ioutil"
 	//"html"
 	//"net/http"
-	//"os"
+	"os"
 	//"strings"
 	"time"
 
@@ -168,6 +168,13 @@ func (p *Pledge) Set_path_list( pl []*Path ) {
 	p.path_list = pl
 }
 
+/*
+	Sets a new expiry value on the pledge.
+*/
+func (p *Pledge) Set_expiry ( v int64 ) {
+	p.expiry = v 
+	p.pushed = false		// force it to be resent to ajust times
+}
 
 /*
 	return a nice string from the data.
@@ -338,6 +345,7 @@ func (p *Pledge) Is_active_soon( window int64 ) ( bool ) {
 	pledge.
 */
 func (p *Pledge) Is_valid_cookie( c *string ) ( bool ) {
+fmt.Fprintf( os.Stderr, "__>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
 	return *c == *p.usrkey 
 }
 
@@ -351,6 +359,20 @@ func (p *Pledge) Concluded_recently( window int64 ) ( bool ) {
 
 	now := time.Now().Unix()
 	return (p.expiry < now)  && (p.expiry >= now - window)
+}
+
+/*
+	Returns true if pledge expired long enough ago that it can safely be discarded.
+	The window is the number of seconds that the pledge must have been expired to 
+	be considered extinct. 
+*/
+func (p *Pledge) Is_extinct( window int64 ) ( bool ) {
+	if p == nil {
+		return false
+	}
+
+	now := time.Now().Unix()
+	return p.expiry <= now - window
 }
 
 /*
