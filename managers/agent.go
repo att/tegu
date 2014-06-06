@@ -14,6 +14,7 @@
 					and the function needed to process the output from a map_mac2phost request.
 					Added ability to send the map_mac2phost request to the agent. 
 				13 May 2014 : Added support for exit-dscp value.
+				05 Jun 2014 : Fixed stray reference to net_sheep. 
 */
 
 package managers
@@ -362,7 +363,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	dscp_list = shift_values( dscp_list )				// must shift values before giving to agent
 
 														// enforce some sanity on config file settings
-	net_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
+	am_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
 	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping 
