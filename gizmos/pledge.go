@@ -11,6 +11,7 @@
 				11 Feb 2014 - Added better doc to some functions and we now save the queue id in 
 							the checkpoint file.
 				13 May 2014 - Added support to enable an exit dscp value on a reservation. 
+				05 Jun 2014 - Added support for pause.
 */
 
 package gizmos
@@ -43,6 +44,7 @@ type Pledge struct {
 	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
 	path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
 	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
+	paused		bool		// set if reservation has been paused
 }
 
 /*
@@ -176,6 +178,32 @@ func (p *Pledge) Set_expiry ( v int64 ) {
 	p.pushed = false		// force it to be resent to ajust times
 }
 
+// There is NOT a toggle pause on purpose; don't add one :)
+
+/*
+	Puts the pledge into paused state and optionally resets the pushed flag.
+*/
+func (p *Pledge) Pause( reset bool ) {
+	if p != nil {
+		p.paused = true
+		if reset {
+			p.pushed = false;
+		}
+	}
+}
+
+/*
+	Puts the pledge into an unpaused (normal) state and optionally resets the pushed flag.
+*/
+func (p *Pledge) Resume( reset bool ) {
+	if p != nil {
+		p.paused = false
+		if reset {
+			p.pushed = false;
+		}
+	}
+}
+
 /*
 	return a nice string from the data.
 	NEVER put the usrkey into the string!
@@ -291,6 +319,17 @@ func (p *Pledge) Is_pushed( ) (bool) {
 	}
 
 	return p.pushed
+}
+
+/*
+	Returns true if the reservation is paused.
+*/
+func (p *Pledge) Is_paused( ) ( bool ) {
+	if p == nil {
+		return false
+	}
+
+	return p.paused
 }
 
 /*

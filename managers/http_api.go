@@ -84,7 +84,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 func parse_post( out http.ResponseWriter, recs []string ) (state string, msg string) {
 	var (
 		err			error
-		res			*gizmos.Pledge
+		res			*gizmos.Pledge			// reservation that we're working on
 		res_name	string = "undefined"
 		tokens		[]string
 		ntokens		int
@@ -123,10 +123,6 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 		reason = ""
 		http_sheep.Baa( 3, "processing request: %s", tokens[0] )
 		switch tokens[0] {
-
-			case "ping":
-				jreason = fmt.Sprintf( "\"pong: %s\"", version )
-				state = "OK"
 
 			case "chkpt":
 				req = ipc.Mk_chmsg( )
@@ -195,6 +191,45 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 						nerrors++
 					}
 				}
+
+			case "pause":
+				if res_paused {							// already in a paused state, just say so and go on
+					jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
+					state = "WARN"
+				} else {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( rmgr_ch, my_ch, REQ_PAUSE, nil, nil )
+					req = <- my_ch
+					if req.State == nil {
+						http_sheep.Baa( 1, "reservations are now paused" )	
+						state = "OK"
+						jreason = string( req.Response_data.( string ) )
+						res_paused = true
+					} else {
+						state = "ERROR"
+						jreason = ""
+						reason = fmt.Sprintf( "s", req.State )
+					}
+				}
+
+			case "ping":
+				jreason = fmt.Sprintf( "\"pong: %s\"", version )
+				state = "OK"
+
+			case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
+				req = ipc.Mk_chmsg( )
+				req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
+				req = <- my_ch															// get response from the network thread
+				state = "OK"
+				m :=  req.Response_data.( []string )
+				jreason = `{ "queues": [ `
+				sep := ""						// local scope not to trash the global var
+				for i := range m {
+					jreason += fmt.Sprintf( "%s%q", sep, m[i] )
+					sep = "," 
+				}
+				jreason += " ] }"
+				reason = "active queues"
 				
 			case "reserve":
 					tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
@@ -264,6 +299,11 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 								jreason = ""
 							}
 
+							if res_paused {
+								rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
+								res.Pause( false )				// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+								res.Set_pushed( )
+							}
 						} else {
 							reason = fmt.Sprintf( "reservation rejected: %s", req.State )
 							nerrors++
@@ -272,21 +312,26 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 						reason = fmt.Sprintf( "reservation rejected: %s", err )
 						nerrors++
 					}
-					
-			case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
-				req = ipc.Mk_chmsg( )
-				req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
-				req = <- my_ch															// get response from the network thread
-				state = "OK"
-				m :=  req.Response_data.( []string )
-				jreason = `{ "queues": [ `
-				sep := ""						// local scope not to trash the global var
-				for i := range m {
-					jreason += fmt.Sprintf( "%s%q", sep, m[i] )
-					sep = "," 
+
+			case "resume":
+				if ! res_paused {							// not in a paused state, just say so and go on
+					jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
+					state = "WARN"
+				} else {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( rmgr_ch, my_ch, REQ_RESUME, nil, nil )
+					req = <- my_ch
+					if req.State == nil {
+						http_sheep.Baa( 1, "reservations are now resumed" )	
+						state = "OK"
+						jreason = string( req.Response_data.( string ) )
+						res_paused = false
+					} else {
+						state = "ERROR"
+						jreason = ""
+						reason = fmt.Sprintf( "s", req.State )
+					}
 				}
-				jreason += " ] }"
-				reason = "active queues"
 
 			case "verbose":									// verbose n [child-bleater]
 				if ntokens > 1 {
@@ -380,7 +425,7 @@ func parse_put( out http.ResponseWriter, recs []string ) (state string, msg stri
 	Supported delete actions:
 		reservation <name> [<cookie>]
 */
-func parse_delete( out http.ResponseWriter, recs []string ) (state string, msg string) {
+func parse_delete( out http.ResponseWriter, recs []string ) ( state string, msg string ) {
 	var (
 		sep			string = ""							// json output list separator
 		req_count	int = 0								// requests processed this batch
@@ -428,35 +473,25 @@ func parse_delete( out http.ResponseWriter, recs []string ) (state string, msg s
 					}
 
 					req = ipc.Mk_chmsg( )
-					//req.Send_req( rmgr_ch, my_ch, REQ_GET, del_data, nil )		// must get the reservation to del from network
-					//req = <- my_ch											// wait for response
+					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view
+					req = <- my_ch										// wait for delete response 
 
-					//if req.State == nil {									// no error, response data contains the pledge
-					//	res = req.Response_data.( *gizmos.Pledge )
-						req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view
-						req = <- my_ch										// wait for delete response 
+					if req.State == nil {								// no error deleting in res mgr
+						req.Send_req( nw_ch, my_ch, REQ_DEL, res, nil )		// delete from the network point of view
+						req = <- my_ch									// wait for response from network
 
-						if req.State == nil {								// no error deleting in res mgr
-							req.Send_req( nw_ch, my_ch, REQ_DEL, res, nil )		// delete from the network point of view
-							req = <- my_ch									// wait for response from network
-
-							if req.State == nil {
-								comment = "reservation successfully deleted"
-								state = "OK"
-							} else {
-								nerrors++
-								comment = fmt.Sprintf( "reservation delete failed: %s", state )
-							}
-
+						if req.State == nil {
+							comment = "reservation successfully deleted"
+							state = "OK"
 						} else {
 							nerrors++
 							comment = fmt.Sprintf( "reservation delete failed: %s", state )
 						}
 
-					//} else {					// get fails if cookie is wrong, or if it doesn't exist
-						//nerrors++
-						//comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
-					//}
+					} else {
+						nerrors++
+						comment = fmt.Sprintf( "reservation delete failed: %s", state )
+					}
 				}
 
 			default:

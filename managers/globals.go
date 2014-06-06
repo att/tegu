@@ -69,6 +69,8 @@ const (
 	REQ_IP2FIP					// request contains a translation of tenant/ip to floating ip
 	REQ_FIP2IP					// request contains a translation of floating ip to tenant/ip
 	REQ_STATE					// generate some kind of state data back to message sender
+	REQ_PAUSE					// put things into a paused mode
+	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
 )
 
 const (
@@ -116,6 +118,7 @@ var (
 
 	pid int = 0							// process id for use in generating reservation names uniqueue across invocations
 	res_nmseed	int = 0					// reservation name sequential value
+	res_paused	bool = false			// set to true if reservations are paused
 
 	super_cookie	*string; 			// the 'admin cookie' that the super user can use to manipulate a reservation
 
@@ -126,6 +129,7 @@ var (
 	osif_sheep	*bleater.Bleater
 	rm_sheep	*bleater.Bleater
 	http_sheep	*bleater.Bleater
+	qm_sheep	*bleater.Bleater
 )
 
 /*

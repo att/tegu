@@ -263,7 +263,11 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 					}
 					push_count++
 
-					fq_data[FQ_EXPIRY] = expiry					// set data constant to all requests for the path list
+					if p.Is_paused( ) {
+						fq_data[FQ_EXPIRY] = time.Now().Unix( ) +  15	// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
+					} else {
+						fq_data[FQ_EXPIRY] = expiry						// set data constant to all requests for the path list
+					}
 					fq_data[FQ_ID] = rname
 					timestamp := time.Now().Unix() + 16			// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
@@ -275,14 +279,15 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						} else {
 							fq_data[FQ_EXTIP] = ""
 						}
-						fq_data[FQ_EXTTY] = "-D"					// external reference is the destination for forward component
+						fq_data[FQ_EXTTY] = "-D"										// external reference is the destination for forward component
 
 						epip, _ := plist[i].Get_h1().Get_addresses()					// forward first, from h1 -> h2 (must use info from path as it might be split)
 						fq_data[FQ_IP1] = *epip
 						epip, _ = plist[i].Get_h2().Get_addresses()
 						fq_data[FQ_IP2] = *epip
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s h1=%s --> h2=%s ip1/2= %s/%s exp=%d", i, rname, *h1, *h2, fq_data[FQ_IP1], fq_data[FQ_IP2], expiry )
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s h1=%s --> h2=%s ip1/2= %s/%s exp=%d", 
+							i, rname, *h1, *h2, fq_data[FQ_IP1], fq_data[FQ_IP2], expiry )
 
 						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
@@ -325,7 +330,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						epip, _ = plist[i].Get_h2().Get_addresses()
 						fq_data[FQ_IP1] = *epip
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s %s %s exp=%d", i, rev_rname, *h1, *h2, fq_data[FQ_IP1], fq_data[FQ_IP2], fq_data[FQ_EXTTY], fq_data[FQ_EXTIP], expiry )
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s %s %s exp=%d", 
+							i, rev_rname, *h1, *h2, fq_data[FQ_IP1], fq_data[FQ_IP2], fq_data[FQ_EXTTY], fq_data[FQ_EXTIP], expiry )
 
 						if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
 							fq_data[FQ_DIR_IN] = true
@@ -372,6 +378,24 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 }
 
 /*
+	Turn pause mode on for all current reservations and reset their push flag so thta they all get pushed again.
+*/
+func (i *Inventory) pause_on( ) {
+	for _, p := range i.cache {
+		p.Pause( true )					// also reset the push flag		
+	}
+}
+
+/*
+	Turn pause mode off for all current reservations and reset their push flag so thta they all get pushed again.
+*/
+func (i *Inventory) pause_off( ) {
+	for _, p := range i.cache {
+		p.Resume( true )					// also reset the push flag		
+	}
+}
+
+/*
 	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.  
 	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
 	seconds).
@@ -387,9 +411,9 @@ func (i *Inventory) write_chkpt( ) {
 	for key, p := range i.cache {
 		s := p.To_chkpt();		
 		if s != "expired" {
-			fmt.Fprintf( i.chkpt, "%s\n", s ); 		// we'll check the overall error state on close
+			fmt.Fprintf( i.chkpt, "%s\n", s ); 					// we'll check the overall error state on close
 		} else {
-			if p.Is_extinct( 120 ) {
+			if p.Is_extinct( 120 ) && p.Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
 				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
 				delete( i.cache, key )
 			}
@@ -663,6 +687,17 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				msg.Response_data = nil
 				rm_sheep.Baa( 1, "checkpoint file loaded" )
 	
+			case REQ_PAUSE:
+				msg.State = nil							// right now this cannot fail in ways we know about 
+				msg.Response_data = ""
+				inv.pause_on()
+				rm_sheep.Baa( 1, "pausing..." );
+
+			case REQ_RESUME:
+				msg.State = nil							// right now this cannot fail in ways we know about 
+				msg.Response_data = ""
+				inv.pause_off()
+
 			case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
 				now := time.Now().Unix()
 				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
