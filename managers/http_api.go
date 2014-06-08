@@ -18,6 +18,7 @@
 	Mods:		05 May 2014 : Added agent manager to the verbose change list.
 				13 May 2014 : Added support for exit-dscp value in reservation.
 				22 May 2014 : Now forces a checkpoint after a successful reservation.
+				06 Jun 2014 : Added support to listen on https rather than http
 */
 
 package managers
@@ -38,6 +39,8 @@ import (
 	"forge.research.att.com/gopkgs/clike"
 	"forge.research.att.com/gopkgs/token"
 	"forge.research.att.com/gopkgs/ipc"
+	"forge.research.att.com/gopkgs/security"
+
 	"forge.research.att.com/tegu/gizmos"
 )
 
@@ -592,18 +595,59 @@ func deal_with( out http.ResponseWriter, in *http.Request ) {
 	start an http listener. we expect channels and the port to be in globals.
 */
 func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
+	var (
+		ssl_key	*string = nil
+		ssl_cert *string = nil
+		create_cert bool = false
+		err	error
+	)
 
 	http_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
 	http_sheep.Set_prefix( "http_api" )
 	tegu_sheep.Add_child( http_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
-	if p := cfg_data["httpmgr"]["verbose"]; p != nil {
-		http_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+	if cfg_data["httpmgr"] != nil {
+		if p := cfg_data["httpmgr"]["verbose"]; p != nil {
+			http_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+		}
+
+		p := cfg_data["httpmgr"]["cert"]
+		if p != nil {
+			ssl_cert = p
+		}
+		p = cfg_data["httpmgr"]["key"]
+		if p != nil {
+			ssl_key = p
+		}
+		p = cfg_data["httpmgr"]["create_cert"]
+		if p != nil  && *p == "true" {	
+			create_cert = true
+		}
 	}
-	http_sheep.Baa( 1, "http interface running" )
 
 	http.HandleFunc( "/tegu/api", deal_with )				// define callback 
-	err := http.ListenAndServe( ":" + *api_port, nil )		// drive the bus
+	if ssl_cert != nil && ssl_key != nil {
+		if  create_cert {
+			http_sheep.Baa( 1, "creating SSL certificate and key: %s %s", *ssl_cert, *ssl_key )
+			dns_list := make( []string, 3 )
+			dns_list[0] = "localhost"
+			this_host, _ := os.Hostname( )
+			tokens := strings.Split( this_host, "." )
+			dns_list[1] = this_host
+			dns_list[2] = tokens[0]	
+			cert_name := "tegu_cert"
+			err = security.Mk_cert( 1024, &cert_name, dns_list, ssl_cert, ssl_key )
+    		if err != nil {
+				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s", ssl_cert, ssl_key, err )
+			}
+		}
+
+		http_sheep.Baa( 1, "http interface running and listening for TLS connections on %s", *api_port )
+		err = http.ListenAndServeTLS( ":" + *api_port, *ssl_cert, *ssl_key,  nil )		// drive the bus
+	} else {
+		http_sheep.Baa( 1, "http interface running and listening for connections on %s", *api_port )
+		err = http.ListenAndServe( ":" + *api_port, nil )		// drive the bus
+	}
 	
 	http_sheep.Baa( 0, "http listener is done" )
 	if( err != nil ) {
