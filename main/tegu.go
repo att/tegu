@@ -30,6 +30,9 @@
 				16 May 2014 : Corrected bug with specifying the "exit" dscp value.
 				18 May 2014 : Now supports cross tenant reservations.
 				29 May 2014 : Now supports default openstack value propigation in config file.
+				05 Jun 2014 : Added pause/resume ability.
+				06 Jun 2014 : Added TLS/SSL support.
+				09 Jun 2014 : Added token authorisation support for reservations.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -59,7 +62,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/16054/a"
+		version		string = "v3.0/16094"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool

@@ -55,6 +55,39 @@ func mk_resname( ) ( string ) {
 	return fmt.Sprintf( "res%x_%05d", pid, r ); 
 }
 
+/*
+	Validate the h1 and h2 strings translating the project name to a tenant ID if present. 
+	The translated names are returned if _both_ are valid; error is set otherwise.
+*/
+func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error ) {
+	
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
+	
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host
+	req = <- my_ch													// hard wait for response
+
+	if req.State != nil {
+		err = fmt.Errorf( "h1 validation failed: %s", err )
+		return
+	}
+
+	h1x = *( req.Response_data.( *string ) )
+	
+	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
+	req = <- my_ch													// hard wait for response
+
+	if req.State != nil {
+		err = fmt.Errorf( "h2 validation failed: %s", err )
+		return
+	}
+
+	h2x = *( req.Response_data.( *string ) )
+
+	return
+}
 
 // ------------------------------------------------------------------------------------------------------ 
 /*
@@ -268,14 +301,19 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 
 
 					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
-					h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split host token into individual names
-					dscp := 0
-					if tmap["dscp"] != nil {
-						dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
-					}
+					h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
-					res_name = mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-					res, err = gizmos.Mk_pledge( &h1, &h2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
+					res = nil 
+					h1, h2, err = validate_hosts( h1, h2 )								// translate project/host into tenantID/host and if token/project/name rquired validates token.
+					if err == nil {
+						dscp := 0
+						if tmap["dscp"] != nil {
+							dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
+						}
+	
+						res_name = mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+						res, err = gizmos.Mk_pledge( &h1, &h2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
+					}
 
 
 					if res != nil {												// able to make the reservation, continue and try to find a path with bandwidth

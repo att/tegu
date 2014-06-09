@@ -1064,7 +1064,6 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 							net_sheep.Baa( 1, "fip2ip map was nil; not changed" )
 						}
 
-
 					case REQ_GEN_QMAP:							// generate a new queue setting map
 						ts := req.Req_data.( int64 )			// time stamp for generation
 						req.Response_data, req.State = act_net.gen_queue_map( ts, false )

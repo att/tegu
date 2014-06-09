@@ -71,6 +71,9 @@ const (
 	REQ_STATE					// generate some kind of state data back to message sender
 	REQ_PAUSE					// put things into a paused mode
 	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
+	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
+	REQ_GENCREDS				// generate crdentials
+	
 )
 
 const (
