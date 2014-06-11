@@ -169,6 +169,12 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, exp
 	if send_all || qnum != 1 {					// ignore if skipping intermediate and this isn't ingress/egress
 		m1 := ip2mac[ip1]						// set with mac addresses
 		m2 := ip2mac[ip2]
+
+		if m1 == nil || m2 == nil {
+			fq_sheep.Baa( 1, "WRN: unable to set flow mod ip2mac could not be translated for either %s (%v) or %s (%v)", ip1, m1 == nil, ip2, m2 == nil )
+			return
+		}
+
 		timeout := expiry - time.Now().Unix()	// figure the timeout and skip if too small
 		if timeout > 10 {
 			if port <= 0 {						// we'll assume that the switch is actually the phy host and br-int is what needs to be set
