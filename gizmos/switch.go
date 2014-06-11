@@ -14,6 +14,8 @@
 
 	Mods:		10 Mar 2014 - We allow a target to be either a switch or host when looking for a path. 
 				13 May 2014 - Corrected bug in debug string. 
+				11 Jun 2014 - Changes to support finding all paths between two VMs rather than just 
+					the shortest one.
 */
 
 package gizmos
@@ -144,10 +146,10 @@ func (s *Switch) Get_link( i int ) ( l *Link ) {
 	return
 }
 
-// -------------- path finding -------------------------------------------------------------
+// -------------- shortest, single, path finding -------------------------------------------------------------
 
 /*
-	probe all of the neighbours of the switch to see if they are attached to 
+	Probe all of the neighbours of the switch to see if they are attached to 
 	the target host. If a neighbour has the target, we set the reverse path
 	in the neighbour and return it indicating success.  If a neighbour does 
 	not have the target, we update the neighbour's cost and reverse path _ONLY_
@@ -214,7 +216,7 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64 ) (f
 	)
 
 	found = nil
-	fifo = make( []*Switch, 1024 )
+	fifo = make( []*Switch, 4096 )
 
 	obj_sheep.Baa( 2, "switch:Path_to: looking for path to %s", *target )
 	s.Prev = nil
@@ -251,6 +253,111 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64 ) (f
 		if pidx > 1 {
 			pidx--
 		}
+	}
+
+	return
+}
+// -------------------- find all paths ------------------------------------------------
+
+/*
+	A list of links each of which represents a unique path between two switches.
+*/
+type trail_list struct {
+	links [][]*Link
+	lidx	int				// next entry to populate
+	ep		*Switch			// far end switch
+}
+
+
+/*
+	Examine all neighbours of the switch 's' for possible connectivity to target host. If s 
+	houses the target host, then we push the current path to this host into the trail list
+	and return. 
+*/
+func (s *Switch) ap_search_neighbours( target *string, clinks []*Link, clidx int, tl *trail_list ) {
+	if s.Has_host( target ) {
+		tl.ep = s							// mark the end switch
+		//obj_sheep.Baa( 0, ">>>FOUND on switch: %s\n", *s.id )
+		c := make( []*Link, clidx )
+		copy( c, clinks[0:clidx+1]	)	// copy and push into the trail list 
+		tl.links[tl.lidx] = c
+		tl.lidx++
+	} else {							// not the end, keep searching forward
+		// TODO: check to see that we aren't beyond limit
+		s.Flags |= tegu.SWFL_VISITED 
+		//obj_sheep.Baa( 0, ">>>testing switch: %s  has %d links", *s.id, s.lidx )
+
+		for i := 0; i < s.lidx; i++ {				// for each link to a neighbour
+			sn := s.links[i].Get_forward_sw() 
+			if (sn.Flags & tegu.SWFL_VISITED) == 0  {
+				//obj_sheep.Baa( 0, ">>>advancing over link %d switch: %s", i, *sn.id )
+				clinks[clidx] = s.links[i]			// push the link onto the trail and check out the switch at the other end
+				sn.ap_search_neighbours( target, clinks, clidx+1,  tl )
+				//obj_sheep.Baa( 0, ">>>back to  switch: %s",  *s.id )
+			}
+		}
+	}
+
+	s.Flags &= ^tegu.SWFL_VISITED				// as we back out we allow paths to come back through
+}
+
+/*
+	Starting at switch s, this function finds all possible paths to the switch that houses the target
+	host, and then returns the list of unique links that are traversed by one or more paths provided 
+	that each link can support the increased amount of capacity (inc_amt). The endpoint switch is also 
+	returned.  If any of the links cannot support the capacity, the list will be nil or empty; this is
+	also the case if no paths are found.  The error message will indicate the exact reason if that is 
+	important to the caller. 
+*/
+func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, inc_amt int64 ) ( links []*Link, ep *Switch, err error ) {
+	var (
+		ulinks	map[string]*Link			// unique list of links involved in all trails
+	)
+
+	links = nil
+	ep = nil
+	err = nil
+
+	tl := &trail_list{ lidx: 0 }
+	tl.links = make( [][]*Link, 4096 )
+
+	clinks := make( []*Link, 4096 )		// working set of links
+	
+	s.ap_search_neighbours(  target, clinks, 0, tl )
+
+	if tl.lidx > 0 {								// found at least one trail
+		ulinks = make( map[string]*Link )
+		ep = tl.ep
+
+		obj_sheep.Baa( 2, "switch/all-paths: %d trails found to target", tl.lidx )
+		for i := 0; i < tl.lidx; i++ {				// for each trail between the two endpoints
+			obj_sheep.Baa( 3, "Trail %d follows:", i )
+			for j := range tl.links[i] {
+				lid := tl.links[i][j].Get_id()				// add if not already found in another trail
+				if ulinks[*lid] == nil  {
+					ulinks[*lid] = tl.links[i][j]
+				}
+				obj_sheep.Baa( 3, "link %d: %s", j, tl.links[i][j].To_str( ) )
+			}
+		}
+
+		obj_sheep.Baa( 0, "found %d unique links across %d trails", len( ulinks ), tl.lidx )
+		links = make( []*Link, len( ulinks ) )
+		i := 0
+		for _, v := range ulinks {
+			// TODO:  Add tenant based check
+			if ! v.Has_capacity( commence, conclude, inc_amt ) {
+				err = fmt.Errorf( "no capacity found bwtween switch (%s) and target (%s)", *s.id, *target )
+				links = nil
+				break
+			}
+
+			// TODO:  Add warning if the capacity for the link is above threshold (here, or when the usage is actually bumpped up?)
+			links[i] = v
+			i++
+		}
+	} else {
+		err = fmt.Errorf( "no paths found bwtween switch (%s) and target (%s)", *s.id, *target )
 	}
 
 	return

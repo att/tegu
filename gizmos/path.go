@@ -31,7 +31,8 @@
 	Date:		26 November 2013
 	Author:		E. Scott Daniels
 
-	Mod:		03 Apr 2014 (sd) - Added support for endpoints
+	Mod:		03 Apr 2014 - Added support for endpoints
+				11 Jun 2014 - Changes to support finding all paths rather than shortest
 */
 
 package gizmos
@@ -61,6 +62,7 @@ type Path struct {
 	endpts	[]*Link			// virtual links that represent the switch to vm endpoint 'link'
 	extip	*string			// external IP address to be added to the flow mod when needed
 	is_reverse	bool		// set to indicate that the path was saved in reverse order
+	is_scramble bool		// if the path is not a true path, but a list of links involved in all possible paths between hosts
 }
 
 // ---------------------------------------------------------------------------------------
@@ -75,6 +77,7 @@ func Mk_path( h1 *Host, h2 *Host ) ( p *Path ) {
 		lidx:	0,
 		sidx:	0,
 		is_reverse: false,
+		is_scramble: false,
 	}
 
 	p.endpts = make( []*Link, 2 )
@@ -113,11 +116,30 @@ func (p *Path) Set_reverse( state bool ) {
 }
 
 /*
+	Causes the is_scramble indicator to be set to the value passed in.
+*/
+func (p *Path) Set_scramble( state bool ) {
+	p.is_scramble = state
+}
+
+/*
+	Returns the state of the scramble setting.
+*/
+func (p *Path) Is_scramble( ) ( bool ) {
+	return p.is_scramble
+}
+
+/*
 	Adds the link passed in to the path. Links should be added in 
 	order from the origin switch to the termination switch.  If
 	the links are added in reverse, the reverse indicator should
 	be set for the path (see Set_reverse() method).  Adding links
 	out of order will cause interesting and likely undesired, results. 
+
+	If the is_scramble indicator is set, then the links represent only
+	a unique set of links necessary to construct one or more paths
+	between the end points. A scramble is generated (probably) when 
+	all paths are found rather than a single, shortest, path.
 */
 func (p *Path) Add_link( l *Link ) {
 	var (

@@ -34,7 +34,7 @@ var (
 */
 func init( ) {
 	obj_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater 
-	obj_sheep.Set_prefix( "tegu-obj" )
+	obj_sheep.Set_prefix( "tegu-giz" )
 }
 
 /*
@@ -43,4 +43,8 @@ func init( ) {
 */
 func Get_sheep( ) ( *bleater.Bleater ) {
 	return obj_sheep
+}
+
+func Set_bleat_level( v uint ) {
+	obj_sheep.Set_level( v )
 }

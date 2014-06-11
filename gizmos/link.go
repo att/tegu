@@ -31,6 +31,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		29 Apr 2014 - Changes to support Tegu-lite
+				11 Jun 2014 - Changes to support finding all paths
 
 */
 
@@ -144,6 +145,13 @@ func (l *Link) Nuke() {
 */
 func (l *Link) Get_allotment( ) ( *Obligation ) {
 	return l.allotment
+}
+
+/*
+	Returns the link id.
+*/
+func (l *Link) Get_id( ) ( *string ) {
+	return l.id
 }
 
 /*

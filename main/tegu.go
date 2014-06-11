@@ -33,6 +33,8 @@
 				05 Jun 2014 : Added pause/resume ability.
 				06 Jun 2014 : Added TLS/SSL support.
 				09 Jun 2014 : Added token authorisation support for reservations.
+				11 Jun 2014 : All paths option added-- reservation will be based on capacity over all
+							paths between h1 and h2.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -62,7 +64,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/16094"
+		version		string = "v3.0/16114"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool

@@ -12,6 +12,26 @@
 				browser/user-agent).  The output should be an array (reqstate) with one "object" describing 
 				the result of each request, and a final object (endstate) describing the overall state. 
 
+				These requests are supported:
+					POST:
+						chkpt	(limited)
+						graph
+						listconns
+						listhosts
+						listres
+						pause (limited)
+						reserve
+						resume (limited)
+						verbose (limited)
+
+					DELETE:
+						reservation
+
+
+					limited commands must be submitted from the host that Tegu is running on using the 
+					IPV4 localhost address -- this assumes that only admins will have access to the 
+					host and thus can issue the administrative commands.
+
 	Date:		20 November 2013 (broken out of initial test on 2 Dec)
 	Author:		E. Scott Daniels
 
@@ -19,6 +39,7 @@
 				13 May 2014 : Added support for exit-dscp value in reservation.
 				22 May 2014 : Now forces a checkpoint after a successful reservation.
 				06 Jun 2014 : Added support to listen on https rather than http
+				10 Jun 2014 : Added requirement that certain admin commands be issued from localhost.
 */
 
 package managers
@@ -69,7 +90,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error 
 	req = <- my_ch													// hard wait for response
 
 	if req.State != nil {
-		err = fmt.Errorf( "h1 validation failed: %s", err )
+		err = fmt.Errorf( "h1 validation failed: %s", req.State )
 		return
 	}
 
@@ -80,7 +101,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error 
 	req = <- my_ch													// hard wait for response
 
 	if req.State != nil {
-		err = fmt.Errorf( "h2 validation failed: %s", err )
+		err = fmt.Errorf( "h2 validation failed: %s", req.State )
 		return
 	}
 
@@ -90,6 +111,19 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error 
 }
 
 // ------------------------------------------------------------------------------------------------------ 
+
+/*
+	Return true if the sender string is the localhost (127.0.0.1).
+*/
+func is_localhost( a string ) ( bool ) {
+	tokens := strings.Split( a, ":" )
+	if tokens[0] == "127.0.0.1" {
+		return true
+	}
+
+	return false
+}
+
 /*
 	pull the data from the request (the -d stuff from churl -d)
 */
@@ -117,7 +151,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 		ping
 		listconns <hostname|hostip>
 */
-func parse_post( out http.ResponseWriter, recs []string ) (state string, msg string) {
+func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	var (
 		err			error
 		res			*gizmos.Pledge			// reservation that we're working on
@@ -161,10 +195,15 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 		switch tokens[0] {
 
 			case "chkpt":
-				req = ipc.Mk_chmsg( )
-				req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
-				state = "OK"
-				reason = "checkpoint was requested"
+				if is_localhost( sender ) {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
+					state = "OK"
+					reason = "checkpoint was requested"
+				} else {
+					state = "ERROR"
+					reason = fmt.Sprintf( "you are not authorised to submit a chkpt command" )
+				}
 
 			case "graph":
 				req = ipc.Mk_chmsg( )
@@ -176,7 +215,6 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 					jreason = string( req.Response_data.(string) )
 				} else {
 					nerrors++
-					jreason = ""
 					reason = "no output from network thread"
 				}
 	
@@ -190,7 +228,6 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 				} else {
 					state = "ERROR"
 					reason = fmt.Sprintf( "%s", req.State )
-					jreason = ""
 					nerrors++
 				}
 			
@@ -204,7 +241,6 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 				} else {
 					state = "ERROR"
 					reason = fmt.Sprintf( "%s", req.State )
-					jreason = ""
 					nerrors++
 				}
 				
@@ -223,29 +259,32 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 					} else {
 						state = "ERROR"
 						reason = fmt.Sprintf( "%s", req.State )
-						jreason = ""
 						nerrors++
 					}
 				}
 
 			case "pause":
-				if res_paused {							// already in a paused state, just say so and go on
-					jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
-					state = "WARN"
-				} else {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_PAUSE, nil, nil )
-					req = <- my_ch
-					if req.State == nil {
-						http_sheep.Baa( 1, "reservations are now paused" )	
-						state = "OK"
-						jreason = string( req.Response_data.( string ) )
-						res_paused = true
+				if is_localhost( sender ) {
+					if res_paused {							// already in a paused state, just say so and go on
+						jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
+						state = "WARN"
 					} else {
-						state = "ERROR"
-						jreason = ""
-						reason = fmt.Sprintf( "s", req.State )
+						req = ipc.Mk_chmsg( )
+						req.Send_req( rmgr_ch, my_ch, REQ_PAUSE, nil, nil )
+						req = <- my_ch
+						if req.State == nil {
+							http_sheep.Baa( 1, "reservations are now paused" )	
+							state = "OK"
+							jreason = string( req.Response_data.( string ) )
+							res_paused = true
+						} else {
+							state = "ERROR"
+							reason = fmt.Sprintf( "s", req.State )
+						}
 					}
+				} else {
+					jreason = fmt.Sprintf( `"you are not authorised to submit a pause request."` )
+					state = "ERROR"
 				}
 
 			case "ping":
@@ -337,7 +376,6 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 							} else {
 								nerrors++
 								reason = fmt.Sprintf( "%s", req.State )
-								jreason = ""
 							}
 
 							if res_paused {
@@ -355,26 +393,36 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 					}
 
 			case "resume":
-				if ! res_paused {							// not in a paused state, just say so and go on
-					jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
-					state = "WARN"
-				} else {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_RESUME, nil, nil )
-					req = <- my_ch
-					if req.State == nil {
-						http_sheep.Baa( 1, "reservations are now resumed" )	
-						state = "OK"
-						jreason = string( req.Response_data.( string ) )
-						res_paused = false
+				if is_localhost( sender ) {
+					if ! res_paused {							// not in a paused state, just say so and go on
+						jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
+						state = "WARN"
 					} else {
-						state = "ERROR"
-						jreason = ""
-						reason = fmt.Sprintf( "s", req.State )
+						req = ipc.Mk_chmsg( )
+						req.Send_req( rmgr_ch, my_ch, REQ_RESUME, nil, nil )
+						req = <- my_ch
+						if req.State == nil {
+							http_sheep.Baa( 1, "reservations are now resumed" )	
+							state = "OK"
+							jreason = string( req.Response_data.( string ) )
+							res_paused = false
+						} else {
+							state = "ERROR"
+							reason = fmt.Sprintf( "s", req.State )
+						}
 					}
+				} else {
+					jreason = fmt.Sprintf( `"you are not authorised to submit a resume request."` )
+					state = "ERROR"
 				}
 
 			case "verbose":									// verbose n [child-bleater]
+				if ! is_localhost( sender ) {
+					jreason = fmt.Sprintf( `"you are not authorised to submit a verbose request."` )
+					state = "ERROR"
+					break
+				}
+
 				if ntokens > 1 {
 					state = "OK"
 					nv := clike.Atou( tokens[1] )
@@ -404,6 +452,9 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 
 							case "tegu", "master":
 								tegu_sheep.Set_level( nv )
+
+							case "lib", "gizmos":
+								gizmos.Set_bleat_level( nv )
 
 							default:
 								state = "ERROR"
@@ -453,9 +504,9 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 	return
 }
 
-func parse_put( out http.ResponseWriter, recs []string ) (state string, msg string) {
+func parse_put( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	
-	state, msg = parse_post( out, recs )
+	state, msg = parse_post( out, recs, sender )
 	return
 }
 
@@ -466,7 +517,7 @@ func parse_put( out http.ResponseWriter, recs []string ) (state string, msg stri
 	Supported delete actions:
 		reservation <name> [<cookie>]
 */
-func parse_delete( out http.ResponseWriter, recs []string ) ( state string, msg string ) {
+func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( state string, msg string ) {
 	var (
 		sep			string = ""							// json output list separator
 		req_count	int = 0								// requests processed this batch
@@ -526,12 +577,12 @@ func parse_delete( out http.ResponseWriter, recs []string ) ( state string, msg 
 							state = "OK"
 						} else {
 							nerrors++
-							comment = fmt.Sprintf( "reservation delete failed: %s", state )
+							comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
 						}
 
 					} else {
 						nerrors++
-						comment = fmt.Sprintf( "reservation delete failed: %s", state )
+						comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
 					}
 				}
 
@@ -566,10 +617,10 @@ func parse_delete( out http.ResponseWriter, recs []string ) ( state string, msg 
 	return
 }
 
-func parse_get( out http.ResponseWriter, recs []string ) (state string, msg string) {
-	http_sheep.Baa( 1, "get received -- unsupported" )
-	state = "OK"
-	msg = "unsupported"
+func parse_get( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
+	http_sheep.Baa( 1, "get received and ignored -- GET is not supported" )
+	state = "ERROR"
+	msg = "GET requests are unsupported"
 	return
 }
 
@@ -597,10 +648,8 @@ func deal_with( out http.ResponseWriter, in *http.Request ) {
 	data = dig_data( in )
 	if( data == nil ) {						// missing data -- punt early
 		http_sheep.Baa( 1, "http: deal_with called without data: %s", in.Method )
-		//fmt.Fprintf( out, "{ \"status\": \"ERROR\", \"comment\": \"missing command\" }", in.Method )
-		fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )
+		fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )	// error stuff back to user
 		return
-
 	} else {
 		_, recs = token.Tokenise_drop( string( data ), ";\n" )		// split based on ; or newline
 		fmt.Fprintf( out, "{ " )									// open the overall object for output
@@ -608,16 +657,16 @@ func deal_with( out http.ResponseWriter, in *http.Request ) {
 	
 	switch in.Method {
 		case "PUT":
-			state, msg = parse_put( out, recs )
+			state, msg = parse_put( out, recs, in.RemoteAddr )
 
 		case "POST":
-			state, msg = parse_post( out, recs )
+			state, msg = parse_post( out, recs, in.RemoteAddr )
 
 		case "DELETE":
-			state, msg = parse_delete( out, recs )
+			state, msg = parse_delete( out, recs, in.RemoteAddr )
 
 		case "GET":
-			state, msg = parse_get( out, recs )
+			state, msg = parse_get( out, recs, in.RemoteAddr )
 
 		default:
 			http_sheep.Baa( 1, "deal_with called for unrecognised method: %s", in.Method )

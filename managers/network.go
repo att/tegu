@@ -27,6 +27,7 @@
 				05 May 2014 - Added support for merging gateways into the host list when not using floodlight.
 				18 May 2014 - Changes to allow cross tenant reservations.
 				30 May 2014 - Corrected typo in error message
+				11 Jun 2014 - Added overall link-headroom support
 */
 
 package managers
@@ -356,7 +357,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int ) ( l *gizmos.Link ) {
 	does _not_ contain a ':'. 
 	
 */
-func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) {
+func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
@@ -366,9 +367,14 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 		links	[]gizmos.FL_link_json			// list of links from floodlight or simulated floodlight source
 		hlist	[]gizmos.FL_host_json			// list of hosts from floodlight or built from vm maps if not using fl
 		err		error
+		hr_factor	int64 = 1
 	)
 
 	n = nil
+
+	if link_headroom > 0 && link_headroom < 100 {
+		hr_factor = 100 - int64( link_headroom )
+	}
 
 	if strings.Index( *flhost, ":" ) >= 0  {
 		links = gizmos.FL_links( flhost )					// request the current set of links from floodlight
@@ -415,8 +421,7 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 			n.switches[links[i].Dst_switch] = dsw
 		}
 
-		//lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, max_capacity )		// omitting the link causes reuse of the link if it existed so that obligations are kept
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, links[i].Capacity )		// omitting the link causes reuse of the link if it existed so that obligations are kept
+		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, links[i].Capacity / hr_factor )		// omitting the link causes reuse of the link if it existed so that obligations are kept
 		lnk.Set_forward( dsw )
 		lnk.Set_backward( ssw )
 		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
@@ -547,6 +552,92 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	return
 }
 
+/*
+	This is a helper function for find_paths and is invoked when we are interested in just the shortest
+	path between two switches. It will find the shortest path, and then build a path structure which
+	represents it.  ssw is the starting switch and h2nm is the endpoint "name" (probably a mac that we 
+	are looking for. 
+
+	This function assumes that the switches have all been initialised with a reset of the visited flag,
+	setting of inital cost, etc.
+*/
+func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, commence int64, conclude int64, inc_cap int64 ) ( path *gizmos.Path ) {
+	h1nm := h1.Get_mac()
+	h2nm := h2.Get_mac()
+	path = nil
+
+	ssw.Cost = 0												// seed the cost in the source switch
+	tsw := ssw.Path_to( h2nm, commence, conclude, inc_cap )		// discover the shortest path to terminating switch that has enough bandwidth
+	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
+		path = gizmos.Mk_path( h1, h2 )
+		path.Set_reverse( true )								// indicate that the path is saved in reverse order 
+		net_sheep.Baa( 2,  "find_spath: found target on %s", tsw.To_str( ) )
+				
+		lnk := n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1 )		// add endpoint -- a virtual link out from switch to h2
+		lnk.Add_lbp( *h2nm )
+		lnk.Set_forward( tsw )												// endpoints have only a forward link
+		path.Add_endpoint( lnk )
+
+		for ; tsw != nil ; {
+			if tsw.Prev != nil {								// last node won't have a prev pointer so no link
+				lnk = tsw.Prev.Get_link( tsw.Plink )
+				path.Add_link( lnk )
+			}	
+			path.Add_switch( tsw )
+
+			net_sheep.Baa( 2, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
+
+			if tsw.Prev == nil {													// last switch in the path, add endpoint 
+				lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1 )		// endpoint is a virt link from switch to h1
+				lnk.Add_lbp( *h1nm )
+				lnk.Set_forward( tsw )												// endpoints have only a forward link
+				path.Add_endpoint( lnk )
+			}
+			tsw = tsw.Prev
+		}
+
+		path.Flip_endpoints()		// path expects them to be in h1,h2 order; we added them backwards so must flip
+	}
+
+	return
+}
+
+/*
+	This is a helper function for find_paths(). It is used to find all possible paths between h1 and h2 starting at ssw. 
+	The resulting path is a "scramble" meaning that the set of links is a unique set of links that are traversed by 
+	one or more paths. The list of links can be traversed without the need to dup check which is beneficial for 
+	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the 
+	middle switches are NOT maintaine. 
+*/
+func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, commence int64, conclude int64, inc_cap int64 ) ( path *gizmos.Path, err error ) {
+
+net_sheep.Baa( 1, ">>>> searching for all paths between %s and %s", *h1.Get_mac(), *h2.Get_mac() )
+	links, epsw, err := ssw.All_paths_to( h2.Get_mac(), commence, conclude, inc_cap )
+	if err != nil {
+		return
+	}
+
+	path = gizmos.Mk_path( h1, h2 )
+	path.Set_scramble( true )
+	path.Add_switch( ssw )
+	path.Add_switch( epsw )
+
+	lnk := n.find_vlink( *(ssw.Get_id()), h2.Get_port( ssw ), -1 )			// add endpoint -- a virtual link out from switch to h1
+	lnk.Add_lbp( *(h1.Get_mac()) )
+	lnk.Set_forward( ssw )
+	path.Add_endpoint( lnk )
+
+	lnk = n.find_vlink( *(epsw.Get_id()), h2.Get_port( epsw ), -1 )		// add endpoint -- a virtual link out from switch to h2
+	lnk.Add_lbp( *(h2.Get_mac()) )
+	lnk.Set_forward( epsw )
+	path.Add_endpoint( lnk )
+
+	for i := range links {
+		path.Add_link( links[i] )
+	}
+
+	return
+}
 
 /*
 	Find a set of connected switches that can be used as a path beteeen 
@@ -566,18 +657,21 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	Extip is an external IP address that will need to be associated with the flow-mods and thus needs to be 
 	added to any path we generate.
 
+	If find_all is set, then we will suss out all possible paths between h1 and h2 and not just the shortest path. 
+
 	DEPRECATED: if the second host is "0.0.0.0", then we will return a path list containing every link we know about :)
 */
-func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, extip *string ) ( pcount int, path_list []*gizmos.Path ) {
+func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, extip *string, find_all bool ) ( pcount int, path_list []*gizmos.Path ) {
 	var (
 		path	*gizmos.Path
 		ssw 	*gizmos.Switch		// starting switch
-		tsw 	*gizmos.Switch; 		// target's linked switch
+		//tsw 	*gizmos.Switch; 		// target's linked switch
 		h1		*gizmos.Host
 		h2		*gizmos.Host
 		lnk		*gizmos.Link
 		plidx	int = 0
 		swidx	int = 0		// index into host's switch list
+		err		error
 	)
 
 	h1 = n.hosts[*h1nm]
@@ -606,7 +700,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
 	pcount = 0
 
-	for {									// we'll break after we've looked at all of the connection points for h1 
+	for {													// we'll break after we've looked at all of the connection points for h1 
 		if plidx >= len( path_list ) {
 			net_sheep.Baa( 0,  "CRI: find-path: internal error -- unable to find a path between hosts, loops in the graph? Edges exceeded number of total links." )
 			return
@@ -614,7 +708,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 
 		ssw, _ = h1.Get_switch_port( swidx )				// get next switch that lists h1 as attached; we'll work 'out' from it toward h2
 		swidx++
-		if ssw == nil {
+		if ssw == nil {										// no more source switches which h1 thinks it's attached to
 			pcount = plidx
 			if pcount <= 0 || swidx == 0 {
 				net_sheep.Baa( 1, "find-path: early exit? no switch port returned for h1 (%s) at index %d", *h1nm, swidx )
@@ -647,7 +741,6 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 				net_sheep.Baa( 2,  "find-path: host1-json= %s", h1.To_json( ) )
 				net_sheep.Baa( 2,  "find-path: host2-json= %s", h2.To_json( ) )
 			}
-			
 		} else {						// usual case, two named hosts and hosts are on different switches
 			net_sheep.Baa( 1, "path[%d]: searching for path starting from switch: %s", plidx, ssw.To_str( ) )
 
@@ -657,46 +750,21 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 				n.switches[sname].Flags &= ^tegu.SWFL_VISITED
 			}
 
-			ssw.Cost = 0												// seed the cost in the source switch
-
-			tsw = ssw.Path_to( h2nm, commence, conclude, inc_cap )		// discover the shortest path to terminating switch that has enough bandwidth
-			if tsw != nil {
-				path = gizmos.Mk_path( h1, h2 )
-				path.Set_reverse( true )								// indicate that the path is saved in reverse order 
-				path.Set_extip( extip )
-				net_sheep.Baa( 2,  "path[%d]: found target on %s", plidx, tsw.To_str( ) )
-				
-				lnk = n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1 )		// add endpoint -- a virtual link out from switch to h2
-				lnk.Add_lbp( *h2nm )
-				lnk.Set_forward( tsw )												// endpoints have only a forward link
-				path.Add_endpoint( lnk )
-
-				for ; tsw != nil ; {
-					if tsw.Prev != nil {								// last node won't have a prev pointer so no link
-						lnk = tsw.Prev.Get_link( tsw.Plink )
-						path.Add_link( lnk )
-					}	
-					path.Add_switch( tsw )
-
-					net_sheep.Baa( 2, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
-
-					if tsw.Prev == nil {													// last switch in the path, add endpoint 
-						lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1 )		// endpoint is a virt link from switch to h1
-						lnk.Add_lbp( *h1nm )
-						lnk.Set_forward( tsw )												// endpoints have only a forward link
-						path.Add_endpoint( lnk )
-					}
-					tsw = tsw.Prev
+			
+			if find_all {																		// find all possible paths not just shortest
+				path, err = n.find_all_paths( ssw, h1, h2, commence, conclude, inc_cap )		// find a 'scramble' path
+				if err != nil {
+					net_sheep.Baa( 1, "find_paths: %s", err )
 				}
+			} else {
+				path = n.find_shortest_path( ssw, h1, h2, commence, conclude, inc_cap )
+			}
 
-				path.Flip_endpoints()		// path expects them to be in h1,h2 order; we added them backwards so must flip
+			if path != nil {
+				path.Set_extip( extip )
 				path_list[plidx] = path
 				plidx++
-
-			} /* else {				// debug only
-				net_sheep.Baa( 1,  "path[%d]: did not find a path from %s -> %s using starting switch %s", plidx, *h1nm, *h2nm, ssw.To_str( ))
 			}
-			*/
 		}
 	}
 
@@ -711,8 +779,12 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 	needed if inbound and outbound rates differ.  In order to build a good set of flow-mods for the split
 	reservation, both VMs MUST have an associated floating point address which is then generated as a 
 	match point in the flow-mod.  
+
+	If find_all is true we will find all paths between each host, not just the shortest.  This should not 
+	be confused with finding all paths when the network is split as that _always_ happens and by default
+	we find just the shortest path in each split network. 
 */
-func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64 ) ( pcount int, path_list []*gizmos.Path ) {
+func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool) ( pcount int, path_list []*gizmos.Path ) {
 	var (
 		num int = 0				// must declare num as := assignment doesnt work when ipath[n] is in the list
 	)
@@ -730,14 +802,14 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	ipaths := make( [][]*gizmos.Path, len( pair_list ) )			// temp holder of each path list resulting from pair_list exploration
 
 	for i := range pair_list {
-		num, ipaths[i] = n.find_path( pair_list[i].h1, pair_list[i].h2, commence, conclude, inc_cap, pair_list[i].fip )	
+		num, ipaths[i] = n.find_paths( pair_list[i].h1, pair_list[i].h2, commence, conclude, inc_cap, pair_list[i].fip, find_all )	
 		if num > 0 {
 			total_paths += num
 			ok_count++
 		}
 	}
 
-	if ok_count < len( pair_list ) {			// didn't find a good path for each pair
+	if ok_count < len( pair_list ) {								// didn't find a good path for each pair
 		net_sheep.Baa( 1, "did not find a good path for each pair; expected %d, found %d", len( pair_list ), ok_count )
 		pcount = 0
 		return 
@@ -852,6 +924,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		req		*ipc.Chmsg
 		max_link_cap	int64 = 0
 		refresh	int = 30
+		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
+		link_headroom int = 0				// percentage that each link capacity is reduced by
 
 		pcount	int
 		path_list	[]*gizmos.Path
@@ -876,14 +950,24 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	tegu_sheep.Add_child( net_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 														// suss out config settings from our section
-	if p := cfg_data["network"]["refresh"]; p != nil {
-		refresh = clike.Atoi( *p ); 			
-	}
-	if p := cfg_data["network"]["link_max_cap"]; p != nil {
-		max_link_cap = clike.Atoi64( *p )
-	}
-	if p := cfg_data["network"]["verbose"]; p != nil {
-		net_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+	if cfg_data["network"] != nil {
+		if p := cfg_data["network"]["refresh"]; p != nil {
+			refresh = clike.Atoi( *p ); 			
+		}
+		if p := cfg_data["network"]["link_max_cap"]; p != nil {
+			max_link_cap = clike.Atoi64( *p )
+		}
+		if p := cfg_data["network"]["verbose"]; p != nil {
+			net_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+		}
+
+		if p := cfg_data["network"]["all_paths"]; p != nil {
+			find_all_paths = *p == "true"
+		}
+
+		if p := cfg_data["network"]["link_headroom"]; p != nil {
+			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacites down by
+		}
 	}
 
 														// enforce some sanity on config file settings
@@ -897,7 +981,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
+	act_net = build( nil, sdn_host, max_link_cap, link_headroom )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
 	if act_net == nil {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!" )		// this is bad and WILL cause a core dump
 	} else {
@@ -941,8 +1025,7 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-						//pcount, path_list = act_net.find_path( h1, h2, commence, expiry, bandw_in + bandw_out ); 
-						pcount, path_list = act_net.build_paths( h1, h2, commence, expiry, bandw_in + bandw_out ); 
+						pcount, path_list = act_net.build_paths( h1, h2, commence, expiry, bandw_in + bandw_out, find_all_paths ); 
 
 						if pcount > 0 {
 							req.Response_data = path_list[:pcount]
@@ -965,8 +1048,7 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 
 						if err == nil {
 							net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-							//pcount, path_list = act_net.find_path( ip1, ip2, commence, expiry, bandw_in + bandw_out ); 
-							pcount, path_list = act_net.build_paths( ip1, ip2, commence, expiry, bandw_in + bandw_out ); 
+							pcount, path_list = act_net.build_paths( ip1, ip2, commence, expiry, bandw_in + bandw_out, find_all_paths ); 
 
 							if pcount > 0 {
 								net_sheep.Baa( 1,  "network: acceptable path found:" )
@@ -1082,7 +1164,7 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 
 					case REQ_NETUPDATE:								// build a new network graph
 						net_sheep.Baa( 2, "rebuilding network graph" )
-						new_net := build( act_net, sdn_host, max_link_cap )
+						new_net := build( act_net, sdn_host, max_link_cap, link_headroom )
 						if new_net != nil {
 							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back 
 							ip2vm_map := act_net.ip2vm
