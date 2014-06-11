@@ -209,7 +209,7 @@ func (l *Link) Comes_from( sw *Switch ) ( bool ) {
 /*
 	Returns the pointer to the switch in the forward direction.
 */
-func (l *Link) Get_foward_sw( ) ( *Switch ) {
+func (l *Link) Get_forward_sw( ) ( *Switch ) {
 	return l.forward
 }
 
@@ -217,7 +217,7 @@ func (l *Link) Get_foward_sw( ) ( *Switch ) {
 	Returns the pointer to the switch in the backward direction.
 */
 func (l *Link) Get_backward_sw( ) ( *Switch ) {
-	return l.forward
+	return l.backward
 }
 
 /*
