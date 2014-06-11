@@ -39,6 +39,7 @@
 				07 Jun 2014 : Added function to validate hosts if supplied with token and 
 					to translate project (tenant) name into an ID. 
 				09 Jun 2014 : Converted the openstack cred list to a map.
+				10 Jun 2014 : Changes to ignore the "ref" entry in the cred map. 
 */
 
 package managers
@@ -150,11 +151,13 @@ func mapvm2ip( os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
 	)
 	
 	m = nil
-	for _, os := range os_refs {
-		osif_sheep.Baa( 1, "mapping VMs from: %s", os.To_str( ) )
-		m, err = os.Mk_vm2ip( m )
-		if err != nil {
-			osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s", err )
+	for k, os := range os_refs {
+		if k != "ref" {	
+			osif_sheep.Baa( 1, "mapping VMs from: %s", os.To_str( ) )
+			m, err = os.Mk_vm2ip( m )
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s", err )
+			}
 		}
 	}
 	
@@ -179,17 +182,19 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		return
 	}
 
-	for _, os := range os_refs {
-		list, err = os.List_hosts( ostack.COMPUTE )	
-		if err != nil {
-			osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s", os.To_str(), err )
-			return							// drop out on first error with no list
-		} else {
-			if *list != "" {
-				ts += sep + *list
-				sep = " "
+	for k, os := range os_refs {
+		if k != "ref" {
+			list, err = os.List_hosts( ostack.COMPUTE )	
+			if err != nil {
+				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s", os.To_str(), err )
+				return							// drop out on first error with no list
 			} else {
-				osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s", os.To_str() )	
+				if *list != "" {
+					ts += sep + *list
+					sep = " "
+				} else {
+					osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s", os.To_str() )	
+				}
 			}
 		}
 	}
@@ -236,18 +241,20 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 	fip2ip = nil
 	ip2fip = nil
 
-	for _, os := range os_refs {
-		osif_sheep.Baa( 2, "creating VM maps from: %s", os.To_str( ) )
-		vmid2ip, ip2vmid, vm2ip, vmid2host, err = os.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
-		if err != nil {
-			osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
-			rerr = err
-		}
-
-		ip2fip, fip2ip, err = os.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
-		if err != nil {
-			osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
-			rerr = err
+	for k, os := range os_refs {
+		if k != "ref" {
+			osif_sheep.Baa( 2, "creating VM maps from: %s", os.To_str( ) )
+			vmid2ip, ip2vmid, vm2ip, vmid2host, err = os.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
+				rerr = err
+			}
+	
+			ip2fip, fip2ip, err = os.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
+				rerr = err
+			}
 		}
 	}
 
@@ -315,7 +322,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 
 	r = nil
 	for k, v := range id2pname {
-		if creds[*v] == nil  {							// dont have; make and validate
+		if creds[*v] == nil  {	
 			osif_sheep.Baa( 1, "adding creds for: %s/%s", k, *v )
 			creds[*v], err = admin.Dup( v )				// duplicate creds for this project and then authorise to get a token
 	
@@ -324,7 +331,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 				creds[*v] = nil
 			}
 		} else {
-			osif_sheep.Baa( 2, "resusing credentials for: %s", *v )
+			osif_sheep.Baa( 2, "reusing credentials for: %s", *v )
 		}
 
 		r = creds[*v]
@@ -409,6 +416,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_admin = get_admin_creds( def_url, def_usr, def_passwd )
 		if os_admin != nil {
 			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the translation maps
+			for k := range pname2id {
+				osif_sheep.Baa( 1, "tenant known: %s", k )
+			}
 		} else {
 			id2pname = make( map[string]*string )				// empty maps and we'll never generate a translation from project name to tenant ID since there are no default admin creds
 			pname2id = make( map[string]*string )
@@ -416,6 +426,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 		if os_list == "all" {
 			os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )		// get a list of all projects and build creds for each
+			for k := range os_refs {
+				osif_sheep.Baa( 1, "inital os_list member: %s", k )
+			}
 		} else {
 			if strings.Index( os_list, "," ) > 0 {
 				os_sects = strings.Split( os_list, "," )
