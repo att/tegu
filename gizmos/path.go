@@ -28,11 +28,16 @@
 				Endpoints only have 'forward' switches and so when we set their queue we always
 				set the forward queue.
 
+				If the path is marked as a scramble, then it's not a true path between the endpoints.
+				For a scramble, the list of links represents only the unique set of links that are 
+				involved in all possible paths between the end points. 
+
 	Date:		26 November 2013
 	Author:		E. Scott Daniels
 
 	Mod:		03 Apr 2014 - Added support for endpoints
 				11 Jun 2014 - Changes to support finding all paths rather than shortest
+				13 Jun 2014 - Added to the doc.
 */
 
 package gizmos
@@ -223,8 +228,10 @@ func (p *Path) Flip_endpoints( ) {
 }
 
 /*
-	Increases the utilisation of the path by adding delta to all links. This assumes that the
-	link has already been tested and indicated it could accept the change. 
+	Increases the utilisation of the path by adding delta to all links. This assumes that each
+	link has already been tested and indicated it could accept the change.  The return value
+	does inidcate wheter or not the assignment was successful to all (true) or if one or more
+	links could not be increased (false).
 */
 func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
 	r = true
