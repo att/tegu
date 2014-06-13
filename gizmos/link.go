@@ -74,7 +74,7 @@ type Link struct {
 	allows for easy accounting of total usage allocated (both directions) for the
 	bidirectional path that the two links represent. 
 */
-func Mk_link( sw1 *string, sw2 *string, capacity int64, bond ...*Link ) ( l *Link ) {
+func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, bond ...*Link ) ( l *Link ) {
 	var id string
 
 	id = fmt.Sprintf( "%s-%s", *sw1, *sw2 )
@@ -87,7 +87,7 @@ func Mk_link( sw1 *string, sw2 *string, capacity int64, bond ...*Link ) ( l *Lin
 	}
 
 	if bond == nil || bond[0] == nil {
-		l.allotment = Mk_obligation( capacity )
+		l.allotment = Mk_obligation( capacity, alarm_thresh )
 	} else {
 		l.allotment = bond[0].Get_allotment( )
 	}
@@ -120,7 +120,7 @@ func Mk_vlink( sw *string, p1 int, p2 int, capacity int64, bond ...*Link ) ( l *
 	}
 
 	if bond == nil || bond[0] == nil {
-		l.allotment = Mk_obligation( capacity )
+		l.allotment = Mk_obligation( capacity, 0 )			// virtual links don't alarm
 	} else {
 		l.allotment = bond[0].Get_allotment( )
 	}
@@ -322,8 +322,11 @@ func (l *Link) Get_allocation( utime int64 ) ( int64 ) {
 func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( r bool ) {
 	r = l.allotment.Has_capacity( commence, conclude, amt )
 	if r {
-		l.allotment.Inc_utilisation( commence, conclude, amt )
-	}
+		msg := l.allotment.Inc_utilisation( commence, conclude, amt )
+		if msg != nil {
+			obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )		// likely a warning regarding encroaching on the limit
+		} 
+	} 
 
 	return
 }
@@ -351,7 +354,12 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 		swdata = fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
 	}
 
-	return l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	if msg != nil {													// warning message that we must presernt
+		obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )
+	}
+
+	return
 }
 
 /*
@@ -364,7 +372,12 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( error ) {
 
 	swdata := fmt.Sprintf( "%s/%d", *l.sw2, l.port2 )			// switch and port data that will be necessary to physically set the queue
-	return l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	if msg != nil {													// warning message that we must presernt
+		obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )
+	}
+
+	return err
 }
 
 /*

@@ -128,7 +128,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
 				for mac, ip := range n.gwmap {
 					if n.mac2phost[mac] == nil {
-						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find mac in gw list: mac=%s  ip=%s", mac, *ip )
+						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find gw mac in mac2phost list: mac=%s  ip=%s", mac, *ip )
 					} else {
 						if ip != nil {
 							net_sheep.Baa( 2, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
@@ -140,7 +140,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 					}
 				}
 			} else {
-				net_sheep.Baa( 1, "WRN: no phost2mac map -- agent likely not returend sp2uuid list" )
+				net_sheep.Baa( 1, "WRN: no phost2mac map -- agent likely not returned sp2uuid list" )
 			}
 		} else {
 			net_sheep.Baa( 1, "WRN: no gateway map" )
@@ -155,7 +155,6 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 }
 
 /*
-	Tegu-lite
 	Takes a set of strings of the form <hostname><space><mac> and adds them to the mac2phost table
 	This is needed to map gateway hosts to physical hosts since openstack does not return the gateways
 	with the same info as it does VMs
@@ -295,7 +294,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	(TODO: it would make sense to vet the obligations to ensure that they can still be met should
 	a switch depart from the network.)
 */
-func (n *Network) find_link( ssw string, dsw string, capacity int64, lnk ...*gizmos.Link ) (l *gizmos.Link) {
+func (n *Network) find_link( ssw string, dsw string, capacity int64, link_alarm_thresh int, lnk ...*gizmos.Link ) (l *gizmos.Link) {
 
 	id := fmt.Sprintf( "%s-%s", ssw, dsw )
 	l = n.links[id]
@@ -308,9 +307,9 @@ func (n *Network) find_link( ssw string, dsw string, capacity int64, lnk ...*giz
 
 	net_sheep.Baa( 3, "making link: %s", id )
 	if lnk == nil {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh );	
 	} else {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, lnk[0] );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, lnk[0] );	
 	}
 	n.links[id] = l
 	return
@@ -357,7 +356,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int ) ( l *gizmos.Link ) {
 	does _not_ contain a ':'. 
 	
 */
-func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int ) (n *Network) {
+func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
@@ -421,14 +420,14 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			n.switches[links[i].Dst_switch] = dsw
 		}
 
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, links[i].Capacity / hr_factor )		// omitting the link causes reuse of the link if it existed so that obligations are kept
+		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh )		// omitting the link causes reuse of the link if it existed so that obligations are kept
 		lnk.Set_forward( dsw )
 		lnk.Set_backward( ssw )
 		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
 		lnk.Set_port( 2, links[i].Dst_port )		// port on dest to src
 		ssw.Add_link( lnk )
 
-		lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, links[i].Capacity, lnk )	// including the link causes its obligation to be shared in this direction
+		lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, lnk )	// including the link causes its obligation to be shared in this direction
 		lnk.Set_forward( ssw )
 		lnk.Set_backward( dsw )
 		lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
@@ -611,7 +610,8 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 */
 func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, commence int64, conclude int64, inc_cap int64 ) ( path *gizmos.Path, err error ) {
 
-net_sheep.Baa( 1, ">>>> searching for all paths between %s and %s", *h1.Get_mac(), *h2.Get_mac() )
+	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and   $s", h1.Get_mac(), h2.Get_mac() )
+
 	links, epsw, err := ssw.All_paths_to( h2.Get_mac(), commence, conclude, inc_cap )
 	if err != nil {
 		return
@@ -677,7 +677,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 	h1 = n.hosts[*h1nm]
 	if h1 == nil {
 		path_list = nil
-		net_sheep.Baa( 1,  "find-path: cannot find host(1) in network -- not reported by SDNC? %s\n", *h1nm )
+		net_sheep.Baa( 1,  "find-path: cannot find host(1) in network -- not reported by SDNC? %s", *h1nm )
 		return
 	}
 	h1nm = h1.Get_mac()			// must have the host's mac as our flowmods are at that level
@@ -685,7 +685,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 	h2 = n.hosts[*h2nm]					// do the same for the second host
 	if h2 == nil {
 		path_list = nil
-		net_sheep.Baa( 1,  "find-path: cannot find host(2) in network -- not reported by the SDNC? %s\n", *h2nm )
+		net_sheep.Baa( 1,  "find-path: cannot find host(2) in network -- not reported by the SDNC? %s", *h2nm )
 		return
 	}
 	h2nm = h2.Get_mac()
@@ -754,7 +754,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 			if find_all {																		// find all possible paths not just shortest
 				path, err = n.find_all_paths( ssw, h1, h2, commence, conclude, inc_cap )		// find a 'scramble' path
 				if err != nil {
-					net_sheep.Baa( 1, "find_paths: %s", err )
+					net_sheep.Baa( 1, "find_paths: find_all failed: %s", err )
 				}
 			} else {
 				path = n.find_shortest_path( ssw, h1, h2, commence, conclude, inc_cap )
@@ -806,6 +806,8 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 		if num > 0 {
 			total_paths += num
 			ok_count++
+		} else {
+			net_sheep.Baa( 1, "path not found between: %s and %s", *pair_list[i].h1, *pair_list[i].h2 )
 		}
 	}
 
@@ -926,6 +928,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		refresh	int = 30
 		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
 		link_headroom int = 0				// percentage that each link capacity is reduced by
+		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
 
 		pcount	int
 		path_list	[]*gizmos.Path
@@ -968,6 +971,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		if p := cfg_data["network"]["link_headroom"]; p != nil {
 			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacites down by
 		}
+
+		if p := cfg_data["network"]["link_alarm"]; p != nil {
+			link_alarm_thresh = clike.Atoi( *p )						// percentage of total capacity when an alarm is generated
+		}
 	}
 
 														// enforce some sanity on config file settings
@@ -981,7 +988,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap, link_headroom )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
+	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
 	if act_net == nil {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!" )		// this is bad and WILL cause a core dump
 	} else {
@@ -1018,7 +1025,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									act_net.ip2fip != nil  {
 								state = 2
 							}
-net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != nil  , act_net.ip2vmid != nil  , act_net.vmid2phost	 != nil  , act_net.ip2mac != nil  , act_net.mac2phost != nil  , act_net.gwmap != nil  , act_net.fip2ip != nil, state  )
+							net_sheep.Baa( 2, "net-state: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != nil, act_net.ip2vmid != nil, 
+									act_net.vmid2phost	 != nil, act_net.ip2mac != nil, act_net.mac2phost != nil, act_net.gwmap != nil, act_net.fip2ip != nil, state  )
 							req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
@@ -1036,8 +1044,9 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 						}
 
 					case REQ_RESERVE:
+						// host names are expected to have been vetted (if needed) and translated to tenant-id/name if IDs are enabled
 						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )
+						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )		
 						net_sheep.Baa( 1,  "network: reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
 
 						ip1, err := act_net.name2ip( h1 )
@@ -1051,13 +1060,13 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 							pcount, path_list = act_net.build_paths( ip1, ip2, commence, expiry, bandw_in + bandw_out, find_all_paths ); 
 
 							if pcount > 0 {
-								net_sheep.Baa( 1,  "network: acceptable path found:" )
+								net_sheep.Baa( 1,  "network: %d acceptable path(s) found", pcount )
 
 								qid := p.Get_id()
 								p.Set_qid( qid )					// add the queue id to the pledge
 
 								for i := 0; i < pcount; i++ {		// set the queues for each path in the list (multiple paths if network is disjoint)
-									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s\n\t%s", i, *h1, *h2, path_list[i].To_str( ) )
+									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
 									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out )		// this causes the utilisation to be increased; no explicit Inc_util is needed
 								}
 
@@ -1121,6 +1130,9 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 					case REQ_IP2MAC:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2mac = req.Req_data.( map[string]*string )
+							for k, v := range act_net.ip2mac {
+								net_sheep.Baa( 3, "ip2mac: %s --> %s", k, *v )
+							}
 						} else {
 							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
 						}
@@ -1128,6 +1140,9 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 					case REQ_GWMAP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.gwmap = req.Req_data.( map[string]*string )
+							for k, v := range act_net.gwmap {
+								net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
+							}
 						} else {
 							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
 						}
@@ -1142,6 +1157,9 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 					case REQ_FIP2IP:
 						if req.Req_data != nil {
 							act_net.fip2ip = req.Req_data.( map[string]*string )
+							for k, v := range act_net.fip2ip {
+								net_sheep.Baa( 3, "fip2ip: %s --> %s", k, *v )
+							}
 						} else {
 							net_sheep.Baa( 1, "fip2ip map was nil; not changed" )
 						}
@@ -1164,7 +1182,7 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 
 					case REQ_NETUPDATE:								// build a new network graph
 						net_sheep.Baa( 2, "rebuilding network graph" )
-						new_net := build( act_net, sdn_host, max_link_cap, link_headroom )
+						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
 						if new_net != nil {
 							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back 
 							ip2vm_map := act_net.ip2vm
@@ -1237,7 +1255,7 @@ net_sheep.Baa( 1, "STATE: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != 
 					// --------------------- agent things -------------------------------------------------------------
 					case REQ_MAC2PHOST:
 						req.Response_ch = nil			// we don't respond to these
-						act_net.update_mac2phost(  req.Req_data.( []string ) )
+						act_net.update_mac2phost( req.Req_data.( []string ) )
 
 					default:
 						net_sheep.Baa( 1,  "unknown request received on channel: %d", req.Msg_type )

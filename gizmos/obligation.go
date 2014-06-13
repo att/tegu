@@ -32,6 +32,8 @@
 
 	Mods:		11 Feb 2014 : Added support for queues and removed the direct references
 					to timeslice fields.
+				12 Jun 2014 : Added abilty to alarm if a link reaches a threshold percentage
+					of the total link capacity.
 */
 
 package gizmos
@@ -56,8 +58,9 @@ const (
 )
 
 type Obligation struct {
-	Max_capacity int64				// the total capacity that any one slice may have assigned
-	tslist		*Time_slice
+	Max_capacity	int64			// the total capacity that any one slice may have assigned
+	alarm_thresh	int64			// alarm if a timeslice reaches this amount
+	tslist			*Time_slice		// list of allotments based on time windows
 }
 
 // -----------------------------------------------------------------------------------------------------------
@@ -65,11 +68,16 @@ type Obligation struct {
 /*
 	constructor 
 */
-func Mk_obligation( max_capacity int64 ) (ob *Obligation) {
+func Mk_obligation( max_capacity int64, alarm_thresh int ) (ob *Obligation) {
 	ob = &Obligation { }
 	ob.Max_capacity = max_capacity
 	ob.tslist = Mk_time_slice( 0, DEF_END_TS, 0 )
 
+	if alarm_thresh > 0 && alarm_thresh < 100 {
+		ob.alarm_thresh = (max_capacity * (100 - int64( alarm_thresh )))/100
+	} else {
+		ob.alarm_thresh = ob.Max_capacity
+	}
 	return
 }
 
@@ -129,12 +137,18 @@ func (ob *Obligation) suss_open_qnum( commence int64, conclude int64 ) ( int ) {
 	amount to be added to an existing queue's amount, and discarded if the queue for qid doesn't exist 
 	(a function of the underlying time-slice object). If a queue number < 0 is passed in, no effort to 
 	set/manage queues is made.
+
+	This function does not issue the actual warning when the utilisation of the link exceeds the alarm
+	threshold, but bubbles it up in msg.  This allows the caller (link) to add the link information 
+	in order to make the log message more useful.
+
 */
-func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64, qnum int, qid *string, qswdata *string ) {
+func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64, qnum int, qid *string, qswdata *string ) ( msg *string ) {
 	var (
 		ts1 *Time_slice = nil		// temp hold of timeslice for various reasons
 	)
 
+	msg = nil
 	for ts := ob.tslist; ts != nil; ts = ts.Next {
 		if !ts.Is_before( commence ) {					// only consider slices that overlap or are after the given window
 
@@ -158,6 +172,10 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 				if ts.Amt < 0 {								// if decrementing don't allow it to go neg
 					ts.Amt = 0
 				}
+				if ts.Amt >= ob.alarm_thresh {
+					tmsg := fmt.Sprintf( "high reservation allotment %d encroaches on limit (%d) from time %d until %d", ts.Amt, ob.Max_capacity, commence, conclude )
+					msg = &tmsg
+				}
 				return
 			}
 
@@ -165,8 +183,12 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 			if ts.Amt < 0 {			// if decrementing don't allow it to go neg
 				ts.Amt = 0
 			}
+				if ts.Amt >= ob.alarm_thresh {
+					tmsg := fmt.Sprintf( "utilisation is %d which encroaches on limit (%d) from time %d until %d", ts.Amt, ob.Max_capacity, commence, conclude )
+					msg = &tmsg
+				}
 			if qnum >= 0 {
-				ts.Add_queue( qnum, qid, qswdata, amt )	// adds the queue if qid does not exist, else it increases the amount
+				ts.Add_queue( qnum, qid, qswdata, amt )		// adds the queue if qid does not exist, else it increases the amount
 			}
 
 			ts1 = ts										// must hold last block in case we fall out of loop
@@ -183,15 +205,15 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 	This function assumes that the capacity has been vetted already and thus makes no checks
 	to see if the increase takes a timeframe beyond the obligation.
 */
-func (ob *Obligation) Inc_utilisation( commence int64, conclude int64, amt int64 ) {
-	ob.inc_utilisation( commence, conclude, amt, -1, nil, nil )
+func (ob *Obligation) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( msg *string ) {
+	return ob.inc_utilisation( commence, conclude, amt, -1, nil, nil )
 }
 
 /*
 	Decreases the capacity of a link's time window by the value of dec_cap.
 */
-func (ob *Obligation) Dec_utilisation( commence int64, conclude int64, dec_cap int64 ) {
-	ob.inc_utilisation( commence, conclude, -dec_cap, -1, nil, nil )
+func (ob *Obligation) Dec_utilisation( commence int64, conclude int64, dec_cap int64 ) ( msg *string ) {
+	return ob.inc_utilisation( commence, conclude, -dec_cap, -1, nil, nil )
 }
 
 /*
@@ -233,7 +255,7 @@ func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) 
 	adjusting the switch and thus needs to know switch/port and maybe more.  The format of the string isn't
 	important to the obligation.
 */
-func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commence int64, conclude int64 ) ( err error ) {
+func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commence int64, conclude int64 ) ( err error, msg *string ) {
 	var (
 		qnum int
 	)
@@ -250,7 +272,7 @@ func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commen
 	}
 
 	err = nil
-	ob.inc_utilisation( commence, conclude, amt, qnum, qid, swdata )
+	msg = ob.inc_utilisation( commence, conclude, amt, qnum, qid, swdata )
 
 	return	
 }

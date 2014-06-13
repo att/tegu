@@ -7,7 +7,8 @@
 	Date:		18 March 2014
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		11 Jun 2014 : Added external level control for bleating, and changed the
+					bleat id to gizmos. 
 */
 
 package gizmos
@@ -34,7 +35,7 @@ var (
 */
 func init( ) {
 	obj_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater 
-	obj_sheep.Set_prefix( "tegu-giz" )
+	obj_sheep.Set_prefix( "gizmos" )
 }
 
 /*
@@ -45,6 +46,9 @@ func Get_sheep( ) ( *bleater.Bleater ) {
 	return obj_sheep
 }
 
+/*
+	Provides the external world with a way to adjust the bleat level for gizmos.
+*/
 func Set_bleat_level( v uint ) {
 	obj_sheep.Set_level( v )
 }
