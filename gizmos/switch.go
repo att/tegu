@@ -277,7 +277,7 @@ type trail_list struct {
 func (s *Switch) ap_search_neighbours( target *string, clinks []*Link, clidx int, tl *trail_list ) {
 	if s.Has_host( target ) {
 		tl.ep = s							// mark the end switch
-		//obj_sheep.Baa( 0, ">>>FOUND on switch: %s\n", *s.id )
+		obj_sheep.Baa( 2, "search_neighbours: target found on switch: %s\n", *s.id )
 		c := make( []*Link, clidx )
 		copy( c, clinks[0:clidx+1]	)	// copy and push into the trail list 
 		tl.links[tl.lidx] = c
@@ -285,15 +285,15 @@ func (s *Switch) ap_search_neighbours( target *string, clinks []*Link, clidx int
 	} else {							// not the end, keep searching forward
 		// TODO: check to see that we aren't beyond limit
 		s.Flags |= tegu.SWFL_VISITED 
-		//obj_sheep.Baa( 0, ">>>testing switch: %s  has %d links", *s.id, s.lidx )
+		obj_sheep.Baa( 2, "search_neighbours: testing switch: %s  has %d links", *s.id, s.lidx )
 
 		for i := 0; i < s.lidx; i++ {				// for each link to a neighbour
 			sn := s.links[i].Get_forward_sw() 
 			if (sn.Flags & tegu.SWFL_VISITED) == 0  {
-				//obj_sheep.Baa( 0, ">>>advancing over link %d switch: %s", i, *sn.id )
+				obj_sheep.Baa( 2, "search_neighbours: advancing over link %d switch: %s", i, *sn.id )
 				clinks[clidx] = s.links[i]			// push the link onto the trail and check out the switch at the other end
 				sn.ap_search_neighbours( target, clinks, clidx+1,  tl )
-				//obj_sheep.Baa( 0, ">>>back to  switch: %s",  *s.id )
+				obj_sheep.Baa( 2, "search_neighbours: back to  switch: %s",  *s.id )
 			}
 		}
 	}
@@ -341,7 +341,7 @@ func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, i
 			}
 		}
 
-		obj_sheep.Baa( 0, "found %d unique links across %d trails", len( ulinks ), tl.lidx )
+		obj_sheep.Baa( 2, "found %d unique links across %d trails", len( ulinks ), tl.lidx )
 		links = make( []*Link, len( ulinks ) )
 		i := 0
 		for _, v := range ulinks {
