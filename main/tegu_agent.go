@@ -11,6 +11,7 @@
 	Mods:		05 May 2014 : Added ability to support the map_mac2phost request
 					which generaets data back to tegu.
 				06 May 2014 : Added support to drive setup_ovs_intermed script.
+				13 Jun 2014 : Corrected typo in warning message.
 */
 
 package main
@@ -120,7 +121,7 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 	msg.Rtype = "map_mac2phost"
 	msg.Vinfo = version
 	msg.State, msg.Rdata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
-	sheep.Baa( 1, "map_mac2pdata completed: state=%d respone data had %d elements", msg.State, len( msg.Rdata ) )
+	sheep.Baa( 1, "map_mac2phost completed: state=%d respone data had %d elements", msg.State, len( msg.Rdata ) )
 
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to execute: %s: %s", cmd_str, err )
