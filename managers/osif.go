@@ -127,9 +127,9 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				id = *idp
 			}
 
-			for _, os := range os_refs {
+			for _, os := range os_refs {								// find the project name in our list
 				if os.Equals_id( &id ) {
-					ok, err := os.Valid_for_project( &(tokens[0]) ) 
+					ok, err := os.Valid_for_project( &(tokens[0]), false ) 
 					if ok {
 						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
 						return &xstr, nil
@@ -145,7 +145,25 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 	return nil, fmt.Errorf( "invalid token/tenant pair" )
 }
 
-func mapvm2ip( os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
+
+/*
+	Verifies that the token passed in is a valid token for teh default (admin) openstack project 
+	as was defined in the config file. Returns "ok" if it is good, and an error otherwise. 	
+*/
+func validate_admin_token( admin *ostack.Ostack, token *string ) ( *string, error ) {
+	var (
+		result	string = "OK"
+	)
+
+	ok, err := admin.Valid_for_project( token, true ) 
+	if ok {
+		return &result, nil
+	}
+
+	return nil, err
+}
+
+func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
 	var (
 		err	error
 	)
@@ -291,13 +309,13 @@ func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[st
 /*
 	Gets an openstack interface object for the admin user.
 */
-func get_admin_creds( url *string, usr *string, passwd *string ) ( creds *ostack.Ostack ) {
+func get_admin_creds( url *string, usr *string, passwd *string, project *string ) ( creds *ostack.Ostack ) {
 	creds = nil
 	if url == nil || usr == nil || passwd == nil {
 		return
 	}
 
-	creds = ostack.Mk_ostack( url, usr, passwd, nil )		// project isn't known or needed for this
+	creds = ostack.Mk_ostack( url, usr, passwd, project )		// project isn't known or needed for this
 
 	return
 }
@@ -424,9 +442,10 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		id2pname		map[string]*string			// project id/name translation maps
 		pname2id	map[string]*string
 		req_token	bool = false				// if set to true in config file the token _must_ be present when called to validate
-		def_passwd	*string
+		def_passwd	*string						// defaults and what we assume are the admin creds
 		def_usr		*string
 		def_url		*string
+		def_project	*string
 	)
 
 	osif_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
@@ -446,6 +465,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		def_passwd = cfg_data["osif"]["passwd"]				// defaults applied if non-section given in list, or info omitted from the section
 		def_usr = cfg_data["osif"]["usr"]
 		def_url = cfg_data["osif"]["url"]
+		def_project = cfg_data["osif"]["project"]
 	
 		p = cfg_data["osif"]["refresh"] 
 		if p != nil {
@@ -479,7 +499,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	} else {
 		// TODO -- investigate getting id2pname maps from each specific set of creds defined if an overarching admin name is not given
 
-		os_admin = get_admin_creds( def_url, def_usr, def_passwd )
+		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project )
 		if os_admin != nil {
 			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the translation maps
 			for k := range pname2id {
@@ -599,6 +619,11 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			case REQ_VALIDATE_HOST:						// validate and translate a [token:]project-name/host  string
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, req_token )
+				}
+
+			case REQ_VALIDATE_ADMIN:					// validate an admin token passed in
+				if msg.Response_ch != nil {
+					msg.Response_data, msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ) )
 				}
 
 			default:

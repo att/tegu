@@ -65,7 +65,7 @@ import (
 	"forge.research.att.com/tegu/gizmos"
 )
 
-/* ------------------------------------------------------------------------------------------------------ */
+/* ---- validation and authorisation functions ---------------------------------------------------------- */
 
 /*
 	Make a reservation name that should be unique across invocations of tegu.
@@ -110,19 +110,76 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error 
 	return
 }
 
-// ------------------------------------------------------------------------------------------------------ 
 
 /*
 	Return true if the sender string is the localhost (127.0.0.1).
 */
-func is_localhost( a string ) ( bool ) {
-	tokens := strings.Split( a, ":" )
+func is_localhost( a *string ) ( bool ) {
+	tokens := strings.Split( *a, ":" )
 	if tokens[0] == "127.0.0.1" {
 		return true
 	}
 
 	return false
 }
+
+/*
+	Given what is assumed to be an admin token, verify it. The admin ID is assumed to be the 
+	ID defined as the default user in the config file. 
+
+	Returns true if the token could be authorised. 
+*/
+func is_admin_token( token *string ) ( bool ) {
+
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
+	
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_ADMIN, token, nil )		// verify that the token is good for the admin (default) user given in the config file
+	req = <- my_ch														// hard wait for response
+
+	if req.State == nil {
+http_sheep.Baa( 1, "authorised token: %s OK", *token )
+		return true
+	}
+
+http_sheep.Baa( 1, "token auth failed: %s", *token )
+	return false
+}
+
+/*
+	This function will validate the requestor is authorised to make the request based on the setting 
+	of priv_auth. When localhost, the request must have originated from the localhost. When token
+	the user must have sent a valid token for the admin user defined in the config file. When none, 
+	we just return true. 
+
+	Returns true if the command can be allowed; false if not. 
+*/
+func validate_auth( data *string, is_token bool ) ( allowed bool ) {
+	if priv_auth == nil {
+		return true
+	}
+
+	switch *priv_auth {
+		case "none":
+			return true
+
+		case "local":
+			fallthrough
+		case "localhost":
+			if ! is_token {
+				return is_localhost( data )
+			}
+			fallthrough
+
+		case "token":
+			return is_admin_token( data )
+	}
+
+	return false
+}
+
+// ------------------------------------------------------------------------------------------------------ 
 
 /*
 	pull the data from the request (the -d stuff from churl -d)
@@ -138,6 +195,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	return
 }
 
+// ---- main parsers ------------------------------------------------------------------------------------ 
 /*
 	parse and react to a POST request. we expect multiple, newline separated, requests
 	to be sent in the body. Supported requests:
@@ -150,6 +208,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 		graph
 		ping
 		listconns <hostname|hostip>
+
 */
 func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	var (
@@ -171,6 +230,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		sep			string = ""				// json object separator
 		req			*ipc.Chmsg
 		my_ch		chan *ipc.Chmsg
+		auth_data	string					// data (token or sending address) sent for authorisation
+		is_token	bool					// flag when auth data is a token
 	)
 
 
@@ -187,6 +248,16 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 			continue
 		}
 
+		if tokens[0][0:5] == "auth="	{
+			auth_data = tokens[0][5:]
+			tokens = tokens[1:]				// reslice to skip the jibberish
+			ntokens--
+			is_token = true
+		} else {
+			auth_data = sender 
+			is_token = false
+		}
+
 		req_count++
 		state = "ERROR"				// default for each loop; final set based on error count following loop
 		jreason = ""
@@ -195,7 +266,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		switch tokens[0] {
 
 			case "chkpt":
-				if is_localhost( sender ) {
+				if validate_auth( &auth_data, is_token ) {
 					req = ipc.Mk_chmsg( )
 					req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 					state = "OK"
@@ -264,7 +335,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				}
 
 			case "pause":
-				if is_localhost( sender ) {
+				if validate_auth( &auth_data, is_token ) {
 					if res_paused {							// already in a paused state, just say so and go on
 						jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
 						state = "WARN"
@@ -393,7 +464,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 			case "resume":
-				if is_localhost( sender ) {
+				if validate_auth( &auth_data, is_token ) {
 					if ! res_paused {							// not in a paused state, just say so and go on
 						jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
 						state = "WARN"
@@ -417,7 +488,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				}
 
 			case "verbose":									// verbose n [child-bleater]
-				if ! is_localhost( sender ) {
+				if ! validate_auth( &auth_data, is_token ) {
 					jreason = fmt.Sprintf( `"you are not authorised to submit a verbose request."` )
 					state = "ERROR"
 					break
@@ -640,10 +711,12 @@ func parse_get( out http.ResponseWriter, recs []string, sender string ) (state s
 	should be parsable as json.
 */
 func deal_with( out http.ResponseWriter, in *http.Request ) {
-	var data 	[]byte
-	var	recs	[]string
-	var state	string
-	var msg		string
+	var (
+		data 	[]byte
+		recs	[]string
+		state	string
+		msg		string
+	)
 
 	data = dig_data( in )
 	if( data == nil ) {						// missing data -- punt early
@@ -693,6 +766,9 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	http_sheep.Set_prefix( "http_api" )
 	tegu_sheep.Add_child( http_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
+	dup_str := "localhost"
+	priv_auth = &dup_str
+	
 	if cfg_data["httpmgr"] != nil {
 		if p := cfg_data["httpmgr"]["verbose"]; p != nil {
 			http_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
@@ -702,13 +778,35 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		if p != nil {
 			ssl_cert = p
 		}
+
 		p = cfg_data["httpmgr"]["key"]
 		if p != nil {
 			ssl_key = p
 		}
+
 		p = cfg_data["httpmgr"]["create_cert"]
 		if p != nil  && *p == "true" {	
 			create_cert = true
+		}
+		
+		p = cfg_data["httpmgr"]["priv_auth"]
+		if p != nil {
+			switch *p {
+				case "none":
+					priv_auth = p
+
+				case "local":
+					priv_auth = p
+
+				case "locahost":
+					priv_auth = p
+
+				case "token":
+					priv_auth = p
+
+				default:
+					http_sheep.Baa( 0, `WRN: invalid local authorisation type (%s), defaulting to "localhost"`, *p )
+			}
 		}
 	}
 

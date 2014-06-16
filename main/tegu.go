@@ -35,6 +35,7 @@
 				09 Jun 2014 : Added token authorisation support for reservations.
 				11 Jun 2014 : All paths option added-- reservation will be based on capacity over all
 							paths between h1 and h2.
+				16 Jun 2014 : Added abilityt to authorise privledged commands with an admin token.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -64,7 +65,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/16134"
+		version		string = "v3.0/16164"
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool

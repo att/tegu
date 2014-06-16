@@ -73,6 +73,7 @@ const (
 	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
 	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
 	REQ_GENCREDS				// generate crdentials
+	REQ_VALIDATE_ADMIN			// validate an admin token
 	
 )
 
@@ -133,7 +134,14 @@ var (
 	rm_sheep	*bleater.Bleater
 	http_sheep	*bleater.Bleater
 	qm_sheep	*bleater.Bleater
+
+	/*
+		http manager needs globals because the http callback doesn't allow private data to be passed
+	*/
+	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
 )
+
+//--------------------------------------------------------------------------------------------------------------------------
 
 /*
 	Sets up the global variables needed by the whole package. This should be invoked by the 
