@@ -15,9 +15,9 @@
 				These requests are supported:
 					POST:
 						chkpt	(limited)
-						graph
+						graph	(limited)
 						listconns
-						listhosts
+						listhosts	(limited)
 						listres
 						pause (limited)
 						reserve
@@ -40,6 +40,8 @@
 				22 May 2014 : Now forces a checkpoint after a successful reservation.
 				06 Jun 2014 : Added support to listen on https rather than http
 				10 Jun 2014 : Added requirement that certain admin commands be issued from localhost.
+				16 Jun 2014 : Added token validation for priv requests and added listhosts and graph to 
+					the set of priv commands.
 */
 
 package managers
@@ -277,30 +279,42 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				}
 
 			case "graph":
-				req = ipc.Mk_chmsg( )
-
-				req.Send_req( nw_ch, my_ch, REQ_NETGRAPH, nil, nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
-				req = <- my_ch											// hard wait for network thread response
-				if req.Response_data != nil {
-					state = "OK"
-					jreason = string( req.Response_data.(string) )
-				} else {
-					nerrors++
-					reason = "no output from network thread"
+				if validate_auth( &auth_data, is_token ) {
+					req = ipc.Mk_chmsg( )
+	
+					req.Send_req( nw_ch, my_ch, REQ_NETGRAPH, nil, nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
+					req = <- my_ch											// hard wait for network thread response
+					if req.Response_data != nil {
+						state = "OK"
+						jreason = string( req.Response_data.(string) )
+					} else {
+						nerrors++
+						reason = "no output from network thread"
+					} else {
+						state = "ERROR"
+						reason = fmt.Sprintf( "you are not authorised to submit a chkpt command" )
+					}
 				}
+
 	
 			case "listhosts":											// list known host information
-				req = ipc.Mk_chmsg( )
-				req.Send_req( nw_ch, my_ch, REQ_HOSTLIST, nil, nil )
-				req = <- my_ch
-				if req.State == nil {
-					state = "OK"
-					jreason = string( req.Response_data.(string) )
+				if validate_auth( &auth_data, is_token ) {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( nw_ch, my_ch, REQ_HOSTLIST, nil, nil )
+					req = <- my_ch
+					if req.State == nil {
+						state = "OK"
+						jreason = string( req.Response_data.(string) )
+					} else {
+						state = "ERROR"
+						reason = fmt.Sprintf( "%s", req.State )
+						nerrors++
+					}
 				} else {
 					state = "ERROR"
-					reason = fmt.Sprintf( "%s", req.State )
-					nerrors++
+					reason = fmt.Sprintf( "you are not authorised to submit a chkpt command" )
 				}
+
 			
 			case "listres":											// list reservations
 				req = ipc.Mk_chmsg( )
