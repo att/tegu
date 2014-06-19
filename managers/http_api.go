@@ -42,6 +42,7 @@
 				10 Jun 2014 : Added requirement that certain admin commands be issued from localhost.
 				16 Jun 2014 : Added token validation for priv requests and added listhosts and graph to 
 					the set of priv commands.
+				18 Jun 2014 : Corrected bug that was causing incorrect json goo when generating an error.
 */
 
 package managers
@@ -555,7 +556,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							default:
 								state = "ERROR"
 								http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
-								jreason = fmt.Sprintf( "\"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net" )
+								jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
 						}
 
 						http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
@@ -571,7 +572,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 			default:
 				nerrors++
-				reason = fmt.Sprintf( "unrecognised put/post action: req %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
+				reason = fmt.Sprintf( "unrecognised put and/or post action: reqest %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
 				http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
 		}
 
