@@ -156,14 +156,19 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 	ip to further limit the sessions which match. This string is assumed to have been
 	prepended with the necessary type (-D or -S) as set by the sender of the request.
 
+	tp_sport and tp_dport are the transport port for source and dest.  We assume both 
+	UDP and TCP traffic is implied and thus need to generate two fmods when either 
+	is set. 
+
 	mdscp is the dscp to match; a value of 0 causes no dscp value to be matched
 	wdscp is the dscp value that should be written on the outgoing datagram.
 
 	DSCP values are assumed to NOT have been shifted!
 */
-func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
+func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_sport int, tp_dport int, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
 	var (
 		host	string
+		qjson2	string = ""
 	)
 
 	if send_all || qnum != 1 {					// ignore if skipping intermediate and this isn't ingress/egress
@@ -186,20 +191,42 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, exp
 	
 			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d aT=%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp, wdscp, sw )
+			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d aT=%d tp_ports=%d/%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp, wdscp, tp_sport, tp_dport, sw )
 
-			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp, *m1, *m2 ) // MUST always match a dscp value to prevent loops on resubmit
+			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp, *m1, *m2 ) 		// MUST always match a dscp value to prevent loops on resubmit
 			if extip != "" {
-				qjson += fmt.Sprintf( `%s `,  extip )		// external IP is assumed to be prefixed with the correct -S or -D flag
+				qjson += fmt.Sprintf( `%s `,  extip )																		// external IP is assumed to be prefixed with the correct -S or -D flag
+			}
+
+			action := fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  %s 0xdead %s"`, qnum, wdscp << 2, act_type, sw )			// action will be the same for each set of json
+			if tp_sport > 0 || tp_dport > 0 {					// need to match on a transport port too
+				qjson2 = qjson									// dup the string
+				if tp_sport > 0 {
+					qjson += fmt.Sprintf( "-p 6:%d ", tp_sport )		// add in prototype 6 == tcp
+					qjson2 += fmt.Sprintf( "-p 17:%d ", tp_sport )		// add in prototype 17 == udp
+				}
+				if tp_dport > 0 {										// repeat if a dest port was given
+					qjson += fmt.Sprintf( "-P 6:%d ", tp_dport )
+					qjson2 += fmt.Sprintf( "-P 17:%d ", tp_dport )
+				}
+
+				qjson2 += action
+				qjson2 += ` ] } ] }`
 			}
 
 			qjson += fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  %s 0xdead %s"`, qnum, wdscp << 2, act_type, sw )			// set queue and dscp value, then resub table 0 to match openstack fmod
-
 			qjson += ` ] } ] }`
 
+
 			tmsg := ipc.Mk_chmsg( )
-fq_sheep.Baa( 2, ">>>> %s", qjson )
+			fq_sheep.Baa( 2, "1st/only json >>>> %s", qjson )
 			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
+
+			if qjson2 != "" {
+				tmsg := ipc.Mk_chmsg( )
+				fq_sheep.Baa( 2, "2nd json >>>> %s", qjson2 )
+				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
+			}
 		}
 	}
 }
@@ -368,17 +395,17 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 					if data[FQ_DIR_IN].(bool)  {			// inbound to this switch we need to revert from our settings to the 'origianal' settings
 						udscp := math.Abs( float64( data[FQ_DSCP].(int) ) )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, int( udscp ), send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 40, 32, send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 41, 46, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, int( udscp ), send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 40, 32, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 41, 46, send_all )
 					} else {								// outbound from this switch we need to translate dscp values to our values
 						udscp := 0							// if DSCP is > 0 it's an 'exit' value that we leave set and translate 0 to dscp; if < 0 we assume we must match the abs() value
 						if data[FQ_DSCP].(int) < 0 {
 							udscp = -data[FQ_DSCP].(int)
 						}
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, udscp, dscp, send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 32, 40, send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 46, 41, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, udscp, dscp, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 32, 40, send_all )
+						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 46, 41, send_all )
 					}
 					msg.Response_ch = nil
 				}

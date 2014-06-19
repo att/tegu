@@ -81,11 +81,14 @@ func mk_resname( ) ( string ) {
 /*
 	Validate the h1 and h2 strings translating the project name to a tenant ID if present. 
 	The translated names are returned if _both_ are valid; error is set otherwise.
+	In addition, if a port number is added to a host name it is stripped and returned.
 */
-func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error ) {
+func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2 int, err error ) {
 	
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
+	p1 = 0
+	p2 = 0
 	
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host
@@ -97,6 +100,11 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error 
 	}
 
 	h1x = *( req.Response_data.( *string ) )
+	tokens := strings.Split( h1x, ":" )
+	if len( tokens ) > 1 {
+		h1x = tokens[0]
+		p1 = clike.Atoi( tokens[1] )
+	}
 	
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
@@ -108,6 +116,11 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, err error 
 	}
 
 	h2x = *( req.Response_data.( *string ) )
+	tokens = strings.Split( h2x, ":" )
+	if len( tokens ) > 1 {
+		h2x = tokens[0]
+		p2 = clike.Atoi( tokens[1] )
+	}
 
 	return
 }
@@ -141,11 +154,10 @@ func is_admin_token( token *string ) ( bool ) {
 	req = <- my_ch														// hard wait for response
 
 	if req.State == nil {
-http_sheep.Baa( 1, "authorised token: %s OK", *token )
 		return true
 	}
 
-http_sheep.Baa( 1, "token auth failed: %s", *token )
+	http_sheep.Baa( 1, "admin token auth failed: %s", req.State )
 	return false
 }
 
@@ -214,7 +226,6 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 */
 func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	var (
-		err			error
 		res			*gizmos.Pledge			// reservation that we're working on
 		res_name	string = "undefined"
 		tokens		[]string
@@ -290,10 +301,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					} else {
 						nerrors++
 						reason = "no output from network thread"
-					} else {
-						state = "ERROR"
-						reason = fmt.Sprintf( "you are not authorised to submit a chkpt command" )
 					}
+				} else {
+					state = "ERROR"
+					reason = fmt.Sprintf( "you are not authorised to submit a graph command" )
 				}
 
 	
@@ -312,7 +323,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 				} else {
 					state = "ERROR"
-					reason = fmt.Sprintf( "you are not authorised to submit a chkpt command" )
+					reason = fmt.Sprintf( "you are not authorised to submit a listhosts command" )
 				}
 
 			
@@ -428,7 +439,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
 					res = nil 
-					h1, h2, err = validate_hosts( h1, h2 )								// translate project/host into tenantID/host and if token/project/name rquired validates token.
+					h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 					if err == nil {
 						dscp := 0
 						if tmap["dscp"] != nil {
@@ -436,7 +447,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						}
 	
 						res_name = mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-						res, err = gizmos.Mk_pledge( &h1, &h2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
+						res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
 					}
 
 

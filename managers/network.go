@@ -1031,7 +1031,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
 						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )
+						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
 						pcount, path_list = act_net.build_paths( h1, h2, commence, expiry, bandw_in + bandw_out, find_all_paths ); 
 
@@ -1046,7 +1046,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_RESERVE:
 						// host names are expected to have been vetted (if needed) and translated to tenant-id/name if IDs are enabled
 						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )		
+						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
 						net_sheep.Baa( 1,  "network: reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
 
 						ip1, err := act_net.name2ip( h1 )
@@ -1087,7 +1087,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_DEL:							// delete the utilisation for the given reservation
 						net_sheep.Baa( 1,  "network: deleting reservation" )
 						p := req.Req_data.( *gizmos.Pledge )
-						_, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
+						_, _, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						pl := p.Get_path_list( )
 						pcount := len( pl )
 

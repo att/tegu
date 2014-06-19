@@ -127,7 +127,7 @@ func (i *Inventory) orig_push_reservations( ) {
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-				h1, h2, _, expiry, _, _ := p.Get_values( )
+				h1, h2, _, _, _, expiry, _, _ := p.Get_values( )
 
 				ip1 := name2ip( h1 )
 				if *h2 == "0.0.0.0" || *h2 == "any" {		// these must be forced as they should never show in name2ip map (DEPRECATED)
@@ -250,7 +250,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 		if p != nil  &&  ! p.Is_pushed() {
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 				fq_data[FQ_DSCP] = p.Get_dscp()
-				h1, h2, _, expiry, _, _ := p.Get_values( )
+				h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
 
 				ip1 := name2ip( h1 )
 				ip2 = name2ip( h2 )
@@ -269,10 +269,11 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						fq_data[FQ_EXPIRY] = expiry						// set data constant to all requests for the path list
 					}
 					fq_data[FQ_ID] = rname
-					timestamp := time.Now().Unix() + 16			// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
+					fq_data[FQ_TPSPORT] = p1							// forward direction transport ports are h1==src h2==dest
+					fq_data[FQ_TPDPORT] = p2
+					timestamp := time.Now().Unix() + 16									// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
-					//for i := 0; i < len( plist ); i++ {			// for each path in the list, send fmod requests for each endpoint and each intermediate link, both forwards and backwards
-					for i := range plist {
+					for i := range plist { 												// for each path in the list, send fmod requests for each endpoint and each intermediate link, both forwards and backwards
 						extip := plist[i].Get_extip()
 						if extip != nil {
 							fq_data[FQ_EXTIP] = *extip
@@ -322,6 +323,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 
 						// ---- push flow-mods in the h2->h1 direction -----------
 						rev_rname := "R" + rname		// the egress link has an R(name) queue name
+						fq_data[FQ_TPSPORT] = p2							// forward direction transport ports are h1==src h2==dest
+						fq_data[FQ_TPDPORT] = p1
 
 						fq_data[FQ_EXTTY] = "-S"							// external reference is the source for backward component
 						epip, _ = plist[i].Get_h1().Get_addresses() 		// for egress and backward intermediates the dest is h1, so reverse them

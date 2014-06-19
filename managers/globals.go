@@ -96,7 +96,10 @@ const (
 	FQ_DSCP						// user supplied dscp that the data should have on egress
 	FQ_EXTIP					// an external IP that is needed to setup flow mods when session traveling through a gateway
 	FQ_EXTTY					// external IP type used in fmod command (either -D or -S)
-	FQ_SIZE						// this must be LAST as it indicates the size of the array needed
+	FQ_TPSPORT					// transport source port number
+	FQ_TPDPORT					// transport dest port number
+
+	FQ_SIZE						// CAUTION:  this must be LAST as it indicates the size of the array needed
 
 	FQ_QLIST	int = 0			// the list of current queue settings 	(set queues)
 )

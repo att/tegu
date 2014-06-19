@@ -25,15 +25,17 @@ import (
 	//"html"
 	//"net/http"
 	"os"
-	//"strings"
+	"strings"
 	"time"
 
-	//"forge.research.att.com/gopkgs/clike"
+	"forge.research.att.com/gopkgs/clike"
 )
 
 type Pledge struct {
 	host1		*string
 	host2		*string
+	tpport1		int			// transport port number or 0 if not defined
+	tpport2		int			// thee match h1/h2 respectively
 	commence	int64
 	expiry		int64
 	bandw_in	int64		// bandwidth to reserve inbound to host1
@@ -72,7 +74,7 @@ type Json_pledge struct {
 	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward 
 	(to the current time) if it is less than the current time.
 */
-func Mk_pledge( host1 *string, host2 *string, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int ) ( p *Pledge, err error ) {
+func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int ) ( p *Pledge, err error ) {
 	now := time.Now().Unix()
 
 	err = nil
@@ -101,6 +103,8 @@ func Mk_pledge( host1 *string, host2 *string, commence int64, expiry int64, band
 	p = &Pledge{ 
 		host1: host1, 
 		host2: host2,
+		tpport1: p1,
+		tpport2: p2,
 		commence: commence,
 		expiry: expiry,
 		bandw_in:	bandw_in,
@@ -134,6 +138,8 @@ func (p *Pledge) Nuke( ) {
 
 /*
 	Given a json string unpack it and put it into a pledge struct.
+	We assume that the host names are name:port and split them apart 
+	as would be expected. 
 */
 func (p *Pledge) From_json( jstr *string ) ( err error ){
 	jp := new( Json_pledge )
@@ -142,8 +148,22 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		return
 	}
 
-	p.host1 = jp.Host1
-	p.host2 = jp.Host2
+	tokens := strings.Split( *jp.Host1, ":" )
+	p.host1 = &tokens[1]
+	if len( tokens ) > 1 {
+		p.tpport1 = clike.Atoi( tokens[2] )
+	} else {
+		p.tpport1 = 0
+	}
+
+	tokens = strings.Split( *jp.Host2, ":" )
+	p.host2 = &tokens[1]
+	if len( tokens ) > 1 {
+		p.tpport2 = clike.Atoi( tokens[2] )
+	} else {
+		p.tpport2 = 0
+	}
+
 	p.commence = jp.Commence
 	p.expiry = jp.Expiry
 	p.id = jp.Id
@@ -233,8 +253,8 @@ func (p *Pledge) To_str( ) ( s string ) {
 		}
 	}
 
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s h2=%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v", state, diff, caption, *p.host1, *p.host2, 
-				*p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v", state, diff, caption, 
+			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed )
 	return
 }
 
@@ -264,7 +284,7 @@ func (p *Pledge) To_json( ) ( json string ) {
 		}
 	}
 	
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": %q, "host2": %q, "id": %q, "qid": %q }`, state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.host2, *p.id, *p.qid )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q }`, state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
 
 	return
 }
@@ -487,17 +507,19 @@ func (p *Pledge) Get_hosts( ) ( *string, *string ) {
 	Returns the set of values that are needed to create a pledge in the network:
 		pointer to host1 name,
 		pointer to host2 name,
+		the h1 transport port number or 0
+		the h2 transport port number or 0
 		the commence time,
 		the expiry time,
 		the inbound bandwidth,
 		the outbound bandwidth
 */
-func (p *Pledge) Get_values( ) ( *string, *string, int64, int64, int64, int64 ) {
+func (p *Pledge) Get_values( ) ( *string, *string, int, int, int64, int64, int64, int64 ) {
 	if p == nil {
-		return &empty_str, &empty_str, 0, 0, 0, 0
+		return &empty_str, &empty_str, 0, 0, 0, 0, 0, 0
 	}
 
-	return p.host1, p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out 
+	return p.host1, p.host2, p.tpport1, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out 
 }
 
 /*

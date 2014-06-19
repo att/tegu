@@ -147,20 +147,21 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 
 
 /*
-	Verifies that the token passed in is a valid token for teh default (admin) openstack project 
-	as was defined in the config file. Returns "ok" if it is good, and an error otherwise. 	
+	Verifies that the token passed in is a valid token for the default user given in the 
+	config file. 
+	Returns "ok" if it is good, and an error otherwise. 	
 */
-func validate_admin_token( admin *ostack.Ostack, token *string ) ( *string, error ) {
-	var (
-		result	string = "OK"
-	)
+func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
 
-	ok, err := admin.Valid_for_project( token, true ) 
-	if ok {
-		return &result, nil
-	}
+osif_sheep.Baa( 1, "validating admin token" )
+	err := admin.Token_validation( token, user ) 		// ensure token is good and was issued for user
+	if err == nil {
+osif_sheep.Baa( 1, "admin token validated successfully: %s", *token )
+	} else {
+osif_sheep.Baa( 1, "admin token invalid: %s", err )
+}
 
-	return nil, err
+	return err
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
@@ -623,7 +624,8 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_VALIDATE_ADMIN:					// validate an admin token passed in
 				if msg.Response_ch != nil {
-					msg.Response_data, msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ) )
+					msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ), def_usr )
+					msg.Response_data = ""
 				}
 
 			default:
