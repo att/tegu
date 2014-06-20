@@ -12,6 +12,8 @@
 							the checkpoint file.
 				13 May 2014 - Added support to enable an exit dscp value on a reservation. 
 				05 Jun 2014 - Added support for pause.
+				20 Jun 2014 - Corrected bug that allowed future start time with an earlier expry time
+							to be accepted. 
 */
 
 package gizmos
@@ -80,14 +82,14 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 	err = nil
 	p = nil
 
-	if expiry <= now {
+	if commence < now {				// ajust forward to better play with windows on the paths
+		commence = now
+	}
+
+	if expiry <= commence {						// bug #156 fix
 		err = fmt.Errorf( "bad expiry submitted, already expired: now=%d expiry=%d", now, expiry );
 		obj_sheep.Baa( 2, "pledge: %s", err )
 		return
-	}
-
-	if commence < now {				// ajust forward to better play with windows on the paths
-		commence = now
 	}
 	
 	if *host2 == "" || *host2 == "any" {			// no longer allowed 
