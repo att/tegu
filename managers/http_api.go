@@ -43,6 +43,7 @@
 				16 Jun 2014 : Added token validation for priv requests and added listhosts and graph to 
 					the set of priv commands.
 				18 Jun 2014 : Corrected bug that was causing incorrect json goo when generating an error.
+				20 Jun 2014 : Corrected bug that allowed a reservation between the same host (VM) name. 
 */
 
 package managers
@@ -83,6 +84,9 @@ func mk_resname( ) ( string ) {
 	Validate the h1 and h2 strings translating the project name to a tenant ID if present. 
 	The translated names are returned if _both_ are valid; error is set otherwise.
 	In addition, if a port number is added to a host name it is stripped and returned.
+
+	If the resulting host names match (project/host[:port]) then we return an error
+	as this isn't allowed. 
 */
 func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2 int, err error ) {
 	
@@ -117,6 +121,11 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2
 	}
 
 	h2x = *( req.Response_data.( *string ) )
+	if h1 == h2 {
+		err = fmt.Errorf( "host names are the same" )
+		return
+	}
+
 	tokens = strings.Split( h2x, ":" )
 	if len( tokens ) > 1 {
 		h2x = tokens[0]

@@ -40,6 +40,7 @@
 					to translate project (tenant) name into an ID. 
 				09 Jun 2014 : Converted the openstack cred list to a map.
 				10 Jun 2014 : Changes to ignore the "_ref_" entry in the cred map. 
+				21 Jun 2014 : Clarification in comment. 
 */
 
 package managers
@@ -71,7 +72,7 @@ import (
 /*
 	Given a raw string of the form [[<token>]/{project-name|ID}]/<data> verify
 	that token is valid for project, and translate project to an ID.  The resulting output
-	is a string tenant_id/hostname (token stripped) if the token was valid for the project. 
+	is a string tenant_id/<data> (token is stripped) if the token was valid for the project. 
 	If the token was not valid, then the resulting string is nil and error will be set. 
 
 	If token is omitted from the raw string, and is not required, the project name is 
