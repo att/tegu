@@ -77,7 +77,8 @@ const (
 	REQ_PROJNAME2ID				// translate project name to ID
 	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port 
 	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
-	
+	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
+	REQ_SETULCAP				// set a user link capacity
 )
 
 const (

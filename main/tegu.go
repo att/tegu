@@ -38,6 +38,7 @@
 				16 Jun 2014 : Added abilityt to authorise privledged commands with a token generated using 
 							the default (admin) user name given in the config file.
 				17 Jun 2014 : Added support for transport ports on reservation host names. 
+				25 Jun 2014 : Added user (project, tenant, whatever) level caps on each link (gak).
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */

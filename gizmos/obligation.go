@@ -34,6 +34,7 @@
 					to timeslice fields.
 				12 Jun 2014 : Added abilty to alarm if a link reaches a threshold percentage
 					of the total link capacity.
+				29 Jun 2014 - Changes to support user link limits.
 */
 
 package gizmos
@@ -74,7 +75,7 @@ func Mk_obligation( max_capacity int64, alarm_thresh int ) (ob *Obligation) {
 	ob.tslist = Mk_time_slice( 0, DEF_END_TS, 0 )
 
 	if alarm_thresh > 0 && alarm_thresh < 100 {
-		ob.alarm_thresh = (max_capacity * (100 - int64( alarm_thresh )))/100
+		ob.alarm_thresh = (max_capacity * int64( alarm_thresh ))/100
 	} else {
 		ob.alarm_thresh = ob.Max_capacity
 	}
@@ -142,8 +143,10 @@ func (ob *Obligation) suss_open_qnum( commence int64, conclude int64 ) ( int ) {
 	threshold, but bubbles it up in msg.  This allows the caller (link) to add the link information 
 	in order to make the log message more useful.
 
+	The usr fence passed in provides the user name and defaults.
+
 */
-func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64, qnum int, qid *string, qswdata *string ) ( msg *string ) {
+func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64, qnum int, qid *string, qswdata *string, usr *Fence ) ( msg *string ) {
 	var (
 		ts1 *Time_slice = nil		// temp hold of timeslice for various reasons
 	)
@@ -168,6 +171,9 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 					ts.Add_queue( qnum, qid, qswdata, amt )	// adds the queue if qid does not exist, else it increases the amount
 				}
 
+				if usr != nil {								// adjust user based utilisation if usr fence (default values) given
+					ts.Inc_usr( usr, amt, ob.Max_capacity )
+				}
 				ts.Amt += amt								// increase just the early part; capaccity past the split point remains the same
 				if ts.Amt < 0 {								// if decrementing don't allow it to go neg
 					ts.Amt = 0
@@ -203,24 +209,30 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 /*
 	Runs the list of time slices, and increases the amount used by amt.
 	This function assumes that the capacity has been vetted already and thus makes no checks
-	to see if the increase takes a timeframe beyond the obligation.
+	to see if the increase takes a timeframe beyond the obligation. The user fence
+	passed in provides the user name and the defaults (max) that are to be used if this is
+	the first time the user has been added to this obligation. If user limits are not
+	being enforced, then a nil pointer may be passed. 
 */
-func (ob *Obligation) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( msg *string ) {
-	return ob.inc_utilisation( commence, conclude, amt, -1, nil, nil )
+func (ob *Obligation) Inc_utilisation( commence int64, conclude int64, amt int64, usr *Fence ) ( msg *string ) {
+	return ob.inc_utilisation( commence, conclude, amt, -1, nil, nil, usr )
 }
 
 /*
-	Decreases the capacity of a link's time window by the value of dec_cap.
+	Decreases the capacity of a link's time window by the value of dec_cap. The user fence
+	passed in provides the user name and the defaults (max) that are to be used if this is
+	the first time the user has been added to this obligation. If user limits are not
+	being enforced, then a nil pointer may be passed. 
 */
-func (ob *Obligation) Dec_utilisation( commence int64, conclude int64, dec_cap int64 ) ( msg *string ) {
-	return ob.inc_utilisation( commence, conclude, -dec_cap, -1, nil, nil )
+func (ob *Obligation) Dec_utilisation( commence int64, conclude int64, dec_cap int64, usr *Fence ) ( msg *string ) {
+	return ob.inc_utilisation( commence, conclude, -dec_cap, -1, nil, nil, usr )
 }
 
 /*
 	Runs the list of time slices and returns true if the capacity increase (amt) can 
 	be satisifed across the given time window.
 */
-func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) ( result bool ) {
+func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64, usr *string ) ( result bool, err error ) {
 	var (
 		ts *Time_slice
 	)
@@ -231,6 +243,7 @@ func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) 
 	}
 
 	result = true
+	err = nil
 	for ts = ob.tslist; ts != nil; ts = ts.Next {
 		if ts.Is_after( conclude ) {					// reached the end of slices that could overlay the window
 			return
@@ -238,9 +251,17 @@ func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) 
 
 		if ts.Overlaps( commence, conclude ) {
 			if ts.Amt + amt > ob.Max_capacity {		
-				result = false;	
-				return
+				err = fmt.Errorf( "link lacks capacity: need %d have %d", ts.Amt + amt, ob.Max_capacity )
+				result = false
+			} else {
+				if usr != nil {								// must check user fence if user name given
+					result, err = ts.Has_usr_capacity( usr, amt ) 
+				}
 			}
+		}
+
+		if ! result {
+			return
 		}
 	}
 
@@ -255,7 +276,7 @@ func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) 
 	adjusting the switch and thus needs to know switch/port and maybe more.  The format of the string isn't
 	important to the obligation.
 */
-func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commence int64, conclude int64 ) ( err error, msg *string ) {
+func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commence int64, conclude int64, usr *Fence ) ( err error, msg *string ) {
 	var (
 		qnum int
 	)
@@ -272,7 +293,7 @@ func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commen
 	}
 
 	err = nil
-	msg = ob.inc_utilisation( commence, conclude, amt, qnum, qid, swdata )
+	msg = ob.inc_utilisation( commence, conclude, amt, qnum, qid, swdata, usr )
 
 	return	
 }
@@ -281,16 +302,16 @@ func (ob *Obligation) Add_queue( qid *string, swdata *string,  amt int64, commen
 	Increase the amount assigned to the queue. If the queue ID isn't known to the obilgation
 	then no action will be taken (a function of the underlying time_slice object).
 */
-func (ob *Obligation) Inc_queue( qid *string, amt int64, commence int64, conclude int64 ) {
-	ob.inc_utilisation( commence, conclude, amt, 0, qid, nil )
+func (ob *Obligation) Inc_queue( qid *string, amt int64, commence int64, conclude int64, usr *Fence ) {
+	ob.inc_utilisation( commence, conclude, amt, 0, qid, nil, usr )
 }
 
 /*
 	Decrease the amount assigned to the queue. If the queue ID isn't known to the obilgation
 	then no action will be taken (a function of the underlying time_slice object).
 */
-func (ob *Obligation) Dec_queue( qid *string, amt int64, commence int64, conclude int64 ) {
-	ob.inc_utilisation( commence, conclude, -amt, 0, qid, nil )
+func (ob *Obligation) Dec_queue( qid *string, amt int64, commence int64, conclude int64, usr *Fence ) {
+	ob.inc_utilisation( commence, conclude, -amt, 0, qid, nil, usr )
 }
 
 
@@ -400,7 +421,7 @@ func (ob *Obligation) To_json( ) ( s string ) {
 		ts *Time_slice
 	)
 
-	s = fmt.Sprintf( `{ "max_capacity": %d, "timeslices": [ `, ob.Max_capacity )
+	s = fmt.Sprintf( `{ "max_capacity": %d, "alarm": %d, "timeslices": [ `, ob.Max_capacity, ob.alarm_thresh )
 
 	for ts = ob.tslist; ts != nil; ts = ts.Next {
 		s += fmt.Sprintf( "%s", ts.To_json( ) )

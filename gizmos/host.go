@@ -14,6 +14,8 @@
 				the host.  At the moment, it does not appear that it is possible to 
 				map the IP address to the switch/port as the list of IPs and the list
 				of attachment points seem not to be ordered.
+
+	Mod:		29 Jun 2014 - Changes to support user link limits.
 */
 
 package gizmos
@@ -31,7 +33,7 @@ import (
 	defines a host
 */
 type Host struct {
-	vmid	string			// id given to the host by the virtualisation manager (ostack etc.)
+	vmid	*string			// id given to host by virtulation manager (e.g. ostack)
 	mac		string
 	ip4		string
 	ip6		string
@@ -64,6 +66,13 @@ func Mk_host( mac string, ip4 string, ip6 string ) (h *Host) {
 func ( h *Host ) Nuke() {
 	h.conns = nil
 	h.ports = nil
+}
+
+/*
+	Adds the vmid to the host (usually not known at mk time, so it's not a part of the mk process.
+*/
+func (h *Host) Add_vmid( vmid *string ) {
+	h.vmid = vmid
 }
 
 /*
@@ -202,7 +211,12 @@ func (h *Host) To_json( ) ( s string ) {
 		return
 	}
 
-	s = fmt.Sprintf( `{ "mac": %q`, h.mac )
+	if h.vmid != nil {
+		s = fmt.Sprintf( `{ "vmid": %q, "mac": %q`, *h.vmid, h.mac )
+	} else {
+		s = fmt.Sprintf( `{ "vmid": "missing", "mac": %q`, h.mac )
+	}
+
 	if h.ip4 != "" {
 		s += fmt.Sprintf( `, "ip4": %q`,  h.ip4 )
 	}

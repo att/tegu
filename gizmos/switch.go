@@ -16,6 +16,7 @@
 				13 May 2014 - Corrected bug in debug string. 
 				11 Jun 2014 - Changes to support finding all paths between two VMs rather than just 
 					the shortest one.
+				29 Jun 2014 - Changes to support user link limits.
 */
 
 package gizmos
@@ -46,6 +47,7 @@ type Switch struct {
 	links		[]*Link
 	lidx		int					// next open index in links
 	hosts		map[string] bool
+	hvmid		map[string]*string	// vmids of attached hosts
 	hport		map[string] int		// the port that the host (string) attaches to
 
 									// these are for path finding and are needed externally
@@ -72,6 +74,7 @@ func Mk_switch( id *string ) ( s *Switch ) {
 	s.links = make( []*Link, 32 )
 	s.hosts = make( map[string]bool, 64 )
 	s.hport = make( map[string]int, 64 )
+	s.hvmid = make( map[string]*string, 64 )
 	return
 }
 
@@ -114,9 +117,10 @@ func (s *Switch) Add_link( link *Link ) {
 /*
 	track an attached host (by name only)
 */
-func (s *Switch) Add_host( host *string, port int ) {
+func (s *Switch) Add_host( host *string, vmid *string, port int ) {
 	s.hosts[*host] = true
 	s.hport[*host] = port
+	s.hvmid[*host] = vmid
 }
 
 /*
@@ -156,13 +160,17 @@ func (s *Switch) Get_link( i int ) ( l *Link ) {
 	if the cost through the current switch is lower than the cost recorded 
 	at the neighbour. If no neighbour links to the target, we return null.
 
+	The usr max value is a percentage which defines the max percentage of 
+	a link that the user (tenant in openstack terms) is allowed to reserve
+	on any given link. 
+
 	We will not probe a neighbour if the link to it cannot accept the additional
 	capacity. 
 
 	The target may be the name of the host we're looking for, or the ID of the
 	endpoint switch to support finding a path to a "gateway".
 */
-func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap int64 ) (found *Switch) {
+func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap int64, usr *string, usr_max int64 ) (found *Switch) {
 	var (
 		fsw	*Switch			// next neighbour switch (through link)
 	)
@@ -171,10 +179,10 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 
 	//fmt.Printf( "\n\nsearching neighbours of (%s) for %s\n", s.To_str(), *target )
 	for i := 0; i < s.lidx; i++ {
-		if s != fsw  &&  s.links[i].Has_capacity( commence, conclude, inc_cap ) {
+		if s != fsw  &&  s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) {
 			fsw = s.links[i].forward				// at the switch on the other side of the link
 			if (fsw.Flags & tegu.SWFL_VISITED) == 0 {
-				obj_sheep.Baa( 2, "switch:probe_neigbour: following link %d -- has capacity to (%s) and NOT visited", i, fsw.To_str() )
+				obj_sheep.Baa( 3, "switch:probe_neigbour: following link %d -- has capacity to (%s) and NOT visited", i, fsw.To_str() )
 				if s.Cost + s.links[i].Cost < fsw.Cost {
 					//fmt.Printf( "\tsetting cost: %d\n", s.Cost + s.links[i].Cost )
 					fsw.Cost = s.Cost + s.links[i].Cost
@@ -182,7 +190,7 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 					fsw.Plink = i								// using its ith link
 				}
 
-				obj_sheep.Baa( 2, "compare: (%s) (%s)", *target, *(fsw.Get_id()) )
+				obj_sheep.Baa( 3, "compare: (%s) (%s)", *target, *(fsw.Get_id()) )
 				if fsw.Has_host( target ) || *(fsw.Get_id()) == *target {			// target is attahced to this switch, or the target is a swtich that is the forward switch
 					fsw.Prev = s
 					fsw.Plink = i
@@ -204,9 +212,12 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 	there is no ordering of queued nodes such that the lowest cost is always
 	searched next.  A path may exist, but not be available if the usage on a 
 	link cannot support the additional capacity that is requested via inc_cap.
+
+	The usr_max vlaue is a percentage (1-100) which indicaes the max percentage
+	of a link that the user may reserve. 
 		
 */
-func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64 ) (found *Switch) {
+func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr *string, usr_max int64 ) (found *Switch) {
 	var (
 		sw		*Switch
 		fifo 	[]*Switch
@@ -230,14 +241,14 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64 ) (f
 			pop = 0; 
 		}
 
-		found = sw.probe_neighbours( target, commence, conclude, inc_cap )
+		found = sw.probe_neighbours( target, commence, conclude, inc_cap, usr, usr_max )
 		if found != nil {
 			return
 		}
 		
 		if sw.Flags & tegu.SWFL_VISITED == 0 {				// possible that it was pushed multiple times and already had it's neighbours queued
 			for i := 0; i < sw.lidx; i++ {
-				if sw.links[i].Has_capacity( commence, conclude, inc_cap ) {
+				if sw.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) {
 					if sw.links[i].forward.Flags & tegu.SWFL_VISITED == 0 {
 						fifo[push] = sw.links[i].forward
 						push++
@@ -277,7 +288,7 @@ type trail_list struct {
 func (s *Switch) ap_search_neighbours( target *string, clinks []*Link, clidx int, tl *trail_list ) {
 	if s.Has_host( target ) {
 		tl.ep = s							// mark the end switch
-		obj_sheep.Baa( 2, "search_neighbours: target found on switch: %s\n", *s.id )
+		obj_sheep.Baa( 3, "search_neighbours: target found on switch: %s\n", *s.id )
 		c := make( []*Link, clidx )
 		copy( c, clinks[0:clidx+1]	)	// copy and push into the trail list 
 		tl.links[tl.lidx] = c
@@ -285,15 +296,15 @@ func (s *Switch) ap_search_neighbours( target *string, clinks []*Link, clidx int
 	} else {							// not the end, keep searching forward
 		// TODO: check to see that we aren't beyond limit
 		s.Flags |= tegu.SWFL_VISITED 
-		obj_sheep.Baa( 2, "search_neighbours: testing switch: %s  has %d links", *s.id, s.lidx )
+		obj_sheep.Baa( 3, "search_neighbours: testing switch: %s  has %d links", *s.id, s.lidx )
 
 		for i := 0; i < s.lidx; i++ {				// for each link to a neighbour
 			sn := s.links[i].Get_forward_sw() 
 			if (sn.Flags & tegu.SWFL_VISITED) == 0  {
-				obj_sheep.Baa( 2, "search_neighbours: advancing over link %d switch: %s", i, *sn.id )
+				obj_sheep.Baa( 3, "search_neighbours: advancing over link %d switch: %s", i, *sn.id )
 				clinks[clidx] = s.links[i]			// push the link onto the trail and check out the switch at the other end
 				sn.ap_search_neighbours( target, clinks, clidx+1,  tl )
-				obj_sheep.Baa( 2, "search_neighbours: back to  switch: %s",  *s.id )
+				obj_sheep.Baa( 3, "search_neighbours: back to  switch: %s",  *s.id )
 			}
 		}
 	}
@@ -308,8 +319,11 @@ func (s *Switch) ap_search_neighbours( target *string, clinks []*Link, clidx int
 	returned.  If any of the links cannot support the capacity, the list will be nil or empty; this is
 	also the case if no paths are found.  The error message will indicate the exact reason if that is 
 	important to the caller. 
+
+	Usr_max is a perctage value (1-100) that defines the maximum percentage of any link that the user
+	may reserve. 
 */
-func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, inc_amt int64 ) ( links []*Link, ep *Switch, err error ) {
+func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, inc_amt int64, usr *string, usr_max int64 ) ( links []*Link, ep *Switch, err error ) {
 	var (
 		ulinks	map[string]*Link			// unique list of links involved in all trails
 	)
@@ -346,8 +360,8 @@ func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, i
 		i := 0
 		for _, v := range ulinks {
 			// TODO:  Add tenant based check
-			if ! v.Has_capacity( commence, conclude, inc_amt ) {
-				err = fmt.Errorf( "no capacity found bwtween switch (%s) and target (%s)", *s.id, *target )
+			if ! v.Has_capacity( commence, conclude, inc_amt, usr, usr_max ) {
+				err = fmt.Errorf( "no capacity found between switch (%s) and target (%s)", *s.id, *target )
 				links = nil
 				break
 			}
@@ -403,7 +417,11 @@ func (s *Switch) To_json( ) ( jstr string ) {
 		for k := range s.hosts {
 			if s.hosts[k] == true {
 				//jstr += fmt.Sprintf( `%s"%s"`, sep, k )
-				jstr += fmt.Sprintf( `%s { "host": %q, "port": %d }`, sep, k, s.hport[k]  )
+				vmid := "unknown"
+				if s.hvmid[k] != nil {
+					vmid = *s.hvmid[k]
+				}
+				jstr += fmt.Sprintf( `%s { "host": %q, "port": %d, "vmid": %q }`, sep, k, s.hport[k], vmid  )
 				sep = ","
 			}
 		}
