@@ -36,19 +36,22 @@ import (
 type Pledge struct {
 	host1		*string
 	host2		*string
-	tpport1		int			// transport port number or 0 if not defined
-	tpport2		int			// thee match h1/h2 respectively
+	tpport1		int				// transport port number or 0 if not defined
+	tpport2		int				// thee match h1/h2 respectively
 	commence	int64
 	expiry		int64
-	bandw_in	int64		// bandwidth to reserve inbound to host1
-	bandw_out	int64		// bandwidth to reserve outbound from host1
-	dscp		int			// dscp value that should be propigated
-	id			*string		// name that the client can use to manage (modify/delete)
-	qid			*string		// name that we'll assign to the queue which allows us to look up the pledge's queues
-	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
-	path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
-	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
-	paused		bool		// set if reservation has been paused
+	bandw_in	int64			// bandwidth to reserve inbound to host1
+	bandw_out	int64			// bandwidth to reserve outbound from host1
+	dscp		int				// dscp value that should be propigated
+	id			*string			// name that the client can use to manage (modify/delete)
+	qid			*string			// name that we'll assign to the queue which allows us to look up the pledge's queues
+	usrkey		*string			// a 'cookie' supplied by the user to prevent any other user from modifying
+	path_list	[]*Path			// list of paths that represent the bandwith and can be used to send flowmods etc.
+	mbox_list	[]*Mbox			// list of middleboxes if the pledge is a steering pledge
+	mbidx		int				// insertion point into mblist
+	pushed		bool			// set when pledge has been pushed into the openflow environment (skoogi)
+	paused		bool			// set if reservation has been paused
+	ptype		int				// pledge type from gizmos PT_ constants. 
 }
 
 /*
@@ -66,7 +69,36 @@ type Json_pledge struct {
 	Id			*string
 	Qid			*string
 	Usrkey		*string
+	Ptype		int
+	Mbox_list	[]*Mbox
 }
+
+// ---- private -------------------------------------------------------------------
+/*
+	Adjust window. Returns a valid commence time (if earlier than now) or 0 if the 
+	time window is not valid.
+*/
+func adjust_window( commence int64, conclude int64 ) ( adj_start int64, err error ) {
+
+	now := time.Now().Unix()
+	err = nil
+
+	if commence < now {				// ajust forward to better play with windows on the paths
+		adj_start = now
+	} else {
+		adj_start = commence
+	}
+
+	if conclude <= adj_start {						// bug #156 fix
+		err = fmt.Errorf( "bad expiry submitted, already expired: now=%d expiry=%d", now, conclude );
+		obj_sheep.Baa( 2, "pledge: %s", err )
+		return
+	}
+
+	return
+}
+
+// ---- public -------------------------------------------------------------------
 
 /*
 	Constructor; creates a pledge.
@@ -77,18 +109,12 @@ type Json_pledge struct {
 	(to the current time) if it is less than the current time.
 */
 func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int ) ( p *Pledge, err error ) {
-	now := time.Now().Unix()
 
 	err = nil
 	p = nil
 
-	if commence < now {				// ajust forward to better play with windows on the paths
-		commence = now
-	}
-
-	if expiry <= commence {						// bug #156 fix
-		err = fmt.Errorf( "bad expiry submitted, already expired: now=%d expiry=%d", now, expiry );
-		obj_sheep.Baa( 2, "pledge: %s", err )
+	commence, err = adjust_window( commence, expiry )
+	if err != nil {
 		return
 	}
 	
@@ -113,7 +139,55 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 		bandw_out:	bandw_out,
 		id: id,
 		dscp: dscp,
+		ptype:	PT_BANDWIDTH,
 	}
+
+	if *usrkey != "" {
+		p.usrkey = usrkey
+	} else {
+		p.usrkey = &empty_str
+	}
+
+	return
+}
+
+/*
+	Makes a steering pledge.
+	Ep 1 and 2 are the endpoints with ep1 being the source if 'direction' is important. Endpoints are
+	things like:
+			host-name
+			username/host-name		(user name is tenant name, tenant ID, squatter name or what ever the in vogue moniker is)
+
+			host name may be one of:
+			VM or host DNS name
+			IP address
+			E*						(all external -- beyond the gateway)
+			L*						(all local)
+
+	TODO: eventually steering needs to match on protocol.
+*/
+func Mk_steer_pledge( ep1 *string, ep2 *string, p1 int, p2 int, commence int64, expiry int64, id *string, usrkey *string ) ( p *Pledge, err error ) {
+	err = nil
+	p = nil
+
+	commence, err = adjust_window( commence, expiry )
+	if err != nil {
+		return
+	}
+	
+	p = &Pledge{ 
+		host1:		ep1, 
+		host2:		ep2,
+		tpport1:	p1,
+		tpport2:	p2,
+		commence:	commence,
+		expiry:		expiry,
+		id:			id,
+		ptype:		PT_STEERING,
+	}
+
+	s := "none"
+	p.qid = &s
 
 	if *usrkey != "" {
 		p.usrkey = usrkey
@@ -133,8 +207,10 @@ func (p *Pledge) Nuke( ) {
 	p.id = nil
 	p.qid = nil
 	p.usrkey = nil
-	for i := range p.path_list {
-		p.path_list[i] = nil
+	if p.path_list != nil {
+		for i := range p.path_list {
+			p.path_list[i] = nil
+		}
 	}
 }
 
@@ -227,6 +303,36 @@ func (p *Pledge) Resume( reset bool ) {
 }
 
 /*
+	Return the number of middleboxes that are already inserted into the pledge.
+*/
+func (p *Pledge) Get_mbidx( ) ( int ) {
+	if p == nil {
+		return 0
+	}
+
+	return p.mbidx
+}
+
+func (p *Pledge) Add_mbox( mb *Mbox ) {
+	if p == nil {
+		return
+	}
+
+	if p.mbidx >= len( p.mbox_list ) {					// allocate more if out of space
+		nmb := make( []*Mbox, p.mbidx + 10 )
+		for i := 0; i < p.mbidx; i++ {
+			nmb[i] = p.mbox_list[i]
+		}
+		p.mbox_list = nmb
+	}
+	
+	p.mbox_list[p.mbidx] = mb
+	p.mbidx++
+}
+
+// --------- humanisation or export functions --------------------------------------------------------
+
+/*
 	return a nice string from the data.
 	NEVER put the usrkey into the string!
 */
@@ -255,8 +361,8 @@ func (p *Pledge) To_str( ) ( s string ) {
 		}
 	}
 
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v", state, diff, caption, 
-			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v ptype=%d", state, diff, caption, 
+			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.ptype )
 	return
 }
 
@@ -286,7 +392,21 @@ func (p *Pledge) To_json( ) ( json string ) {
 		}
 	}
 	
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q }`, state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+	switch p.ptype {
+		case PT_BANDWIDTH:
+				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "bandwidth" }`, 
+							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+
+		case PT_STEERING:
+				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+				sep := ""
+				for i := 0; i < p.mbidx; i++ {
+					json += fmt.Sprintf( `%s%q`, sep, *p.mbox_list[i].Get_id() )
+					sep = ","			
+				}
+				json += " ] }"
+	}
 
 	return
 }
@@ -309,7 +429,21 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 		return
 	}
 	
-	chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q }`, *p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey )
+	switch p.ptype {
+		case PT_BANDWIDTH:
+				chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d }`, 
+						*p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+
+		case PT_STEERING:
+				chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
+						*p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+				sep := ""
+				for i := 0; i < p.mbidx; i++ {
+					chkpt += fmt.Sprintf( `%s %s`, sep, *p.mbox_list[i].To_json() )
+					sep = ","			
+				}
+				chkpt += " ] }"
+	}
 
 	return
 }
@@ -355,6 +489,20 @@ func (p *Pledge) Is_paused( ) ( bool ) {
 }
 
 /*
+	Returns true if type is steering.
+*/
+func (p *Pledge) Is_steering( ) ( bool ) {
+	return p.ptype == PT_STEERING
+}
+
+/*
+	Returns true if type is bandwidth.
+*/
+func (p *Pledge) Is_bandwidth( ) ( bool ) {
+	return p.ptype == PT_BANDWIDTH
+}
+
+/*
 	Returns true if the pledge has expired (the current time is greather than 
 	the expiry time in the pledge).
 */
@@ -367,7 +515,7 @@ func (p *Pledge) Is_expired( ) ( bool ) {
 }
 
 /*
-	Returns true if the pledge has not becoe active (the commence time is >= the current time).
+	Returns true if the pledge has not become active (the commence time is >= the current time).
 */
 func (p *Pledge) Is_pending( ) ( bool ) {
 	if p == nil {
@@ -448,6 +596,13 @@ func (p *Pledge) Commenced_recently( window int64 ) ( bool ) {
 
 	now := time.Now().Unix() 
 	return (p.commence >= (now - window)) && (p.commence <= now ) && (p.expiry > now)
+}
+
+/*
+	Return the type of pledge; one of the PT_ constants.
+*/
+func (p *Pledge) Get_ptype( ) ( int ) {
+	return p.ptype
 }
 
 /*

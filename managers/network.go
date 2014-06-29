@@ -494,6 +494,35 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	return nil
 }
 
+/*
+	Given a host name, generate various bits of information like mac address, switch and switch port.
+	Error is set if we cannot find the box.
+*/
+func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *string, swport int, err error ) {
+	var (
+		h	*gizmos.Host
+		ok 	bool
+	)
+
+	if ip, ok = n.vm2ip[*name]; !ok {
+		err = fmt.Errorf( "cannot translate vm (%s) to an IP address", *name )
+		return
+	}
+
+	mac = n.ip2mac[*ip]
+	if h, ok = n.hosts[*mac]; !ok {
+		err = fmt.Errorf( "(internal) unable to find host represnetation for MAC: %s", *mac )
+		return
+	}
+
+	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network 
+	if sw != nil {
+		swid = sw.Get_id() 
+	}
+
+	return
+}
+
 // -------------------- path finding ------------------------------------------------------------------------------------------------------
 
 
@@ -843,6 +872,7 @@ func (n *Network) host_list( ) ( jstr string ) {
 	var( 	
 		sep 	string = ""
 		hname	string = ""
+		vmid	string = ""
 		seen	map[string]bool
 	)
 
@@ -862,7 +892,12 @@ func (n *Network) host_list( ) ( jstr string ) {
 				} else {
 					hname = "unknown"
 				}
-				jstr += fmt.Sprintf( `%s { "name": %q, "mac": %q, "ip4": %q, "ip6": %q `, sep, hname, *(h.Get_mac()), *ip4, *ip6 )
+				if n.ip2vmid[*ip4] != nil {
+					vmid = *n.ip2vmid[*ip4]
+				} else {
+					vmid = "unknown"
+				}
+				jstr += fmt.Sprintf( `%s { "name": %q, "vmid": %q, "mac": %q, "ip4": %q, "ip6": %q `, sep, hname, vmid, *(h.Get_mac()), *ip4, *ip6 )
 				if nconns := h.Get_nconns(); nconns > 0 {
 					jstr += `, "conns": [`
 					sep = ""
@@ -1175,6 +1210,19 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_GETIP:								// given a VM name or ID return the IP if we know it. 
 						s := req.Req_data.( string )
 						req.Response_data, req.State = act_net.name2ip( &s )		// returns ip or nil
+					
+					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
+						if req.Req_data != nil {
+							ip, mac, swid, port, err := act_net.host_info(  req.Req_data.( *string ) )
+							if err != nil {
+								req.State = err
+								req.Response_data = nil
+							} else {
+								req.Response_data = fmt.Sprintf( "%s,%s,%s,%d", *ip, *mac, *swid, port )
+							}
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" ) 
+						}
 
 					case REQ_GETLMAX:							// DEPRECATED!  request for the max link allocation
 						req.Response_data = nil;

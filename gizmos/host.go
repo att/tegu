@@ -31,6 +31,7 @@ import (
 	defines a host
 */
 type Host struct {
+	vmid	string			// id given to the host by the virtualisation manager (ostack etc.)
 	mac		string
 	ip4		string
 	ip6		string

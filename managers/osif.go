@@ -146,7 +146,6 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 	return nil, fmt.Errorf( "invalid token/tenant pair" )
 }
 
-
 /*
 	Verifies that the token passed in is a valid token for the default user given in the 
 	config file. 
@@ -616,6 +615,24 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg.Response_data, msg.State = get_hosts( os_refs )
 				} else {
 					osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
+				}
+
+			case REQ_PROJNAME2ID:					// translate a project name (tenant) to ID
+				if msg.Response_ch != nil {
+					pname := msg.Req_data.( *string )
+					if s, ok := pname2id[*pname]; ok {			// translate if there, else assume it's in it's "final" form
+						msg.Response_data = s
+					} else {
+						msg.Response_data = pname
+					}
+				}
+				
+
+			case REQ_VALIDATE_TOKEN:						// given token/tenant validate it and translate tenant name to ID if given; returns just ID
+				if msg.Response_ch != nil {
+					s := msg.Req_data.( *string )
+					*s += "/"								// add trailing slant to simulate "data"
+					msg.Response_data, msg.State = validate_token( s, os_refs, pname2id, req_token )
 				}
 
 			case REQ_VALIDATE_HOST:						// validate and translate a [token:]project-name/host  string

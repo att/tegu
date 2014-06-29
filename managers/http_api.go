@@ -237,7 +237,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	var (
 		res			*gizmos.Pledge			// reservation that we're working on
-		res_name	string = "undefined"
+		//res_name	string = "undefined"
 		tokens		[]string
 		ntokens		int
 		nerrors 	int = 0
@@ -412,7 +412,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				jreason += " ] }"
 				reason = "active queues"
 				
-			case "reserve":
+
+			case "reserve":								// parse a reservation and make it so
 					tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
 					if len( tmap ) < 1  {
 						if ntokens < 4  {		
@@ -456,7 +457,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
 						}
 	
-						res_name = mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+						res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
 						res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
 					}
 
@@ -521,6 +522,81 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					jreason = fmt.Sprintf( `"you are not authorised to submit a resume request."` )
 					state = "ERROR"
 				}
+
+			case "steer":								// parse a steering request and make it happen
+					tmap := gizmos.Toks2map( tokens )	// allow ep1=name ep2=name mblist=mb1,mb2,mb3 window=start-end usrsp=token/project
+					if len( tmap ) < 1  {
+						if ntokens < 5  {		
+							nerrors++
+							reason = fmt.Sprintf( "incorrect number of parameters supplied: usage: steer [start-]end [token/]tenant ep1 ep2 mblist [cookie]; received: %s", recs[i] )
+							break
+						} 
+
+						tmap["window"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
+						tmap["usrsp"] = &tokens[2]			// user space
+						tmap["ep1"] = &tokens[3]
+						tmap["ep2"] = &tokens[4]
+						tmap["mblist"] = &tokens[5]
+						if len( tokens ) > 6 {
+							tmap["cookie"] = &tokens[6]
+						}
+					}
+
+					h1, h2, p1, p2, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+					if err != nil {
+						reason = fmt.Sprintf( "invalid endpoints:  %s", err )
+						nerrors++
+						break
+					}
+					
+					req := ipc.Mk_chmsg( )
+					req.Send_req( osif_ch, my_ch, REQ_VALIDATE_TOKEN, tmap["usrsp"], nil )		// validate token and convert user space to ID if name given
+					req = <- my_ch
+					tmap["usrsp"] = req.Response_data.( *string )
+
+					startt, endt = gizmos.Str2start_end( *tmap["window"] )																// split time token into start/end timestamps
+					res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+					res, err := gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"] )
+
+					if err != nil {
+						reason = fmt.Sprintf( "unable to create a steering reservation  %s", err )
+						nerrors++
+						break
+					}
+
+					mbnames := strings.Split( *tmap["mblist"], "," )
+					for i := range mbnames {									// generate a mbox object for each
+						mbn := ""
+						if strings.Index( mbnames[i], "/" ) < 0 {				// add user space info out front
+							mbn = *tmap["usrsp"] + mbnames[i] 					// validation/translation adds a trailing /, so not needed here
+						} else {
+							mbn = mbnames[i] 
+						}
+						req.Send_req( nw_ch, my_ch, REQ_HOSTINFO, &mbn, nil )		// get host info string (mac, ip, switch)
+						req = <- my_ch
+						if req.State != nil {
+							break
+						} else {
+							htoks := strings.Split( req.Response_data.( string ), "," )					// results are: ip, mac, switch-id, switch-port; all strings
+							res.Add_mbox( gizmos.Mk_mbox( &mbnames[i], &htoks[1], &htoks[2], clike.Atoi( htoks[3] ) ) )
+						}
+					}
+
+					if req.State == nil {											// all middle boxes were validated
+						req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )			// push it into the reservation manager which will drive flow-mods etc
+						req = <- my_ch										
+					}
+
+					if req.State == nil {
+						ckptreq := ipc.Mk_chmsg( )								// must have new message since we don't wait on a response 
+						ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
+						state = "OK"
+						reason = fmt.Sprintf( "steering reservation accepted; reservation has %d middleboxes", len( mbnames ) )
+						jreason =  res.To_json()
+					} else {
+						nerrors++
+						reason = fmt.Sprintf( "%s", req.State )
+					}
 
 			case "verbose":									// verbose n [child-bleater]
 				if ! validate_auth( &auth_data, is_token ) {

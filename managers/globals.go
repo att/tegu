@@ -11,7 +11,7 @@
 	Date:		02 December 2013
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		25 Jun 2014 - Added initial steering support
 */
 
 package managers
@@ -74,13 +74,16 @@ const (
 	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
 	REQ_GENCREDS				// generate crdentials
 	REQ_VALIDATE_ADMIN			// validate an admin token
+	REQ_PROJNAME2ID				// translate project name to ID
+	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port 
+	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
 	
 )
 
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.0/14620"
+	version 	string = "v3.1/16264"			// version bumped to 3.1 for steering 
 )
 
 

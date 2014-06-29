@@ -2,13 +2,14 @@
 
 /*
 
-	Mnemonic:	globals.go
-	Abstract:	package level initialisation and constants for the objects package
+	Mnemonic:	init.go
+	Abstract:	package level initialisation and constants for the gizmos package
 	Date:		18 March 2014
 	Author:		E. Scott Daniels
 
 	Mods:		11 Jun 2014 : Added external level control for bleating, and changed the
 					bleat id to gizmos. 
+				24 Jun 2014 : Added new constants for steering pledges.
 */
 
 package gizmos
@@ -22,6 +23,8 @@ import (
 //import "forge.research.att.com/tegu"
 
 const (
+	PT_BANDWIDTH	int = iota				// pledge types
+	PT_STEERING
 )
 
 var (
