@@ -38,6 +38,7 @@
 				16 Jun 2014 : Added abilityt to authorise privledged commands with a token generated using 
 							the default (admin) user name given in the config file.
 				17 Jun 2014 : Added support for transport ports on reservation host names. 
+				25 Jun 2014 : Added user (project, tenant, whatever) level caps on each link (gak).
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -67,7 +68,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/16204"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.0/16294"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool

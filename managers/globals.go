@@ -74,13 +74,15 @@ const (
 	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
 	REQ_GENCREDS				// generate crdentials
 	REQ_VALIDATE_ADMIN			// validate an admin token
+	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
+	REQ_SETULCAP				// set a user link capacity
 	
 )
 
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.0/14620"
+	version 	string = "v3.0/16294"
 )
 
 

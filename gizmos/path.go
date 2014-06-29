@@ -38,6 +38,7 @@
 	Mod:		03 Apr 2014 - Added support for endpoints
 				11 Jun 2014 - Changes to support finding all paths rather than shortest
 				13 Jun 2014 - Added to the doc.
+				29 Jun 2014 - Changes to support user link limits.
 */
 
 package gizmos
@@ -58,6 +59,7 @@ import (
 )
 
 type Path struct {
+	usr		*string			// user that this path is associated with -- needed to delete the user based utilisation on links
 	links	[]*Link
 	lidx	int
 	switches []*Switch
@@ -233,16 +235,23 @@ func (p *Path) Flip_endpoints( ) {
 	does inidcate wheter or not the assignment was successful to all (true) or if one or more
 	links could not be increased (false).
 */
-func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
+func (p *Path) Inc_utilisation( commence, conclude, delta int64, usr *Fence ) ( r bool ){
 	r = true
 
 	for i := 0; i < p.lidx; i++ {
-		if ! p.links[i].Inc_utilisation( commence, conclude, delta ) {
+		if ! p.links[i].Inc_utilisation( commence, conclude, delta, usr ) {
 			r = false
 		}
 	}
 
 	return
+}
+
+/*
+	Sets the user name associated with the path
+*/
+func (p *Path) Set_usr( usr *string ) {
+	p.usr = usr
 }
 
 /*
@@ -270,8 +279,11 @@ func (p *Path) Set_extip( extip *string ) {
 		4) Rqid - the queue (n) set on the last link in the path for the data flowing from host2 toward host1
 
 	The process of adding a queue to a link increases the obligation (allotment) for that link. 
+
+	The user fence that is passed in provides the user name and the set of defaults that are to be used if
+	this is the first time a queue has been set for the user on a link that the path traverses.
 */
-func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in int64, amt_out int64 ) (err error) {
+func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in int64, amt_out int64, usr *Fence ) (err error) {
 	err = nil
 	poutstr := "priority-out"		// names for priority queue in the proper direction
 	pinstr := "priority-in"
@@ -289,67 +301,74 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 	}
 
 	if p.is_reverse {				// path was saved backwards, so we run it from last to first
-		err = p.links[p.lidx-1].Set_forward_queue( qid, commence, conclude, amt_out )		// set first outbound queue from h1 on the ingress to a specific queue
+		err = p.links[p.lidx-1].Set_forward_queue( qid, commence, conclude, amt_out, usr )		// set first outbound queue from h1 on the ingress to a specific queue
 		if err != nil { return }
 
 		if p.lidx > 1 {																			// if this is only link, there'll not be a priority queue set toward h1
-			err = p.links[p.lidx-1].Set_backward_queue( &pinstr, commence, conclude, amt_in )	// add inbound amount to the priority queue for this link in direction of h1
+			err = p.links[p.lidx-1].Set_backward_queue( &pinstr, commence, conclude, amt_in, usr )	// add inbound amount to the priority queue for this link in direction of h1
 			if err != nil { return }
 		}
 
 		for i := p.lidx-2; i > 0; i-- {						// set priority queues for all interediate links; set in both directions
-			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, amt_out )
+			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, amt_out, usr )
 			if err != nil { return }
 
-			err = p.links[i].Set_backward_queue( &pinstr, commence, conclude, amt_in  )
+			err = p.links[i].Set_backward_queue( &pinstr, commence, conclude, amt_in, usr  )
 			if err != nil { return }
 		}
 
 		rqid := "R" + *qid
-		err = p.links[0].Set_backward_queue( &rqid, commence, conclude, amt_in )			// and the 'reverse' (outbound from h2) gets a specific queue num set to inbound h1 amt
+		err = p.links[0].Set_backward_queue( &rqid, commence, conclude, amt_in, usr )			// and the 'reverse' (outbound from h2) gets a specific queue num set to inbound h1 amt
 		if err != nil { return }
 		if p.lidx > 1 {																		// when only one link, there is no priority queue inbound to h2
-			err = p.links[0].Set_forward_queue( &poutstr, commence, conclude, amt_out )		// for the last link set the last priority in direction of h2 to amt-out
+			err = p.links[0].Set_forward_queue( &poutstr, commence, conclude, amt_out, usr )		// for the last link set the last priority in direction of h2 to amt-out
 		}
 
 	} else {
-		err = p.links[0].Set_forward_queue( qid, commence, conclude, amt_out )			// set the specific queue on the ingress switch side of the link
+		err = p.links[0].Set_forward_queue( qid, commence, conclude, amt_out, usr )			// set the specific queue on the ingress switch side of the link
 		if err != nil { return }
 
 		if p.lidx > 1 {																	// when more than one link we need a priority queue on the far end of the link
-			p.links[0].Set_backward_queue( &pinstr, commence, conclude, amt_in )		// set the inbound amount on the priority queue of the first link
+			p.links[0].Set_backward_queue( &pinstr, commence, conclude, amt_in, usr )		// set the inbound amount on the priority queue of the first link
 		}
 
 		for i := 1; i < p.lidx-1; i++ {
-			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, amt_out )
+			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, amt_out, usr )
 			if err != nil { return }
 
-			err = p.links[i].Set_backward_queue( &pinstr, commence, conclude, amt_in )
+			err = p.links[i].Set_backward_queue( &pinstr, commence, conclude, amt_in, usr )
 			if err != nil { return }
 		}
 
 		rqid := "R" + *qid
-		err = p.links[p.lidx-1].Set_backward_queue( &rqid, commence, conclude, amt_in )			// for last link, inbound limit for h1 gates the outbound queue on last switch
+		err = p.links[p.lidx-1].Set_backward_queue( &rqid, commence, conclude, amt_in, usr )			// for last link, inbound limit for h1 gates the outbound queue on last switch
 		if err != nil { return }
 		if p.lidx > 1 {																				// when just one link there is no priority queue into last switch
-			err = p.links[p.lidx-1].Set_forward_queue( &poutstr, commence, conclude, amt_out )		// and priority for this is the limit out from h1
+			err = p.links[p.lidx-1].Set_forward_queue( &poutstr, commence, conclude, amt_out, usr )		// and priority for this is the limit out from h1
 			if err != nil { return }
 		}
 	}
 
 	if p.endpts[0] != nil {			// endpoints are added in h1, h2 order regardless of path order, so no need for special handeling here
 		eqid := "E0" + *qid;
-		err = p.endpts[0].Set_forward_queue( &eqid, commence, conclude, amt_in )		// amount back to h1 
+		err = p.endpts[0].Set_forward_queue( &eqid, commence, conclude, amt_in, usr )		// amount back to h1 
 		if err != nil { return }
 	}
 
 	if p.endpts[1] != nil {					
 		eqid := "E1" + *qid;
-		err = p.endpts[1].Set_forward_queue( &eqid, commence, conclude, amt_out )		// amount out from h1 into h2
+		err = p.endpts[1].Set_forward_queue( &eqid, commence, conclude, amt_out, usr )		// amount out from h1 into h2
 		if err != nil { return }
 	}
 
 	return
+}
+
+/*
+	Return the usr name associated with the path.
+*/
+func (p *Path) Get_usr( ) ( *string ) {
+	return p.usr
 }
 
 /*

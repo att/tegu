@@ -32,6 +32,7 @@
 
 	Mods:		29 Apr 2014 - Changes to support Tegu-lite
 				11 Jun 2014 - Changes to support finding all paths
+				29 Jun 2014 - Changes to support user link limits.
 
 */
 
@@ -263,9 +264,41 @@ func (l *Link) Connects( sw *Switch ) ( bool ) {
 /*
 	Return true if this link can accept the indicated amount in addition to the current
 	obligation for the time window indicated by commence and conclude.
+
+	usr_max is a percentage (0-100) which is the maximum amount that the user is 
+	allowed to have reserved on any link or a hard limit if > 100. We check it here against 
+	the total link capacity to ensure that the request isn't larger than the link itself can 
+	support.  Underlying functions check to see what the user's current reservation alotment is
+	for the link during the time window, but assume that if there is no reservation yet
+	for the user that the overall limit was chekced here.  This function returns false, without
+	checking deeper, if the request itself cannot be handled by the link. 
+
+	Capacity error messages only propigate to this point and are only shown at higher
+	verbose levels.  This is mostly because we expect some links in path finding to be
+	at capacity which is not always an error, and the higher level path finding doesn't
+	know or care that some paths are not available. It may, however, be important during
+	debugging or verification to know which links are causing the reservation to fail, so 
+	we provide the mechanism to bleat that information here.
 */
-func (l *Link) Has_capacity( commence int64, conclude int64, amt int64 ) ( bool ) {
-	return l.allotment.Has_capacity( commence, conclude, amt )
+func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( bool ) {
+	if usr_max < 101 {
+		if amt > (l.allotment.Get_max_capacity() * int64( usr_max ))/100 {
+			obj_sheep.Baa( 2, "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			return false
+		}
+	} else {
+		if amt > usr_max {				// seems silly to check, but we will
+			obj_sheep.Baa( 2, "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			return false
+		}
+	}
+
+	able, err := l.allotment.Has_capacity( commence, conclude, amt, usr )
+	if err != nil {
+		obj_sheep.Baa( 2, "no capacity on link %s: %s", *l.id, err )
+	}
+
+	return able
 }
 
 /*
@@ -318,15 +351,19 @@ func (l *Link) Get_allocation( utime int64 ) ( int64 ) {
 	maximum capacity for the link. If adding amount does not exceed the maximum
 	capacity, the amount is added to the link's utilisation and true is returned. 
 	Otherwise, no change in the utilisation is made and false is returned. 
+	The usr fence supplies the user name and default values; we pass it through and it may be nil
+	if no per user caps are to be checked/placed on link usage.
 */
-func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( r bool ) {
-	r = l.allotment.Has_capacity( commence, conclude, amt )
+func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64, usr *Fence ) ( r bool ) {
+	r, err := l.allotment.Has_capacity( commence, conclude, amt, usr.Name )
 	if r {
-		msg := l.allotment.Inc_utilisation( commence, conclude, amt )
+		msg := l.allotment.Inc_utilisation( commence, conclude, amt, usr )
 		if msg != nil {
 			obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )		// likely a warning regarding encroaching on the limit
 		} 
-	} 
+	} else {
+		obj_sheep.Baa( 1, "WRN: inc utilisation failed %s: %s", *l.id, err )
+	}
 
 	return
 }
@@ -337,8 +374,11 @@ func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( r 
 	Qid is a string that is used to identify the queue -- useful for digging out queue/port
 	information that are needed for reservations and thus is probably the reservation ID or 
 	some derivation, but is up to the user of the link.
+
+	The usr fence passed in provides the user name and the set of defaults that are used if
+	this is the first time we've set values for the user. It may be nil if no limits are to be placed. 
 */
-func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( err error ) {
+func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) ( err error ) {
 	var (
 		swdata string
 	)
@@ -354,7 +394,7 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 		swdata = fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
 	}
 
-	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude, usr )
 	if msg != nil {													// warning message that we must presernt
 		obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )
 	}
@@ -368,11 +408,14 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 	Qid is a string that is used to identify the queue -- useful for digging out queue/port
 	information that are needed for reservations and thus is probably the reservation ID or 
 	some derivation, but is up to the user of the link.
+
+	The usr fence passed in provides the user name and a set of defaults that are used if this
+	is the first time we've seen this user. It may be nil if no limits are to be placed. 
 */
-func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( error ) {
+func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) ( error ) {
 
 	swdata := fmt.Sprintf( "%s/%d", *l.sw2, l.port2 )			// switch and port data that will be necessary to physically set the queue
-	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude, usr )
 	if msg != nil {													// warning message that we must presernt
 		obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )
 	}
@@ -384,8 +427,8 @@ func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, 
 	Add an amount to the indicated queue number. This is probably used just to increase the 
 	generic priority queue for middle links, but who knows. 
 */
-func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64 ) {
-	l.allotment.Inc_queue( qid, amt, commence, conclude )
+func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) {
+	l.allotment.Inc_queue( qid, amt, commence, conclude, usr )
 }
 
 /*

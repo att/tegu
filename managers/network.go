@@ -28,6 +28,9 @@
 				18 May 2014 - Changes to allow cross tenant reservations.
 				30 May 2014 - Corrected typo in error message
 				11 Jun 2014 - Added overall link-headroom support
+				25 Jun 2014 - Added user level link capacity limits.
+				26 Jun 2014 - Support for putting vmid into graph and hostlist output.
+				29 Jun 2014 - Changes to support user link limits.
 */
 
 package managers
@@ -74,9 +77,11 @@ type Network struct {
 	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
 	ip2fip		map[string]*string			// tenant/ip to floating ip address translation
 	fip2ip		map[string]*string			// floating ip address to tenant/ip translation
+	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
 }
 
 type host_pair struct {
+	usr	*string			// the user/tenant/project/squatter name/ID
 	h1	*string
 	h2	*string	
 	fip	*string			// floating IP address needed for this segment
@@ -152,6 +157,38 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 	}
 
 	return
+}
+
+/*
+	Given a user name find a fence in the table, or copy the defaults and 
+	return those.
+*/
+func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
+	var (
+		fence *gizmos.Fence
+	)
+
+	fence = nil
+	if usr != nil {
+		fence = n.limits[*usr] 								// get the default fence settings for the user or the overall defaults if none supplied for the user
+	} else {
+		u := "nobody"
+		usr = &u
+	}
+
+	if fence == nil {
+		if n.limits["default"] != nil {
+			fence = n.limits["default"].Copy( usr )			// copy the default to pick up the user name and pass that down
+			n.limits[*usr] = fence
+		} else {
+			nm := "default"
+			fence = gizmos.Mk_fence( &nm, 100, 0, 0 )		// create a generic default with no limits (100% max)
+			n.limits["default"] = fence
+			fence = fence.Copy( usr )
+		}
+	}
+
+	return fence
 }
 
 /*
@@ -440,7 +477,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
 			if len( hlist[i].Ipv4 ) > 0 {
-				ip4 = hlist[i].Ipv4[0]; 		//TODO: we need to associated all ips with the host; for now just the first
+				ip4 = hlist[i].Ipv4[0]; 		//TODO: we need to associate all ips with the host; for now just the first
 			} else {
 				ip4 = ""
 			}
@@ -451,12 +488,19 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			}
 
 			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
+			vmid := &empty_str
+			if old_net.ip2vmid != nil {
+				if old_net.ip2vmid[ip4] != nil {
+					vmid = old_net.ip2vmid[ip4]
+					h.Add_vmid( vmid ) 
+				}
+			}
 
 			for j := range hlist[i].AttachmentPoint {
 				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
 				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
 				if ssw != nil {							// it should always be known, but no chances
-					ssw.Add_host( &hlist[i].Mac[0], hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
+					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
 					net_sheep.Baa( 3, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
 				}
 			}
@@ -508,6 +552,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list = make( []host_pair, 1 )
 		pair_list[0].h1 = h1ip
 		pair_list[0].h2 = h2ip
+		pair_list[0].usr = nil
 		return
 	}
 
@@ -521,6 +566,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list = make( []host_pair, 1 )
 		pair_list[0].h1 = h1ip
 		pair_list[0].h2 = h2ip
+		pair_list[0].usr = &t1
 		return
 	}
 
@@ -542,11 +588,13 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	pair_list = make( []host_pair, 2 )				// return a h1->g1 and h2->g2 pair set
 	pair_list[0].h1 = h1ip
 	pair_list[0].h2 = g1
-	pair_list[0].fip = f2							// destination fip for h1->h2
+	pair_list[0].usr = &t1
+	pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
 
-	pair_list[1].h1 = g2							// order is important to ensure bandwith in/out limits if different
 	pair_list[1].h2 = h2ip
-	pair_list[1].fip = f1							// destination fip for h1<-h2
+	pair_list[1].h1 = g2							// order is important to ensure bandwith in/out limits if different
+	pair_list[1].usr = &t2
+	pair_list[1].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
 
 	return
 }
@@ -556,17 +604,20 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	path between two switches. It will find the shortest path, and then build a path structure which
 	represents it.  ssw is the starting switch and h2nm is the endpoint "name" (probably a mac that we 
 	are looking for. 
+	
+	The usr_max value is the percentage (1-100) that indicates the maximum percentage of a link that the 
+	user may reserve. 
 
 	This function assumes that the switches have all been initialised with a reset of the visited flag,
 	setting of inital cost, etc.
 */
-func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, commence int64, conclude int64, inc_cap int64 ) ( path *gizmos.Path ) {
+func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path ) {
 	h1nm := h1.Get_mac()
 	h2nm := h2.Get_mac()
 	path = nil
 
-	ssw.Cost = 0												// seed the cost in the source switch
-	tsw := ssw.Path_to( h2nm, commence, conclude, inc_cap )		// discover the shortest path to terminating switch that has enough bandwidth
+	ssw.Cost = 0														// seed the cost in the source switch
+	tsw := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
 		path = gizmos.Mk_path( h1, h2 )
 		path.Set_reverse( true )								// indicate that the path is saved in reverse order 
@@ -607,12 +658,17 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 	one or more paths. The list of links can be traversed without the need to dup check which is beneficial for 
 	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the 
 	middle switches are NOT maintaine. 
+
+	usr is the name of the user that the reservation is being processed for (tenant in openstack). The usr_max value
+	is a percentage (1-100)  that defines the maximum of any link that the user may have reservations against or a hard
+	limit if larger than 100. 
+
 */
-func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, commence int64, conclude int64, inc_cap int64 ) ( path *gizmos.Path, err error ) {
+func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
 
-	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and   $s", h1.Get_mac(), h2.Get_mac() )
+	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and  %s", h1.Get_mac(), h2.Get_mac() )
 
-	links, epsw, err := ssw.All_paths_to( h2.Get_mac(), commence, conclude, inc_cap )
+	links, epsw, err := ssw.All_paths_to( h2.Get_mac(), commence, conclude, inc_cap, usr, usr_max )
 	if err != nil {
 		return
 	}
@@ -661,7 +717,7 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 
 	DEPRECATED: if the second host is "0.0.0.0", then we will return a path list containing every link we know about :)
 */
-func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, extip *string, find_all bool ) ( pcount int, path_list []*gizmos.Path ) {
+func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence int64, conclude int64, inc_cap int64, extip *string, find_all bool ) ( pcount int, path_list []*gizmos.Path ) {
 	var (
 		path	*gizmos.Path
 		ssw 	*gizmos.Switch		// starting switch
@@ -670,7 +726,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 		h2		*gizmos.Host
 		lnk		*gizmos.Link
 		plidx	int = 0
-		swidx	int = 0		// index into host's switch list
+		swidx	int = 0				// index into host's switch list
 		err		error
 	)
 
@@ -711,18 +767,19 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 		if ssw == nil {										// no more source switches which h1 thinks it's attached to
 			pcount = plidx
 			if pcount <= 0 || swidx == 0 {
-				net_sheep.Baa( 1, "find-path: early exit? no switch port returned for h1 (%s) at index %d", *h1nm, swidx )
+				net_sheep.Baa( 1, "find-path: early exit? no switch/port returned for h1 (%s) at index %d", *h1nm, swidx )
 			}
 			path_list = path_list[0:pcount]					// slice it down to size
 			return
 		}
 
+		fence := n.get_fence( usr )
 		if ssw.Has_host( h1nm )  &&  ssw.Has_host( h2nm ) {			// if both hosts are on the same switch, there's no path if they both have the same port
 			p1 := h1.Get_port( ssw )
 			p2 := h2.Get_port( ssw )
 			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
 				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2 )
-				if lnk.Has_capacity( commence, conclude, inc_cap ) {		// room for the reservation
+				if lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) {		// room for the reservation
 					lnk.Add_lbp( *h1nm )
 					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
 					path = gizmos.Mk_path( h1, h2 )							// empty path
@@ -735,7 +792,6 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 				} else {
 					net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", inc_cap )
 				}
-	
 			}  else {					// debugging only
 				net_sheep.Baa( 2,  "find-path: path[%d]: found target (%s) on same switch with same port: %s  %d, %d", plidx, *h2nm, ssw.To_str( ), p1, p2 )
 				net_sheep.Baa( 2,  "find-path: host1-json= %s", h1.To_json( ) )
@@ -752,12 +808,12 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, commence int64, conclu
 
 			
 			if find_all {																		// find all possible paths not just shortest
-				path, err = n.find_all_paths( ssw, h1, h2, commence, conclude, inc_cap )		// find a 'scramble' path
+				path, err = n.find_all_paths( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )		// find a 'scramble' path
 				if err != nil {
 					net_sheep.Baa( 1, "find_paths: find_all failed: %s", err )
 				}
 			} else {
-				path = n.find_shortest_path( ssw, h1, h2, commence, conclude, inc_cap )
+				path = n.find_shortest_path( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )
 			}
 
 			if path != nil {
@@ -802,10 +858,14 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	ipaths := make( [][]*gizmos.Path, len( pair_list ) )			// temp holder of each path list resulting from pair_list exploration
 
 	for i := range pair_list {
-		num, ipaths[i] = n.find_paths( pair_list[i].h1, pair_list[i].h2, commence, conclude, inc_cap, pair_list[i].fip, find_all )	
+		num, ipaths[i] = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, find_all )	
 		if num > 0 {
 			total_paths += num
 			ok_count++
+
+			for j := range ipaths[i] {
+				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation 
+			}
 		} else {
 			net_sheep.Baa( 1, "path not found between: %s and %s", *pair_list[i].h1, *pair_list[i].h2 )
 		}
@@ -862,7 +922,11 @@ func (n *Network) host_list( ) ( jstr string ) {
 				} else {
 					hname = "unknown"
 				}
-				jstr += fmt.Sprintf( `%s { "name": %q, "mac": %q, "ip4": %q, "ip6": %q `, sep, hname, *(h.Get_mac()), *ip4, *ip6 )
+				vmid := "unknown"
+				if n.ip2vmid[*ip4] != nil {
+					vmid = *n.ip2vmid[*ip4]
+				}
+				jstr += fmt.Sprintf( `%s { "name": %q, "vmid": %q, "mac": %q, "ip4": %q, "ip6": %q `, sep, hname, vmid, *(h.Get_mac()), *ip4, *ip6 )
 				if nconns := h.Get_nconns(); nconns > 0 {
 					jstr += `, "conns": [`
 					sep = ""
@@ -929,6 +993,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
 		link_headroom int = 0				// percentage that each link capacity is reduced by
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
+		limits map[string]*gizmos.Fence			// user link capacity boundaries
 
 		pcount	int
 		path_list	[]*gizmos.Path
@@ -952,6 +1017,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	net_sheep.Set_prefix( "netmgr" )
 	tegu_sheep.Add_child( net_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
+	limits = make( map[string]*gizmos.Fence )
 														// suss out config settings from our section
 	if cfg_data["network"] != nil {
 		if p := cfg_data["network"]["refresh"]; p != nil {
@@ -975,6 +1041,14 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		if p := cfg_data["network"]["link_alarm"]; p != nil {
 			link_alarm_thresh = clike.Atoi( *p )						// percentage of total capacity when an alarm is generated
 		}
+
+		if p := cfg_data["network"]["user_link_cap"]; p != nil {
+			s := "default"
+			f := gizmos.Mk_fence( &s, clike.Atoi64( *p ), 0, 0 )			// the default capacity value used if specific user hasn't been added to the hash
+			limits["default"] = f
+			v, _ := f.Get_limits()
+			net_sheep.Baa( 1, "link capacity limits set to: %d%%", v )
+		}
 	}
 
 														// enforce some sanity on config file settings
@@ -993,6 +1067,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!" )		// this is bad and WILL cause a core dump
 	} else {
 		net_sheep.Baa( 1, "initial network graph has been built" )
+		act_net.limits = limits
 	}
 
 	if refresh <= 10 {
@@ -1066,8 +1141,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								p.Set_qid( qid )					// add the queue id to the pledge
 
 								for i := 0; i < pcount; i++ {		// set the queues for each path in the list (multiple paths if network is disjoint)
+									fence := act_net.get_fence( path_list[i].Get_usr() )
 									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
-									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out )		// this causes the utilisation to be increased; no explicit Inc_util is needed
+									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out, fence )		// this causes the utilisation to be increased; no explicit Inc_util is needed
 								}
 
 								req.Response_data = path_list[:pcount]
@@ -1092,8 +1168,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						pcount := len( pl )
 
 						for i := 0; i < pcount; i++ {
-							net_sheep.Baa( 1,  "network: deleting path %d", i )
-							path_list[i].Inc_utilisation( commence, expiry, -(bandw_in + bandw_out) )
+							fence := act_net.get_fence( path_list[i].Get_usr() )
+							net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, fence.Name )
+							path_list[i].Inc_utilisation( commence, expiry, -(bandw_in + bandw_out), fence )
 						}
 
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 
@@ -1194,6 +1271,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							gwmap := act_net.gwmap
 							fip2ip := act_net.fip2ip
 							ip2fip := act_net.ip2fip
+							limits := act_net.limits
 
 							act_net = new_net
 
@@ -1207,6 +1285,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							act_net.gwmap = gwmap
 							act_net.fip2ip = fip2ip
 							act_net.ip2fip = ip2fip
+							act_net.limits = limits
 
 							net_sheep.Baa( 1, "network graph rebuild completed" )		// timing during debugging
 						} else {
@@ -1215,6 +1294,12 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 						
 					//	------------------ user api things ---------------------------------------------------------
+					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
+						data := req.Req_data.( []*string )
+						f := gizmos.Mk_fence( data[0], clike.Atoi64( *data[1] ), 0, 0 )			// get the default frame
+						act_net.limits[*data[0]] = f
+						net_sheep.Baa( 1, "user link capacity set: %s now %d%%", *data[0], f.Get_limit_max() )
+						
 					case REQ_NETGRAPH:							// dump the current network graph
 						req.Response_data = act_net.to_json()
 

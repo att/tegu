@@ -44,6 +44,7 @@
 					the set of priv commands.
 				18 Jun 2014 : Corrected bug that was causing incorrect json goo when generating an error.
 				20 Jun 2014 : Corrected bug that allowed a reservation between the same host (VM) name. 
+				29 Jun 2014 - Changes to support user link limits.
 */
 
 package managers
@@ -271,7 +272,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 			continue
 		}
 
-		if tokens[0][0:5] == "auth="	{
+		if len( tokens[0] ) > 5  && tokens[0][0:5] == "auth="	{
 			auth_data = tokens[0][5:]
 			tokens = tokens[1:]				// reslice to skip the jibberish
 			ntokens--
@@ -521,6 +522,30 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					jreason = fmt.Sprintf( `"you are not authorised to submit a resume request."` )
 					state = "ERROR"
 				}
+
+			case "setulcap":									// set a user link cap; expect user-name limit
+				if ! validate_auth( &auth_data, is_token ) {
+					jreason = fmt.Sprintf( `"you are not authorised to submit a verbose request."` )
+					state = "ERROR"
+					break
+				}
+
+				if ntokens == 3 {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( osif_ch, my_ch, REQ_PNAME2ID, &tokens[1], nil )		// translate the name to virtulisation assigned ID
+					req = <- my_ch
+
+					pdata := make( []*string, 2 )
+					pdata[0] = req.Response_data.( *string )
+					pdata[1] = &tokens[2]
+					reason = fmt.Sprintf( "user link cap set for %s (%s): %s%%", tokens[1], pdata[0], tokens[2] )
+
+					req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// dont wait for a reply
+				} else {
+					state = "ERROR"
+					reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
+				}
+
 
 			case "verbose":									// verbose n [child-bleater]
 				if ! validate_auth( &auth_data, is_token ) {

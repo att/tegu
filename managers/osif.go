@@ -14,8 +14,8 @@
 
 				The trick with openstack is that there may be more than one project
 				(tenant) that we need to find VMs in.  We will depend on the config
-				file data (global) which should contain a list of each openstack section defined in the config, and for each section we expect it
-				to contain:
+				file data (global) which should contain a list of each openstack section 
+				defined in the config, and for each section we expect it to contain:
 
 					url 	the url for the authorisation e.g. "http://135.197.225.209:5000/"
     				usr 	the user name that can be authorised with passwd
@@ -41,6 +41,7 @@
 				09 Jun 2014 : Converted the openstack cred list to a map.
 				10 Jun 2014 : Changes to ignore the "_ref_" entry in the cred map. 
 				21 Jun 2014 : Clarification in comment. 
+				29 Jun 2014 - Changes to support user link limits.
 */
 
 package managers
@@ -628,6 +629,15 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ), def_usr )
 					msg.Response_data = ""
 				}
+
+			case REQ_PNAME2ID:							// user, project, tenant (what ever) name to ID
+				if msg.Response_ch != nil {
+					msg.Response_data = pname2id[*(msg.Req_data.( *string ))] 
+					if msg.Response_data == nil  {
+						msg.Response_data = msg.Req_data			// if not in table assume it was an ID that was given
+					}
+				}
+				
 
 			default:
 				osif_sheep.Baa( 1, "unknown request: %d", msg.Msg_type )
