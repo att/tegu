@@ -330,6 +330,23 @@ func (p *Pledge) Add_mbox( mb *Mbox ) {
 	p.mbidx++
 }
 
+/*
+	Return the mbox at index n, or nil if out of bounds.
+*/
+func (p *Pledge) Get_mbox( n int ) ( *Mbox ) {
+	if n < 0 || n >= p.mbidx {
+		return nil
+	}
+
+	return p.mbox_list[n]
+}
+
+/*
+	Return mbox count.
+*/
+func (p *Pledge) Get_mbox_count( ) ( int ) {
+	return p.mbidx
+}
 // --------- humanisation or export functions --------------------------------------------------------
 
 /*

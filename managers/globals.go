@@ -54,6 +54,7 @@ const (
 	REQ_HOSTLIST				// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
 	REQ_GEN_QMAP				// network - generate queue info needed by external process to set queues
 	REQ_IE_RESERVE				// fq-manager send ingress/egress reservations to skoogi
+	REQ_ST_RESERVE				// fq-manager send traffic steering reservation fmods to agent
 	REQ_VM2IP					// xlate map VM name | VM ID to IP map is in the request
 	REQ_VMID2IP					// xlate map VM-ID to ip is in request
 	REQ_IP2VMID					// xlate map IP address to VM-ID
@@ -79,12 +80,14 @@ const (
 	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
 	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
 	REQ_SETULCAP				// set a user link capacity
+	REQ_GETGW					// give a tenant ID and get it's gateway
+	REQ_GETPHOST				// givn an IP address, get it's physical host
 )
 
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.1/16264"			// version bumped to 3.1 for steering 
+	version 	string = "v3.1/17024"			// version bumped to 3.1 for steering 
 )
 
 
@@ -102,6 +105,13 @@ const (
 	FQ_EXTTY					// external IP type used in fmod command (either -D or -S)
 	FQ_TPSPORT					// transport source port number
 	FQ_TPDPORT					// transport dest port number
+	FQ_SMAC						// mac addresses (src and dest)
+	FQ_DMAC		
+	FQ_NEXT_MAC					// mac address of next hop
+	FQ_SWID						// switch ID
+	FQ_PRI						// priority
+	FQ_META_M
+	FQ_META_S
 
 	FQ_SIZE						// CAUTION:  this must be LAST as it indicates the size of the array needed
 
@@ -147,6 +157,45 @@ var (
 	*/
 	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
 )
+
+
+//--------------------------------------------------------------------------------------------------------------------------
+
+/*
+	Paramters that may need to be passed to fq-mgr for either matching or setting in the action
+*/
+type Fq_parms struct {
+	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
+	Ip2		*string
+	Tpsport	int					// transport layer source port
+	Tpdport int					// transport layer dest port
+	Swport	int					// the switch port 
+	Smac	*string				// source mac
+	Dmac	*string				// dest mac
+	Dscp	int					// dscp mask to match if non-zero
+	Meta	*string				// meta 
+}
+
+/*
+	Main struct passed to fq-mgr that references the set of match and action parameters
+*/
+type Fq_req struct {
+	Pri		int					// fmod priority
+	Expiry	int64				// either a hard time or a timeout depending on the situation
+	Id		*string				// id that fq-mgr will pass back if it indicates an error
+
+	Dir_in	bool				// true if direction is inbound (bandwidth fmods)
+	Spq		int					// switch's port for queue
+	Extip	*string				// exterior IP address necessary for inter-tenant reservations
+	Exttyp	*string				// external IP type (either -D or -S)
+
+	Nxt_mac	*string				// mac of next hop
+	Lbmac	*string				// late binding mac
+	Swid	*string				// switch ID (either a dpid or host name for ovs)
+
+	Match	*Fq_parms			// things to match on
+	Action	*Fq_parms			// things to set in action
+}
 
 //--------------------------------------------------------------------------------------------------------------------------
 

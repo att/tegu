@@ -30,6 +30,7 @@ package managers
 import (
 	//"bufio"
 	//"errors"
+	"encoding/json"
 	"fmt"
 	//"io"
 	"math"
@@ -47,6 +48,15 @@ import (
 
 // --- Private --------------------------------------------------------------------------
 
+// --- fq-req and fq-parms support -----------------------------------------------------
+
+func (fr *Fq_req) To_json( ) ( string ) {
+	b, _ := json.Marshal( fr )
+
+	return string( b )
+}
+
+//-------------------------------------------------------------------------------------
 
 /*
 	We depend on an external script to actually set the queues so this is pretty simple.
@@ -219,17 +229,138 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 
 
 			tmsg := ipc.Mk_chmsg( )
-			fq_sheep.Baa( 2, "1st/only json >>>> %s", qjson )
+			fq_sheep.Baa( 2, "1st/only json: %s", qjson )
 			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
 
 			if qjson2 != "" {
 				tmsg := ipc.Mk_chmsg( )
-				fq_sheep.Baa( 2, "2nd json >>>> %s", qjson2 )
+				fq_sheep.Baa( 2, "2nd json: %s", qjson2 )
 				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
 			}
 		}
 	}
 }
+
+/*
+	Send flow-mod(s) to the agent for steering. 
+	The fq_req contains data that are neither match or action oriented (priority, expiry, etc) are or 
+	macht or action only (late binding mac value), and a set of match and action paramters that are
+	applied depending on where they are found. 
+	Data expected in the fq_req:
+		Nxt_mac - the mac address that is to be set on the action as dest
+		Expiry  - the timeout for the fmod(s)
+		Ip1/2	- The src/dest IP addresses for match (one must be supplied)
+		Meta	- The meta value to set/match (both optional)
+		Swid	- The switch DPID or host name (ovs) (used as -h option)
+		Swport	- The switch port to match (inbound)
+		Lbmac	- Assumed to be the mac address associated with the switch port when
+					switch port is -128. This is passed on the -i option to the 
+					agent allowing the underlying interface to do late binding
+					of the port based on the mac address of the mbox.
+		Pri		- Fmod priority
+
+	TODO: this needs to be expanded to be generic and handle all possible match/action parms
+			not just the ones that are specific to steering.  It will probably need an on-all
+			flag in the main request struct rather than deducing it from parms. 
+*/
+func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) {
+
+	if data.Pri <= 0 {
+		data.Pri = 100
+	}
+
+	if data.Match.Ip1 == nil && data.Match.Ip2 == nil {
+		fq_sheep.Baa( 0, "ERR: cannot set steering fmod: both source and dest IP addresses nil" )
+		return
+	}
+
+	match_opts := "--match"					// build match options
+
+	if data.Match.Meta != nil {
+		match_opts += " -m " + *data.Match.Meta		// allow caller to override if they know better
+	} else {
+		match_opts += " -m 0x01/0x00"		// should always prevent hit if higher priority steering rule matched
+	}
+
+	on_all := data.Swid == nil 					// if no switch id, then we write to all
+
+	if data.Match.Swport >= 0  {						// valid port
+		match_opts += fmt.Sprintf( " -i %d", data.Match.Swport )
+	} else {
+		if data.Match.Swport == -128 {				// late binding port, we subs in the late binding MAC that was given
+			if data.Lbmac != nil {
+				match_opts += fmt.Sprintf( " -i %s", *data.Lbmac )
+			} else {
+				fq_sheep.Baa( 1, "ERR: cannot set steering fmod: late binding port supplied, but late binding MAC was nil" )
+			}
+		}
+	}
+
+	if data.Match.Ip1 != nil {						// src supplied, match on src
+		smac := ip2mac[*data.Match.Ip1]
+		if smac == nil {
+			fq_sheep.Baa( 0, "ERR: cannot set steering fmod: src IP did not translate to MAC: %s", *data.Match.Ip1 )
+			return
+		}
+		match_opts += " -s " + *smac
+	}
+
+	if data.Match.Ip2 != nil {						// dest supplied, match on it too
+		dmac := ip2mac[*data.Match.Ip2]
+		if dmac == nil {
+			fq_sheep.Baa( 0, "ERR: cannot set steering fmod: dest IP did not translate to MAC: %s", *data.Match.Ip2 )
+			return
+		}
+		match_opts += " -d " + *dmac
+	}
+
+	action_opts := ""
+	if data.Action.Meta != nil {
+		action_opts += " -m " + *data.Action.Meta
+	} else {
+		action_opts += " -m 0x01/0x01"			// should always set meta option so we don't match steering rule on resub
+	}
+
+	if data.Action.Dmac != nil {
+		action_opts += " -d " + *data.Action.Dmac
+	}
+	if data.Action.Smac != nil {
+		action_opts += " -s " + *data.Action.Smac
+	}
+
+	if data.Nxt_mac != nil {
+		action_opts += " -d " + *data.Nxt_mac			// add next hop if supplied -- last mbox won't have a next hop, but needs to exist to skip p100 fmod
+	}
+
+	action_opts = fmt.Sprintf( "--action %s -R ,0 -N", action_opts )		// set up actions; may be order sensitive so -R and -N LAST! 
+
+
+	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+
+	if on_all {											// blast the fmod to all switches
+		hosts := strings.Split( *hlist, " " )
+		for i := range hosts {
+			tmsg := ipc.Mk_chmsg( )						// must have one per since we dont wait for an ack
+
+			json := base_json
+			json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s"`, hosts[i], data.Expiry, data.Pri, match_opts, action_opts )
+			json += ` ] } ] }`
+			fq_sheep.Baa( 1, ">>> json: %s", json )
+			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+		}
+	} else {											// fmod goes only to the named switch
+		json := base_json
+		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s"`, *data.Swid, data.Expiry, data.Pri, match_opts, action_opts )
+		json += ` ] } ] }`
+		fq_sheep.Baa( 1, ">>> json: %s", json )
+
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+	}
+	
+}
+
+
 
 /*
 	Send a newly arrived host list to the agent manager.
@@ -368,6 +499,19 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		
 		fq_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
 		switch msg.Msg_type {
+			case REQ_ST_RESERVE:							// reservation fmods for traffic steering
+				msg.Response_ch = nil						// for now, nothing goes back
+				if msg.Req_data != nil {
+					fq_data := msg.Req_data.( *Fq_req ); 			// request data
+					if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled (not supported)
+						fq_sheep.Baa( 0, "ERR: steering reservations are not supported with skoogi (SDNC); no flow-mods pushed" )
+					} else {
+						send_stfmod_agent( fq_data, ip2mac, host_list )	
+					}
+				} else {
+					fq_sheep.Baa( 0, "CRI: missing data on st-reserve request to fq-mgr" )
+				}
+
 			case REQ_IE_RESERVE:							// the new proactive ingress/egress reservation format
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, *Spq
 				spq := data[FQ_SPQ].( *gizmos.Spq )

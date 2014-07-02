@@ -9,8 +9,8 @@
 	Author:		E. Scott Daniels
 
 	CFG:		These config file variables are used when present:
-					resmgr:ckpt_dir	- name of the directory where checkpoint data is to be kept (/var/lib/tegu)
-									FWIW: /var/lib/tegu selected based on description: http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
+				resmgr:ckpt_dir	- name of the directory where checkpoint data is to be kept (/var/lib/tegu)
+				FWIW: /var/lib/tegu selected based on description: http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
 
 
 	TODO:		need a way to detect when skoogie/controller has been reset meaning that all
@@ -35,7 +35,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	//"strings"
+	"strings"
 	"time"
 
 	"forge.research.att.com/gopkgs/bleater"
@@ -88,15 +88,61 @@ func ( i *Inventory ) res2json( ) (json string, err error) {
 func name2ip( name *string ) ( ip *string ) {
 	ip = nil
 
+	if name == nil || *name == "" {
+		return 
+	}
+
 	ch := make( chan *ipc.Chmsg );	
 	msg := ipc.Mk_chmsg( )
-	msg.Send_req( nw_ch, ch, REQ_GETIP, *name, nil )
+	msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
 	msg = <- ch
 	if msg.State == nil {					// success
-		ip = msg.Response_data.(*string)
+		ip = msg.Response_data.( *string )
+		if ip == nil {						// nil string we'll  assume that it was already in ip form
+			ip = name
+		}
+	} else {
+		ip = name					// on error assume it's an IP address
 	}
 
 	return
+}
+
+/*
+	Given a name, get host info (IP, mac, switch-id, switch-port) from network.
+*/
+func get_hostinfo( name *string ) ( *string, *string, *string, int ) {
+
+	if name != nil  &&  *name != "" {
+		ch := make( chan *ipc.Chmsg );	
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, ch, REQ_HOSTINFO, name, nil )		// get host info string (mac, ip, switch)
+		req = <- ch
+		if req.State == nil {
+			htoks := strings.Split( req.Response_data.( string ), "," )					// results are: ip, mac, switch-id, switch-port; all strings
+			return &htoks[0], &htoks[1], &htoks[2], clike.Atoi( htoks[3] )
+		}
+	}
+
+	return nil, nil, nil, 0
+}
+
+/*
+	Given an ip address send a request to network manager to request the physical host.
+*/
+func get_physhost( ip *string ) ( *string ) {
+
+	if ip != nil  &&  *ip != "" {
+		ch := make( chan *ipc.Chmsg );	
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, ch, REQ_GETPHOST, ip, nil )
+		req = <- ch
+		if req.State == nil {
+			return req.Response_data.( *string )
+		}
+	}
+
+	return nil 
 }
 
 /*
@@ -285,23 +331,125 @@ func push_bw_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 }
 
 /*
-	Push a the fmod requests to fq-mgr for a steering resrvation. 
+	Generate flow-mod requests to the fq-manager for a given src,dest pair and list of 
+	middleboxes.  This assumes that the middlebox list has been reversed if necessary. 
+	Either source (ep1) or dest (ep2) may be nil which indicates a "to any" or "from any"
+	intention. 
+
+	TODO: add transport layer port support
 */
-func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string  ) {
 	var (
-		msg			*ipc.Chmsg			// message for sending to fqmgr
-		fq_data		[]interface{}		// local works space to organise data for fq manager
-		fq_sdata	[]interface{}		// copy of data at time message is sent so that it 'survives' after msg sent and this continues to update fq_data
+		mb	*gizmos.Mbox							// current middle box being worked with (must span various blocks)
 	)
 
-	fq_data = make( []interface{}, FQ_SIZE )
-	rm_sheep.Baa( 0, "push-st-reservation is running" )
+	nmb := len( mblist )
+	for i := 0; i < nmb; i++ {						// forward direction ep1->ep2
+		fq_match := &Fq_parms{
+			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
+		}
 
-	ep1, ep2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
-	fq_data[FQ_TPSPORT] = p1						// ports
-	fq_data[FQ_TPDPORT] = p2
-	fq_data[FQ_SPQ] = 100							// priority for steering 
+		fq_action := &Fq_parms{
+		}
+
+		fq_data := &Fq_req {							// fq-mgr request data
+			Id:		rname,
+			Expiry:	expiry,
+			Match: 	fq_match,
+			Action: fq_action,
+		}
+		fq_data.Match.Ip1 = ep1
+		fq_data.Match.Ip2 = ep2
 	
+		if i == 0 {									// push the ingress rule to all switches
+			fq_data.Pri = 100
+
+			mb = mblist[i]
+			if ep1 != nil {
+				_, _, fq_data.Swid, _ = get_hostinfo( ep1 )		// if a specific src host supplied, get it's switch and we'll land only one flow-mod on it
+			} else {
+				fq_data.Swid = nil								// if ep1 is undefined (all), then we need a f-mod on all switches to handle ingress case
+			}
+			fq_data.Action.Tpsport = -1							// invalid port when writing to all too
+			fq_data.Nxt_mac = mb.Get_mac( )
+			rm_sheep.Baa( 2, "write ingress fmod: %s", fq_data.To_json() )
+
+			msg := ipc.Mk_chmsg()
+			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// no response right now -- eventually we want an asynch error
+		} else {																// push fmod on the switch that connects the previous mbox matching packets from it and directing to next mbox
+																				// CAUTION: pull from the previous middle box _before_ getting next middlebox in list
+			fq_data.Swid, fq_data.Match.Swport = mb.Get_sw_port( )	 			// specific switch and input port needed for this fmod
+			fq_data.Lbmac = mb.Get_mac()										// fqmgr will need the mac if the port is late binding (-128)
+
+			fq_data.Pri = 200						// priority for intermediate flow-mods
+			mb = mblist[i]	 						// now safe to get next middlebox in the list
+			if mb == nil {
+				rm_sheep.Baa( 2, "unexpected nil mb i=%d", i )
+			} else {
+				fq_data.Nxt_mac = mb.Get_mac( )
+				rm_sheep.Baa( 2, "write intemed fmod: %s", fq_data.To_json() )
+	
+				msg := ipc.Mk_chmsg()
+				msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// flow mod for each intermediate link in backwards direction
+			}
+		}
+
+		if i == nmb - 1 {							// for last mb we need a rule that causes steering to be skipped based on mb mac
+			fq_match = &Fq_parms{
+				Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
+			}
+
+			fq_action = &Fq_parms{
+				// all nil
+			}
+			fq_data.Match.Ip1 = ep1
+			fq_data.Match.Ip2 = ep2
+
+			fq_data = &Fq_req {							// generate data with just what need to be there
+				Pri:	300,
+				Id:		rname,
+				Expiry:	expiry,
+				Match:	fq_match,
+				Action:	fq_action,
+			}
+			fq_data.Swid, fq_data.Action.Swport = mb.Get_sw_port()
+			fq_data.Lbmac = mb.Get_mac()							// fqmgr will need the mac if the port is late binding
+			fq_data.Action.Smac = mb.Get_mac()						// we must force the source mac on the last f-mod to avoid other p100 rules
+			fq_data.Match.Ip1 = name2ip( ep1 )
+			fq_data.Match.Ip2 = name2ip( ep2 )
+
+			rm_sheep.Baa( 2, "write final fmod: %s", fq_data.To_json() )
+
+			msg := ipc.Mk_chmsg()
+			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// final flow-mod from the last middlebox out
+		}
+	}
+}
+
+/*
+	Push the fmod requests to fq-mgr for a steering resrvation. 
+*/
+func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+
+	ep1, ep2, _, _, _, conclude, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
+	now := time.Now().Unix()
+
+	ep1 = name2ip( ep1 )										// we work only with IP addresses; sets to nil if "" (L*)
+	ep2 = name2ip( ep2 )
+
+	nmb := p.Get_mbox_count()
+	mblist := make( []*gizmos.Mbox, nmb ) 
+	for i := range mblist {
+		mblist[i] = p.Get_mbox( i )
+	}
+	steer_fmods( ep1, ep2, mblist, now-conclude, &rname )			// set forward fmods
+
+	nmb--
+	for i := range mblist {											// build middlebox list in reverse
+		mblist[nmb-i] = p.Get_mbox( i )
+	}
+	steer_fmods( ep2, ep1, mblist, now-conclude, &rname )			// set backward fmods
+
 	p.Set_pushed()
 }
 

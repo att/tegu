@@ -111,3 +111,27 @@ func Toks2map( toks []string ) ( m map[string]*string ) {
 
 	return
 }
+
+/*
+	Given an array of tokens (strings), and a list of names, generate a map of tokens 
+	referenced by the corresponding name.  If tokens list is longer than the name list
+	the remaining tokens are not mapped. 
+*/
+func Untok2map( toks []string, names string ) ( tmap map[string]*string ) {
+	tmap = nil
+
+	nlist := strings.Split( names, " " )
+	maxt := len( toks )
+	tmap = make( map[string]*string, len( toks ) )
+
+	for i := range nlist {
+		if i > maxt {
+			return
+		}
+
+		tmap[nlist[i]] = &toks[i]
+	}
+
+	return
+}
+	

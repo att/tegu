@@ -204,6 +204,44 @@ func validate_auth( data *string, is_token bool ) ( allowed bool ) {
 	return false
 }
 
+// --- generic utility ---------------------------------------------------------------------------------- 
+
+/*
+	Given something like project/E* translate to a real name or IP address.
+	The name MUST have a leading project (tenant or what ever the virtulisation manager
+	calls it these days).
+*/
+func wc2name( raw string ) ( string ) {
+	var (
+		lch	chan *ipc.Chmsg				// local channel for responses
+	)
+
+	lch = make( chan *ipc.Chmsg ) 
+	toks := strings.Split( raw, "/" )
+	if len( toks ) < 2 {				// must have <project>/<name> to do this
+		return raw
+	}
+	
+	switch toks[1] {
+		case "E*":					// look up gateway for project
+			req := ipc.Mk_chmsg( )
+
+			req.Send_req( nw_ch, lch, REQ_GETGW, &toks[0], nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
+			req = <- lch											// hard wait for network thread response
+			if req.Response_data.(*string) != nil {
+				return *(req.Response_data.( *string ))
+			}
+
+		case "L*":
+			break
+
+		default:
+			return raw
+	}
+
+	return ""
+}
+
 // ------------------------------------------------------------------------------------------------------ 
 
 /*
@@ -533,14 +571,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							break
 						} 
 
-						tmap["window"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
-						tmap["usrsp"] = &tokens[2]			// user space
-						tmap["ep1"] = &tokens[3]
-						tmap["ep2"] = &tokens[4]
-						tmap["mblist"] = &tokens[5]
-						if len( tokens ) > 6 {
-							tmap["cookie"] = &tokens[6]
-						}
+						tmap = gizmos.Untok2map( tokens, "reqname window usrsp ep1 ep2 mblist cookie" )		// map tokens in order to these names	(not as efficient, but makes code easier to read below)
 					}
 
 					h1, h2, p1, p2, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
@@ -549,7 +580,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						nerrors++
 						break
 					}
-					
+
+					h1 = wc2name( h1 )							// resolve E* or L* wild cards
+					h2 = wc2name( h2 )
+
 					req := ipc.Mk_chmsg( )
 					req.Send_req( osif_ch, my_ch, REQ_VALIDATE_TOKEN, tmap["usrsp"], nil )		// validate token and convert user space to ID if name given
 					req = <- my_ch

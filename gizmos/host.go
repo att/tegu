@@ -109,7 +109,7 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 	s = nil
 	p = -1
 
-	if i < len( h.conns ) {
+	if h != nil  &&  i < len( h.conns ) {
 		s = h.conns[i]
 		p = h.ports[i]
 	}

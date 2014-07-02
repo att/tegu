@@ -68,7 +68,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1/17254"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.1/17024"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -79,7 +79,7 @@ func main() {
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager 
-		qm_ch	chan *ipc.Chmsg		// quantus manager
+		//qm_ch	chan *ipc.Chmsg		// quantus manager
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager 
 		osif_ch chan *ipc.Chmsg		// openstack interface
 		fq_ch chan *ipc.Chmsg		// flow queue manager
@@ -119,7 +119,7 @@ func main() {
 	}
 
 	nw_ch = make( chan *ipc.Chmsg )					// create the channels that the threads will listen to
-	qm_ch = make( chan *ipc.Chmsg, 128 )					
+	//qm_ch = make( chan *ipc.Chmsg, 128 )					
 	fq_ch = make( chan *ipc.Chmsg, 128 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
 	am_ch = make( chan *ipc.Chmsg, 128 )			// agent manager channel
 	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
@@ -131,7 +131,7 @@ func main() {
 		os.Exit( 1 )
 	}
 
-	go managers.Quantus_mgr( qm_ch )
+	//go managers.Quantus_mgr( qm_ch )
 	go managers.Res_manager( rmgr_ch, super_cookie ); 						// manage the reservation inventory
 	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
 	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph

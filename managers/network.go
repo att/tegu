@@ -548,15 +548,22 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 		ok 	bool
 	)
 
-	if ip, ok = n.vm2ip[*name]; !ok {
-		err = fmt.Errorf( "cannot translate vm (%s) to an IP address", *name )
-		return
-	}
+	mac = nil
+
+	if ip, ok = n.vm2ip[*name]; !ok {		// assume that IP was given instead of name (gateway)	
+		//err = fmt.Errorf( "cannot translate vm to an IP address: %s", *name )
+		//return
+		ip = name
+	} 
 
 	mac = n.ip2mac[*ip]
-	if h, ok = n.hosts[*mac]; !ok {
-		err = fmt.Errorf( "(internal) unable to find host represnetation for MAC: %s", *mac )
-		return
+	if mac != nil {
+		if h, ok = n.hosts[*mac]; !ok {
+			err = fmt.Errorf( "cannot find host (representation) based on IP and MAC: %s %s", *ip, *mac )
+			return
+		}
+	} else {
+		err = fmt.Errorf( "cannot translate IP to MAC: %s", *ip )
 	}
 
 	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network 
@@ -932,7 +939,6 @@ func (n *Network) host_list( ) ( jstr string ) {
 	var( 	
 		sep 	string = ""
 		hname	string = ""
-		vmid	string = ""
 		seen	map[string]bool
 	)
 
@@ -1279,9 +1285,37 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						ts := req.Req_data.( int64 )			// time stamp for generation
 						req.Response_data, req.State = act_net.gen_queue_map( ts, true )
 						
+					case REQ_GETGW:								// given a project ID (tenant ID) map it to the gateway
+						if req.Req_data != nil {
+							tname := req.Req_data.( *string )
+							req.Response_data = act_net.gateway4tid( *tname )
+						} else {
+							req.Response_data = nil
+						}
+
+					case REQ_GETPHOST:							// given a name or IP address, return the physcial host
+						if req.Req_data != nil {
+							var ip *string
+
+							s := req.Req_data.( *string )
+							ip, req.State = act_net.name2ip( s )
+							if req.State == nil {
+								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
+								if req.Response_data == nil {
+									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", ip )
+								}	
+							}
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" ) 
+						}
+						
 					case REQ_GETIP:								// given a VM name or ID return the IP if we know it. 
-						s := req.Req_data.( string )
-						req.Response_data, req.State = act_net.name2ip( &s )		// returns ip or nil
+						if req.Req_data != nil {
+							s := req.Req_data.( *string )
+							req.Response_data, req.State = act_net.name2ip( s )		// returns ip or nil
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" ) 
+						}
 					
 					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
 						if req.Req_data != nil {
@@ -1342,7 +1376,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						f := gizmos.Mk_fence( data[0], clike.Atoi64( *data[1] ), 0, 0 )			// get the default frame
 						act_net.limits[*data[0]] = f
 						net_sheep.Baa( 1, "user link capacity set: %s now %d%%", *data[0], f.Get_limit_max() )
-						
+
 					case REQ_NETGRAPH:							// dump the current network graph
 						req.Response_data = act_net.to_json()
 
