@@ -992,7 +992,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 			cert_name := "tegu_cert"
 			err = security.Mk_cert( 1024, &cert_name, dns_list, ssl_cert, ssl_key )
     		if err != nil {
-				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s", ssl_cert, ssl_key, err )
+				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s", *ssl_cert, *ssl_key, err )
 			}
 		}
 

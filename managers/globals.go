@@ -174,6 +174,7 @@ type Fq_parms struct {
 	Dmac	*string				// dest mac
 	Dscp	int					// dscp mask to match if non-zero
 	Meta	*string				// meta 
+	Resub	*string				// list of tables to resubmit to
 }
 
 /*
@@ -183,6 +184,7 @@ type Fq_req struct {
 	Pri		int					// fmod priority
 	Expiry	int64				// either a hard time or a timeout depending on the situation
 	Id		*string				// id that fq-mgr will pass back if it indicates an error
+	Table	int					// table to put the fmod into
 
 	Dir_in	bool				// true if direction is inbound (bandwidth fmods)
 	Spq		int					// switch's port for queue

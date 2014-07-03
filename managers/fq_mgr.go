@@ -253,6 +253,8 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 		Meta	- The meta value to set/match (both optional)
 		Swid	- The switch DPID or host name (ovs) (used as -h option)
 		Swport	- The switch port to match (inbound)
+		Table	- Table number to put the flow mod into
+		Rsub    - A list (space separated) of table numbers to resub to in the order listed.
 		Lbmac	- Assumed to be the mac address associated with the switch port when
 					switch port is -128. This is passed on the -i option to the 
 					agent allowing the underlying interface to do late binding
@@ -269,15 +271,23 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		data.Pri = 100
 	}
 
-	if data.Match.Ip1 == nil && data.Match.Ip2 == nil {
-		fq_sheep.Baa( 0, "ERR: cannot set steering fmod: both source and dest IP addresses nil" )
-		return
+
+	table := ""
+	if data.Table > 0 {
+		table = fmt.Sprintf( "-T %d ", data.Table )
+	} else {														// for table 0 we insist on having at least a src or dest to match
+		if data.Match.Ip1 == nil && data.Match.Ip2 == nil {
+			fq_sheep.Baa( 0, "ERR: cannot set steering fmod: both source and dest IP addresses nil" )
+			return
+		}
 	}
 
 	match_opts := "--match"					// build match options
 
 	if data.Match.Meta != nil {
-		match_opts += " -m " + *data.Match.Meta		// allow caller to override if they know better
+		if *data.Match.Meta != "" {
+			match_opts += " -m " + *data.Match.Meta		// allow caller to override if they know better
+		}
 	} else {
 		match_opts += " -m 0x01/0x00"		// should always prevent hit if higher priority steering rule matched
 	}
@@ -315,11 +325,6 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	}
 
 	action_opts := ""
-	if data.Action.Meta != nil {
-		action_opts += " -m " + *data.Action.Meta
-	} else {
-		action_opts += " -m 0x01/0x01"			// should always set meta option so we don't match steering rule on resub
-	}
 
 	if data.Action.Dmac != nil {
 		action_opts += " -d " + *data.Action.Dmac
@@ -332,8 +337,23 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		action_opts += " -d " + *data.Nxt_mac			// add next hop if supplied -- last mbox won't have a next hop, but needs to exist to skip p100 fmod
 	}
 
-	action_opts = fmt.Sprintf( "--action %s -R ,0 -N", action_opts )		// set up actions; may be order sensitive so -R and -N LAST! 
+	if data.Action.Meta != nil {						// CAUTION: ovs barfs on the command if write metadata isn't last
+		action_opts += " -m " + *data.Action.Meta
+	} else {
+		action_opts += " -m 0x01/0x01"					// should always set meta option so we don't match steering rule on resub
+	}
 
+	if data.Action.Resub != nil { 						// action options order may be sensitive; ensure -R is last
+		toks := strings.Split( *data.Action.Resub, " " )
+		for i := range toks {
+			action_opts += " -R " + toks[i]
+		}
+	}
+
+	output := "-N"			// TODO: allow output action to be passed in
+
+	//action_opts = fmt.Sprintf( "--action %s -R ,0 -N", action_opts )		// set up actions; may be order sensitive so -R and -N LAST 
+	action_opts = fmt.Sprintf( "--action %s %s", action_opts, output )		// set up actions
 
 	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
@@ -343,14 +363,14 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 			tmsg := ipc.Mk_chmsg( )						// must have one per since we dont wait for an ack
 
 			json := base_json
-			json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s"`, hosts[i], data.Expiry, data.Pri, match_opts, action_opts )
+			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0xe5d br-int"`, hosts[i], table, data.Expiry, data.Pri, match_opts, action_opts )
 			json += ` ] } ] }`
 			fq_sheep.Baa( 1, ">>> json: %s", json )
 			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
 		}
-	} else {											// fmod goes only to the named switch
+	} else {															// fmod goes only to the named switch
 		json := base_json
-		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s"`, *data.Swid, data.Expiry, data.Pri, match_opts, action_opts )
+		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s add 0xe5d br-int"`, *data.Swid, data.Expiry, data.Pri, match_opts, action_opts )
 		json += ` ] } ] }`
 		fq_sheep.Baa( 1, ">>> json: %s", json )
 

@@ -331,6 +331,32 @@ func push_bw_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 }
 
 /*
+	Generate the flow mod that is placed into table 10 for steering. 
+*/
+func table10_fmods( rname *string ) {
+		fq_match := &Fq_parms{
+			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
+			Meta:	&empty_str,
+		}
+
+		mstr := "0x02/0x02"							// sets the meta value
+		fq_action := &Fq_parms{
+			Meta:	&mstr,
+		}
+
+		fq_data := &Fq_req {							// fq-mgr request data
+			Id:		rname,
+			Expiry:	0,
+			Match: 	fq_match,
+			Action: fq_action,
+			Table:	10,
+		}
+
+		msg := ipc.Mk_chmsg()
+		msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// no response right now -- eventually we want an asynch error
+}
+
+/*
 	Generate flow-mod requests to the fq-manager for a given src,dest pair and list of 
 	middleboxes.  This assumes that the middlebox list has been reversed if necessary. 
 	Either source (ep1) or dest (ep2) may be nil which indicates a "to any" or "from any"
@@ -343,13 +369,21 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 		mb	*gizmos.Mbox							// current middle box being worked with (must span various blocks)
 	)
 
+	if expiry < 5 {								// refuse if too short
+		return
+	}
+
+	mstr := "0x02/0x0"							// meta match -- if not set
 	nmb := len( mblist )
 	for i := 0; i < nmb; i++ {						// forward direction ep1->ep2
 		fq_match := &Fq_parms{
 			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
+			Meta:	&mstr,
 		}
 
+		resub := "10 0"
 		fq_action := &Fq_parms{
+			Resub: &resub,							// resubmit to table 1 to set meta info, then to 0 to get tunnel matches
 		}
 
 		fq_data := &Fq_req {							// fq-mgr request data
@@ -361,7 +395,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 		fq_data.Match.Ip1 = ep1
 		fq_data.Match.Ip2 = ep2
 	
-		if i == 0 {									// push the ingress rule to all switches
+		if i == 0 {									// push the ingress rule (possibly to all switches)
 			fq_data.Pri = 100
 
 			mb = mblist[i]
@@ -437,18 +471,20 @@ func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 	ep1 = name2ip( ep1 )										// we work only with IP addresses; sets to nil if "" (L*)
 	ep2 = name2ip( ep2 )
 
+	table10_fmods( &rname )
+
 	nmb := p.Get_mbox_count()
 	mblist := make( []*gizmos.Mbox, nmb ) 
 	for i := range mblist {
 		mblist[i] = p.Get_mbox( i )
 	}
-	steer_fmods( ep1, ep2, mblist, now-conclude, &rname )			// set forward fmods
+	steer_fmods( ep1, ep2, mblist, conclude - now, &rname )			// set forward fmods
 
 	nmb--
 	for i := range mblist {											// build middlebox list in reverse
 		mblist[nmb-i] = p.Get_mbox( i )
 	}
-	steer_fmods( ep2, ep1, mblist, now-conclude, &rname )			// set backward fmods
+	steer_fmods( ep2, ep1, mblist, conclude - now, &rname )			// set backward fmods
 
 	p.Set_pushed()
 }
