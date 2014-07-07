@@ -44,7 +44,9 @@
 					the set of priv commands.
 				18 Jun 2014 : Corrected bug that was causing incorrect json goo when generating an error.
 				20 Jun 2014 : Corrected bug that allowed a reservation between the same host (VM) name. 
-				29 Jun 2014 - Changes to support user link limits.
+				29 Jun 2014 : Changes to support user link limits.
+				07 Jul 2014 : Change to drop the request to network manager on delete; reservation manager
+					now sends that request to tighten up the timing between the two. 
 */
 
 package managers
@@ -413,6 +415,30 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				jreason += " ] }"
 				reason = "active queues"
 				
+			case "refresh":								// refresh reservations for named VM(s)
+				if validate_auth( &auth_data, is_token ) {
+					for i := 1; i < ntokens; i++ {
+						req = ipc.Mk_chmsg( )
+						req.Send_req( osif_ch, my_ch, REQ_XLATE_HOST, &tokens[i], nil )		// translate [token/][project/]host-name into ID/hostname
+						req = <- my_ch											// get response from the network thread
+						if req.Response_data != nil {
+							hname := req.Response_data.( *string )
+							req.Send_req( rmgr_ch, my_ch, REQ_PLEDGE_LIST, hname, nil )
+							req = <- my_ch											// get response from the network thread
+							if req.Response_data != nil {
+								plist := req.Response_data.( []*gizmos.Pledge )
+								http_sheep.Baa( 1, "refreshing reservations for %s, %d pledge(s)", *hname, len( plist ) )
+							} else {
+								http_sheep.Baa( 1, "refreshing reservations for %s, no pledges", tokens[i] )
+							}
+				
+						}
+					}
+				} else {
+					jreason = fmt.Sprintf( `"you are not authorised to submit a refresh request."` )
+					state = "ERROR"
+				}
+
 			case "reserve":
 					tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
 					if len( tmap ) < 1  {
@@ -660,7 +686,6 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		comment		string = ""							// comment about the state
 		my_ch		chan *ipc.Chmsg
 		del_data	[]*string								// data sent on delete
-		res			*gizmos.Pledge								// reservation fetched from resmgr
 	)
 
 	my_ch = make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
@@ -686,7 +711,7 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 					nerrors++
 					comment = fmt.Sprintf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received '%s'", recs[i] ); 
 				} else {
-					del_data = make( []*string, 2, 2 )			// deletee data is the reservation name and the cookie if supplied
+					del_data = make( []*string, 2, 2 )			// delete data is the reservation name and the cookie if supplied
 					del_data[0] = &tokens[1]
 					if ntokens < 3 {
 						del_data[1] = &empty_str
@@ -696,21 +721,12 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 					}
 
 					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view
+					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
 					req = <- my_ch										// wait for delete response 
 
-					if req.State == nil {								// no error deleting in res mgr
-						req.Send_req( nw_ch, my_ch, REQ_DEL, res, nil )		// delete from the network point of view
-						req = <- my_ch									// wait for response from network
-
-						if req.State == nil {
-							comment = "reservation successfully deleted"
-							state = "OK"
-						} else {
-							nerrors++
-							comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
-						}
-
+					if req.State == nil {
+						comment = "reservation successfully deleted"
+						state = "OK"
 					} else {
 						nerrors++
 						comment = fmt.Sprintf( "reservation delete failed: %s", req.State )

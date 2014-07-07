@@ -243,7 +243,7 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 	(Supports gen_queue_map and probably not useful for anything else)
 */
 func qlist2map( qmap map[string]int, qlist *string, ep_only bool ) {
-	qdata := strings.Split( *qlist, " " )		// split the list into tokens
+	qdata := strings.Split( *qlist, " " )									// split the list into tokens
 
 	if ep_only {
 		for i := range qdata  {
@@ -1165,12 +1165,12 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						p := req.Req_data.( *gizmos.Pledge )
 						_, _, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						pl := p.Get_path_list( )
-						pcount := len( pl )
 
-						for i := 0; i < pcount; i++ {
+						qid := p.Get_qid()
+						for i := range pl {
 							fence := act_net.get_fence( path_list[i].Get_usr() )
-							net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, fence.Name )
-							path_list[i].Inc_utilisation( commence, expiry, -(bandw_in + bandw_out), fence )
+							net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
+							path_list[i].Set_queue( qid, commence, expiry, -bandw_in, -bandw_out, fence )				// reduce queues on the path as needed
 						}
 
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 

@@ -33,6 +33,8 @@
 	Mods:		29 Apr 2014 - Changes to support Tegu-lite
 				11 Jun 2014 - Changes to support finding all paths
 				29 Jun 2014 - Changes to support user link limits.
+				07 Jul 2014 - Inc queue changed to return status and fail if unable to increase
+					the utilisation of the link. 
 
 */
 
@@ -424,11 +426,21 @@ func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, 
 }
 
 /*
-	Add an amount to the indicated queue number. This is probably used just to increase the 
-	generic priority queue for middle links, but who knows. 
+	Add an amount to the indicated queue if the obligation has room for it.  True returned if the amount could
+	be aded, and was, false otherwise. 
 */
-func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) {
-	l.allotment.Inc_queue( qid, amt, commence, conclude, usr )
+func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) ( r bool, err error ) {
+	r = true
+	err = nil
+	if amt > 0 {
+		r, err = l.allotment.Has_capacity( commence, conclude, amt, usr.Name )
+	}
+
+	if r {
+		l.allotment.Inc_queue( qid, amt, commence, conclude, usr )
+	} 
+
+	return r, err
 }
 
 /*

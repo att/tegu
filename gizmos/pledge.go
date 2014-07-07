@@ -14,6 +14,7 @@
 				05 Jun 2014 - Added support for pause.
 				20 Jun 2014 - Corrected bug that allowed future start time with an earlier expry time
 							to be accepted. 
+				07 Jul 2014 - Added clone function.
 */
 
 package gizmos
@@ -54,6 +55,8 @@ type Pledge struct {
 /*
 	A work struct used to decode a json string using Go's json package which requires things to 
 	be exported (boo). We need this to easily parse the json saved in the checkpoint file.
+	We assume that host1/2 are saved _with_ trailing :port and thus we don't explicitly save/restore
+	the tp port fields.  The conversion from checkpoint value to full struct will split them off. 
 */
 type Json_pledge struct {
 	Host1		*string
@@ -122,6 +125,32 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 	}
 
 	return
+}
+
+/*
+	Create a clone of the pledge.  The path is NOT a copy, but just a reference to the list
+	from the original. 
+*/
+func (p *Pledge) Clone( name string ) ( newp *Pledge ) {
+	newp = &Pledge {
+		host1:		p.host1,
+		host2:		p.host2,
+		tpport1: 	p.tpport1,
+		tpport2: 	p.tpport2,
+		commence:	p.commence,
+		expiry:		p.expiry,
+		bandw_in:	p.bandw_in,
+		bandw_out:	p.bandw_out,
+		dscp:		p.dscp,
+		id:			&name,
+		usrkey:		p.usrkey,
+		qid:		p.qid,
+		path_list:	p.path_list,
+		pushed:		p.pushed,
+		paused:		p.paused,
+	}
+
+	return newp
 }
 
 /*
@@ -224,6 +253,14 @@ func (p *Pledge) Resume( reset bool ) {
 			p.pushed = false;
 		}
 	}
+}
+
+/* 
+	Accepts a host name and returns true if it matches either of the names associated with 
+	this pledge.
+*/
+func (p *Pledge) Has_host( hname *string ) ( bool ) {
+	return *p.host1 == *hname || *p.host2 == *hname
 }
 
 /*
@@ -459,6 +496,17 @@ func (p *Pledge) Get_id( ) ( *string ) {
 	}
 
 	return p.id
+}
+
+/*
+	Returns a pointer to the queue ID
+*/
+func (p *Pledge) Get_qid( ) ( *string ) {
+	if p == nil {
+		return nil
+	}
+
+	return p.qid
 }
 
 /*
