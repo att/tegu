@@ -22,6 +22,7 @@
 					for it's personal use. 
 				12 May 2014 (sd) - Reverts dscp values to 'original' at the egress switch
 				19 May 2014 (sd) - Changes to allow floating ip to be supplied as a part of the flow mod.
+				07 Jul 2014 - Added support for reservation refresh.
 
 */
 
@@ -181,7 +182,7 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 		}
 
 		timeout := expiry - time.Now().Unix()	// figure the timeout and skip if too small
-		if timeout > 10 {
+		if timeout > 0 {
 			if port <= 0 {						// we'll assume that the switch is actually the phy host and br-int is what needs to be set
 				host = sw
 				sw = "br-int"

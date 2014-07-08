@@ -31,6 +31,7 @@
 				25 Jun 2014 - Added user level link capacity limits.
 				26 Jun 2014 - Support for putting vmid into graph and hostlist output.
 				29 Jun 2014 - Changes to support user link limits.
+				07 Jul 2014 - Added support for reservation refresh.
 */
 
 package managers
@@ -1161,8 +1162,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 
 					case REQ_DEL:							// delete the utilisation for the given reservation
-						net_sheep.Baa( 1,  "network: deleting reservation" )
 						p := req.Req_data.( *gizmos.Pledge )
+						net_sheep.Baa( 1,  "network: deleting reservation: %s", *p.Get_id() )
 						_, _, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						pl := p.Get_path_list( )
 

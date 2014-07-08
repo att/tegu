@@ -31,17 +31,18 @@
 	Date:		28 December 2013
 	Author:		E. Scott Daniels
 
-	Mods:		05 May 2014 : Changes to support digging the various maps out of openstack
+	Mods:		05 May 2014 - Changes to support digging the various maps out of openstack
 					that are needed when we are not using floodlight.
-				19 May 2014 : Changes to support floating ip translation map generation.
-				05 Jun 2014 : Added support for pulling all tenants rather than just those
+				19 May 2014 - Changes to support floating ip translation map generation.
+				05 Jun 2014 - Added support for pulling all tenants rather than just those
 					listed with credientials and building project to ID map.
-				07 Jun 2014 : Added function to validate hosts if supplied with token and 
+				07 Jun 2014 - Added function to validate hosts if supplied with token and 
 					to translate project (tenant) name into an ID. 
-				09 Jun 2014 : Converted the openstack cred list to a map.
-				10 Jun 2014 : Changes to ignore the "_ref_" entry in the cred map. 
-				21 Jun 2014 : Clarification in comment. 
+				09 Jun 2014 - Converted the openstack cred list to a map.
+				10 Jun 2014 - Changes to ignore the "_ref_" entry in the cred map. 
+				21 Jun 2014 - Clarification in comment. 
 				29 Jun 2014 - Changes to support user link limits.
+				06 Jul 2014 - Changes to support refresh reservations.
 */
 
 package managers
@@ -127,6 +128,11 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				id = tokens[1]
 			} else {
 				id = *idp
+			}
+
+			if ! tok_req {							// using this for translation, skip the osif call
+				xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
+				return &xstr, nil
 			}
 
 			for _, os := range os_refs {								// find the project name in our list
@@ -619,9 +625,14 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
 				}
 
-			case REQ_VALIDATE_HOST:						// validate and translate a [token:]project-name/host  string
+			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, req_token )
+				}
+
+			case REQ_XLATE_HOST:						// accepts a [token/][project/]host name and translate project to an ID
+				if msg.Response_ch != nil {
+					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, false )		// same process as validation but token not required
 				}
 
 			case REQ_VALIDATE_ADMIN:					// validate an admin token passed in

@@ -12,6 +12,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:
+				07 Jul 2014 - Added support for reservation refresh.
 */
 
 package managers
@@ -76,6 +77,9 @@ const (
 	REQ_VALIDATE_ADMIN			// validate an admin token
 	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
 	REQ_SETULCAP				// set a user link capacity
+	REQ_XLATE_HOST				// translate a [token/][project/]hostname into ID/hostname without validation of token if it exits.
+	REQ_PLEDGE_LIST				// causes res mgr to generate a list of pledges based on a host name
+	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
 	
 )
 
