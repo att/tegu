@@ -275,12 +275,18 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	table := ""
 	if data.Table > 0 {
 		table = fmt.Sprintf( "-T %d ", data.Table )
-	} else {														// for table 0 we insist on having at least a src or dest to match
+	} 
+	/*
+	//===== right now no restriction/checking on some kind of source/dest
+	else {														// for table 0 we insist on having at least a src IP or port or a dest ip
 		if data.Match.Ip1 == nil && data.Match.Ip2 == nil {
-			fq_sheep.Baa( 0, "ERR: cannot set steering fmod: both source and dest IP addresses nil" )
-			return
+			if data.Match.Swport == -1 {
+				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: both source and dest IP addresses nil and no inbound switch port set" )
+				return
+			}
 		}
 	}
+	*/
 
 	match_opts := "--match"					// build match options
 
@@ -288,16 +294,14 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		if *data.Match.Meta != "" {
 			match_opts += " -m " + *data.Match.Meta		// allow caller to override if they know better
 		}
-	} else {
-		match_opts += " -m 0x01/0x00"		// should always prevent hit if higher priority steering rule matched
-	}
+	} 
 
-	on_all := data.Swid == nil 					// if no switch id, then we write to all
+	on_all := data.Swid == nil 							// if no switch id, then we write to all
 
 	if data.Match.Swport >= 0  {						// valid port
 		match_opts += fmt.Sprintf( " -i %d", data.Match.Swport )
 	} else {
-		if data.Match.Swport == -128 {				// late binding port, we subs in the late binding MAC that was given
+		if data.Match.Swport == -128 {				// late binding port, we sub in the late binding MAC that was given
 			if data.Lbmac != nil {
 				match_opts += fmt.Sprintf( " -i %s", *data.Lbmac )
 			} else {
@@ -306,27 +310,37 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		}
 	}
 
-	if data.Match.Ip1 != nil {						// src supplied, match on src
-		smac := ip2mac[*data.Match.Ip1]
-		if smac == nil {
-			fq_sheep.Baa( 0, "ERR: cannot set steering fmod: src IP did not translate to MAC: %s", *data.Match.Ip1 )
-			return
+	smac := data.Match.Smac								// smac wins if both smac and sip are given
+	if smac == nil {
+		if data.Match.Ip1 != nil {						// src supplied, match on src
+			smac = ip2mac[*data.Match.Ip1]
+			if smac == nil {
+				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: src IP did not translate to MAC: %s", *data.Match.Ip1 )
+				return
+			}
 		}
+	}
+	if smac != nil {
 		match_opts += " -s " + *smac
 	}
 
-	if data.Match.Ip2 != nil {						// dest supplied, match on it too
-		dmac := ip2mac[*data.Match.Ip2]
-		if dmac == nil {
-			fq_sheep.Baa( 0, "ERR: cannot set steering fmod: dest IP did not translate to MAC: %s", *data.Match.Ip2 )
-			return
+	dmac := data.Match.Dmac								// dmac wins if both dmac and sip are given
+	if dmac == nil {
+		if data.Match.Ip2 != nil {						// src supplied, match on src
+			dmac = ip2mac[*data.Match.Ip2]
+			if dmac == nil {
+				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: dst IP did not translate to MAC: %s", *data.Match.Ip2 )
+				return
+			}
 		}
+	}
+	if dmac != nil {
 		match_opts += " -d " + *dmac
 	}
 
 	action_opts := ""
 
-	if data.Action.Dmac != nil {
+	if data.Action.Dmac != nil {						
 		action_opts += " -d " + *data.Action.Dmac
 	}
 	if data.Action.Smac != nil {
@@ -338,9 +352,9 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	}
 
 	if data.Action.Meta != nil {						// CAUTION: ovs barfs on the command if write metadata isn't last
-		action_opts += " -m " + *data.Action.Meta
-	} else {
-		action_opts += " -m 0x01/0x01"					// should always set meta option so we don't match steering rule on resub
+		if *data.Action.Meta != "" {
+			action_opts += " -m " + *data.Action.Meta
+		}
 	}
 
 	if data.Action.Resub != nil { 						// action options order may be sensitive; ensure -R is last

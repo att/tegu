@@ -563,16 +563,13 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				}
 
 			case "steer":								// parse a steering request and make it happen
-					tmap := gizmos.Toks2map( tokens )	// allow ep1=name ep2=name mblist=mb1,mb2,mb3 window=start-end usrsp=token/project
-					if len( tmap ) < 1  {
-						if ntokens < 5  {		
-							nerrors++
-							reason = fmt.Sprintf( "incorrect number of parameters supplied: usage: steer [start-]end [token/]tenant ep1 ep2 mblist [cookie]; received: %s", recs[i] )
-							break
-						} 
+					if ntokens < 5  {		
+						nerrors++
+						reason = fmt.Sprintf( "incorrect number of parameters supplied: usage: steer [start-]end [token/]tenant ep1 ep2 mblist [cookie]; received: %s", recs[i] )
+						break
+					} 
 
-						tmap = gizmos.Untok2map( tokens, "reqname window usrsp ep1 ep2 mblist cookie" )		// map tokens in order to these names	(not as efficient, but makes code easier to read below)
-					}
+					tmap := gizmos.Mixtoks2map( tokens[1:], "window usrsp ep1 ep2 mblist cookie" )		// map tokens in order to these names	(not as efficient, but makes code easier to read below)
 
 					h1, h2, p1, p2, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 					if err != nil {
@@ -592,11 +589,14 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					startt, endt = gizmos.Str2start_end( *tmap["window"] )																// split time token into start/end timestamps
 					res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
 					res, err := gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"] )
-
 					if err != nil {
 						reason = fmt.Sprintf( "unable to create a steering reservation  %s", err )
 						nerrors++
 						break
+					}
+
+					if tmap["proto"] != nil {									// specific prototype for steering
+						http_sheep.Baa( 1, "would set proto: %s", *tmap["proto"] )
 					}
 
 					mbnames := strings.Split( *tmap["mblist"], "," )

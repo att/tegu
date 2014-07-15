@@ -38,6 +38,7 @@ type Pledge struct {
 	host2		*string
 	tpport1		int				// transport port number or 0 if not defined
 	tpport2		int				// thee match h1/h2 respectively
+	protocol	*string			// tcp/udp:port (for steering)
 	commence	int64
 	expiry		int64
 	bandw_in	int64			// bandwidth to reserve inbound to host1
@@ -61,6 +62,7 @@ type Pledge struct {
 type Json_pledge struct {
 	Host1		*string
 	Host2		*string
+	Protocol	*string
 	Commence	int64
 	Expiry		int64
 	Bandwin		int64
@@ -227,21 +229,22 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	}
 
 	tokens := strings.Split( *jp.Host1, ":" )
-	p.host1 = &tokens[1]
+	p.host1 = &tokens[0]
 	if len( tokens ) > 1 {
-		p.tpport1 = clike.Atoi( tokens[2] )
+		p.tpport1 = clike.Atoi( tokens[1] )
 	} else {
 		p.tpport1 = 0
 	}
 
 	tokens = strings.Split( *jp.Host2, ":" )
-	p.host2 = &tokens[1]
+	p.host2 = &tokens[0]
 	if len( tokens ) > 1 {
-		p.tpport2 = clike.Atoi( tokens[2] )
+		p.tpport2 = clike.Atoi( tokens[1] )
 	} else {
 		p.tpport2 = 0
 	}
 
+	p.protocol = jp.Protocol
 	p.commence = jp.Commence
 	p.expiry = jp.Expiry
 	p.id = jp.Id
@@ -313,6 +316,9 @@ func (p *Pledge) Get_mbidx( ) ( int ) {
 	return p.mbidx
 }
 
+/*
+	Add the middlebox reference to the pledge
+*/
 func (p *Pledge) Add_mbox( mb *Mbox ) {
 	if p == nil {
 		return
@@ -329,6 +335,18 @@ func (p *Pledge) Add_mbox( mb *Mbox ) {
 	p.mbox_list[p.mbidx] = mb
 	p.mbidx++
 }
+
+/*
+	Add a protocol reference to the pledge (e.g. tcp:80 or udp:4444)
+*/
+func (p *Pledge) Add_proto( proto *string ) {
+	if p == nil {
+		return
+	}
+
+	p.protocol = proto
+}
+
 
 /*
 	Return the mbox at index n, or nil if out of bounds.
@@ -378,8 +396,8 @@ func (p *Pledge) To_str( ) ( s string ) {
 		}
 	}
 
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v ptype=%d", state, diff, caption, 
-			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.ptype )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d proto=%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v ptype=%d", state, diff, caption, 
+			*p.host1, p.tpport2, *p.host2, p.protocol, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.ptype )
 	return
 }
 
@@ -415,8 +433,8 @@ func (p *Pledge) To_json( ) ( json string ) {
 							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
 
 		case PT_STEERING:
-				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
-							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "protocol", %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.protocol, p.tpport2, *p.id, *p.qid )
 				sep := ""
 				for i := 0; i < p.mbidx; i++ {
 					json += fmt.Sprintf( `%s%q`, sep, *p.mbox_list[i].Get_id() )
@@ -452,8 +470,8 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 						*p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
 
 		case PT_STEERING:
-				chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
-						*p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+				chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "protocol": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
+						*p.host1, *p.host2, p.protocol, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
 				sep := ""
 				for i := 0; i < p.mbidx; i++ {
 					chkpt += fmt.Sprintf( `%s %s`, sep, *p.mbox_list[i].To_json() )
