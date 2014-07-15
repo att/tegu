@@ -32,6 +32,8 @@
 				26 Jun 2014 - Support for putting vmid into graph and hostlist output.
 				29 Jun 2014 - Changes to support user link limits.
 				07 Jul 2014 - Added support for reservation refresh.
+				15 Jul 2014 - Added partial path allocation if one endpoint is in a different user space and
+							is not validated.
 */
 
 package managers
@@ -58,7 +60,7 @@ import (
 
 // --------------------------------------------------------------------------------------
 
-	// this probably should be network rather than Network as it's used only internally
+// this probably should be network rather than Network as it's used only internally
 
 /*
 	Defines everything we need to know about a network. 
@@ -298,19 +300,33 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	Returns the ip address associated with the name. The name may indeed be 
 	an IP address which we'll look up in the hosts table to verify first. 
 	If it's not an ip, then we'll search the vm2ip table for it. 
+
+	If the name passed in has a leading dash (-) meaning that it was not 
+	validated, we'll strip it and do the lookup, but will return the resulting 
+	IP address with a leading dash to propigate the invalidness of the address.
 */
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
+	lname := *hname								// lookup name - we may have to strip leading -
 
-	if n.hosts[*hname] != nil {					// we have a host by 'name', then 'name' must be an ip address
+	if  (*hname)[0:1] == "-" {					// ignore leading dashes which indicate unvalidated IDs
+		lname = (*hname)[1:]
+	} 
+
+	if n.hosts[lname] != nil {					// we have a host by 'name', then 'name' must be an ip address
 		ip = hname
 	} else {
-		ip = n.vm2ip[*hname]					// it's not an ip, try to translate it as either a VM name or VM ID
+		ip = n.vm2ip[lname]						// it's not an ip, try to translate it as either a VM name or VM ID
 		if ip != nil {							// the name translates, see if it's in the known net
-			if n.hosts[*ip] == nil {			// ip isn't in floodlight scope, return nil
+			if n.hosts[*ip] == nil {			// ip isn't in the network scope as a host, return nil
 				err = fmt.Errorf( "host unknown: %s maps to an IP, but IP not known to SDNC: %s", *hname, *ip )
 				ip = nil
+			} else {
+				if (*hname)[0:1] == "-" {					// ensure that we return the ip with the leading dash
+					lname = "-" + *ip
+					ip = &lname
+				}
 			}
 		} else {
 			err = fmt.Errorf( "host unknown: %s could not be mapped to an IP address", *hname )
@@ -547,8 +563,19 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	the tenant ids for the hosts differ.  This will allow for reservations between tenant VMs that are both
 	known to Tegu.  If the endpoints are in different tenants, then we require each to have a floating point
 	IP address that is known to us.
+
+	If the tenant/project/user ID starts with a leading dash (-) then we assume it was NOT validated. If
+	both are not validated we reject the attempt. If one is validated we build the path from the other 
+	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
+	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
+	shortcut and thus not needing to supply the same authorisation token twice on the request. 
 */
 func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair ) {
+	var (
+		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different tenants
+		h2_auth bool = true
+	)
+
 	if strings.Index( *h1ip, "/" ) < 0 {					// no tenant id in the name we have to assume in the same realm
 		pair_list = make( []host_pair, 1 )
 		pair_list[0].h1 = h1ip
@@ -557,13 +584,33 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		return
 	}
 
-	toks := strings.SplitN( *h1ip, "/", 2 )			// suss out tenant ids
+	nalloc := 2												// number to allocate if both validated
+	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out tenant ids
 	t1 := toks[0]
+	if t1[0:1] == "-" {										// tenant wasn't validated, we use as endpoint, but dont create an end to end path
+		h1_auth = false
+		t1 =  t1[1:]										// drop the not authorised indicator for fip lookup later
+		ah1 :=  (*h1ip)[1:]									// must also adjust h1 string for fip translation
+		h1ip = &ah1
+		nalloc--											// need one less in return vector
+	}
 
 	toks = strings.SplitN( *h2ip, "/", 2 )
 	t2 := toks[0]
+	if  t2[0:1] ==  "-" {									// tenant wasn't validated, we use as endpoint, but dont create an end to end path
+		h2_auth = false
+		t2 =  t2[1:]
+		ah2 :=  (*h2ip)[1:]									// must also adjust h2 string for fip translation
+		h2ip = &ah2
+		nalloc--											// need one less in return vector
+	}
 
-	if t1 == t2 {									// same tenant, just one pair to deal with
+	if nalloc <= 0 {
+		net_sheep.Baa( 1, "neither endpoint was validated, refusing to build a path for %s-%s", *h1ip, *h2ip )
+		return
+	}
+
+	if t1 == t2 {									// same tenant, just one pair to deal with and we don't care if one wasn't validated
 		pair_list = make( []host_pair, 1 )
 		pair_list[0].h1 = h1ip
 		pair_list[0].h2 = h2ip
@@ -571,7 +618,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		return
 	}
 
-	f1 := n.ip2fip[*h1ip]
+	f1 := n.ip2fip[*h1ip]							// dig the floating point IP address for each host (used as dest for flowmods on ingress rules)
 	f2 := n.ip2fip[*h2ip]
 	if f1 == nil {
 		net_sheep.Baa( 1, "find_endpoints: unable to map host to floating ip: %s", *h1ip )
@@ -586,16 +633,26 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
 	g2 := n.gateway4tid( t2 )
 
-	pair_list = make( []host_pair, 2 )				// return a h1->g1 and h2->g2 pair set
-	pair_list[0].h1 = h1ip
-	pair_list[0].h2 = g1
-	pair_list[0].usr = &t1
-	pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
+	h2i := nalloc - 1								// insertion point for h2 into pair list
+	pair_list = make( []host_pair, nalloc )			// build the list based on number of validated
 
-	pair_list[1].h2 = h2ip
-	pair_list[1].h1 = g2							// order is important to ensure bandwith in/out limits if different
-	pair_list[1].usr = &t2
-	pair_list[1].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
+	if h1_auth {
+		pair_list[0].h1 = h1ip
+		pair_list[0].h2 = g1
+		pair_list[0].usr = &t1
+		pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
+	} else {
+		net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
+	}
+
+	if h2_auth {
+		pair_list[h2i].h2 = h2ip
+		pair_list[h2i].h1 = g2							// order is important to ensure bandwith in/out limits if different
+		pair_list[h2i].usr = &t2
+		pair_list[h2i].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
+	} else {
+		net_sheep.Baa( 1, "h2 was not validated, creating partial path reservation %s <-> %s", *g1, *h1ip )
+	}
 
 	return
 }
@@ -667,7 +724,7 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 */
 func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
 
-	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and  %s", h1.Get_mac(), h2.Get_mac() )
+	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and  %s", *(h1.Get_mac()), *(h2.Get_mac()) )
 
 	links, epsw, err := ssw.All_paths_to( h2.Get_mac(), commence, conclude, inc_cap, usr, usr_max )
 	if err != nil {

@@ -43,6 +43,8 @@
 				21 Jun 2014 - Clarification in comment. 
 				29 Jun 2014 - Changes to support user link limits.
 				06 Jul 2014 - Changes to support refresh reservations.
+				15 Jul 2014 - Added support for dash (-) as a token which skips authorisation
+					but marks the resulting ID as unauthorised with a leading dash.
 */
 
 package managers
@@ -130,16 +132,21 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				id = *idp
 			}
 
-			if ! tok_req {							// using this for translation, skip the osif call
+			if ! tok_req {										// using this for translation, skip the osif call
 				xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
 				return &xstr, nil
 			}
 
-			for _, os := range os_refs {								// find the project name in our list
+			if tokens[0] == "-"	{								// special indication to skip validation and return ID with a lead dash indicating not authorised
+				xstr := fmt.Sprintf( "-%s/%s", id, tokens[2] )	// build and return the translated string
+				return &xstr, nil
+			}
+
+			for _, os := range os_refs {										// find the project name in our list
 				if os.Equals_id( &id ) {
-					ok, err := os.Valid_for_project( &(tokens[0]), false ) 
+					ok, err := os.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
 					if ok {
-						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
+						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
 						return &xstr, nil
 					} else {
 						osif_sheep.Baa( 1, "invalid token: %s: %s", *raw, err )
