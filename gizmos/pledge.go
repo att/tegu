@@ -142,6 +142,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 		id: id,
 		dscp: dscp,
 		ptype:	PT_BANDWIDTH,
+		protocol:	&empty_str,
 	}
 
 	if *usrkey != "" {
@@ -186,6 +187,7 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 int, p2 int, commence int64, 
 		expiry:		expiry,
 		id:			id,
 		ptype:		PT_STEERING,
+		protocol:	&empty_str,
 	}
 
 	s := "none"
@@ -397,7 +399,7 @@ func (p *Pledge) To_str( ) ( s string ) {
 	}
 
 	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d proto=%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v ptype=%d", state, diff, caption, 
-			*p.host1, p.tpport2, *p.host2, p.protocol, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.ptype )
+			*p.host1, p.tpport2, *p.host2, *p.protocol, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.ptype )
 	return
 }
 
@@ -433,8 +435,8 @@ func (p *Pledge) To_json( ) ( json string ) {
 							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
 
 		case PT_STEERING:
-				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "protocol", %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
-							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.protocol, p.tpport2, *p.id, *p.qid )
+				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "protocol": %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.protocol, *p.id, *p.qid )
 				sep := ""
 				for i := 0; i < p.mbidx; i++ {
 					json += fmt.Sprintf( `%s%q`, sep, *p.mbox_list[i].Get_id() )
@@ -466,12 +468,12 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 	
 	switch p.ptype {
 		case PT_BANDWIDTH:
-				chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d }`, 
-						*p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+				chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d }`, 
+						*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
 
 		case PT_STEERING:
-				chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "protocol": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
-						*p.host1, *p.host2, p.protocol, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+				chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "protocol": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
+						*p.host1, p.tpport1, *p.host2, p.tpport2, *p.protocol, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
 				sep := ""
 				for i := 0; i < p.mbidx; i++ {
 					chkpt += fmt.Sprintf( `%s %s`, sep, *p.mbox_list[i].To_json() )
