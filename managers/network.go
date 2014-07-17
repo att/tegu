@@ -34,6 +34,8 @@
 				07 Jul 2014 - Added support for reservation refresh.
 				15 Jul 2014 - Added partial path allocation if one endpoint is in a different user space and
 							is not validated.
+				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
+					vm names have a dash (gak).
 */
 
 package managers
@@ -81,6 +83,7 @@ type Network struct {
 	ip2fip		map[string]*string			// tenant/ip to floating ip address translation
 	fip2ip		map[string]*string			// floating ip address to tenant/ip translation
 	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
+	hupdate		bool						// set to true only if hosts is updated after gwmap has size (chkpt reload timing)
 }
 
 type host_pair struct {
@@ -301,16 +304,16 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	an IP address which we'll look up in the hosts table to verify first. 
 	If it's not an ip, then we'll search the vm2ip table for it. 
 
-	If the name passed in has a leading dash (-) meaning that it was not 
+	If the name passed in has a leading bang (!) meaning that it was not 
 	validated, we'll strip it and do the lookup, but will return the resulting 
-	IP address with a leading dash to propigate the invalidness of the address.
+	IP address with a leading bang (!) to propigate the invalidness of the address.
 */
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
 	lname := *hname								// lookup name - we may have to strip leading -
 
-	if  (*hname)[0:1] == "-" {					// ignore leading dashes which indicate unvalidated IDs
+	if  (*hname)[0:1] == "!" {					// ignore leading bang which indicate unvalidated IDs
 		lname = (*hname)[1:]
 	} 
 
@@ -323,8 +326,8 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 				err = fmt.Errorf( "host unknown: %s maps to an IP, but IP not known to SDNC: %s", *hname, *ip )
 				ip = nil
 			} else {
-				if (*hname)[0:1] == "-" {					// ensure that we return the ip with the leading dash
-					lname = "-" + *ip
+				if (*hname)[0:1] == "!" {					// ensure that we return the ip with the leading bang
+					lname = "!" + *ip
 					ip = &lname
 				}
 			}
@@ -491,6 +494,12 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[links[i].Dst_switch].To_json() )
 	}
 
+	if len( old_net.gwmap ) > 0 {			// if we build after gateway map has size, then gateways are in host table and checkpoints can be processed
+		n.hupdate = true
+	} else {
+		n.hupdate = false
+	}
+
 	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
 			if len( hlist[i].Ipv4 ) > 0 {
@@ -564,7 +573,7 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	known to Tegu.  If the endpoints are in different tenants, then we require each to have a floating point
 	IP address that is known to us.
 
-	If the tenant/project/user ID starts with a leading dash (-) then we assume it was NOT validated. If
+	If the tenant/project/user ID starts with a leading bang (!) then we assume it was NOT validated. If
 	both are not validated we reject the attempt. If one is validated we build the path from the other 
 	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
 	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
@@ -587,7 +596,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	nalloc := 2												// number to allocate if both validated
 	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out tenant ids
 	t1 := toks[0]
-	if t1[0:1] == "-" {										// tenant wasn't validated, we use as endpoint, but dont create an end to end path
+	if t1[0:1] == "!" {										// tenant wasn't validated, we use as endpoint, but dont create an end to end path
 		h1_auth = false
 		t1 =  t1[1:]										// drop the not authorised indicator for fip lookup later
 		ah1 :=  (*h1ip)[1:]									// must also adjust h1 string for fip translation
@@ -597,7 +606,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 
 	toks = strings.SplitN( *h2ip, "/", 2 )
 	t2 := toks[0]
-	if  t2[0:1] ==  "-" {									// tenant wasn't validated, we use as endpoint, but dont create an end to end path
+	if  t2[0:1] ==  "!" {									// tenant wasn't validated, we use as endpoint, but dont create an end to end path
 		h2_auth = false
 		t2 =  t2[1:]
 		ah2 :=  (*h2ip)[1:]									// must also adjust h2 string for fip translation
@@ -1143,12 +1152,12 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 				switch req.Msg_type {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
-					case REQ_STATE:
+					case REQ_STATE:			// return state of data: 1 == vm xlation (orig), 2 == all ostack data for q-lite
 							state := 0
 							if act_net.vm2ip != nil  && act_net.ip2vm != nil { 		// non q-lite oriented things 
 								state = 1
 							}
-							if act_net.vmid2ip != nil  && 						
+							if act_net.vmid2ip != nil  && 							// check for q-lite tables and ensure they have size
 									act_net.ip2vmid != nil  && 
 									act_net.vmid2phost	 != nil  && 
 									act_net.ip2mac != nil  && 
@@ -1156,10 +1165,22 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									act_net.gwmap != nil  && 
 									act_net.fip2ip != nil  && 
 									act_net.ip2fip != nil  {
-								state = 2
+								if len( act_net.vmid2ip ) > 0   && 						
+										len( act_net.ip2vmid ) > 0   && 
+										len( act_net.vmid2phost	 ) > 0   && 
+										len( act_net.ip2mac ) > 0   && 
+										len( act_net.mac2phost ) > 0   && 
+										len( act_net.gwmap ) > 0   && 
+										len( act_net.fip2ip ) > 0   && 
+										len( act_net.ip2fip ) > 0   {
+									if act_net.hupdate {							// tables there, but only good if host table updated after gwmap had data
+										state = 2
+									}
+								}
 							}
-							net_sheep.Baa( 2, "net-state: %v| %v| %v| %v| %v| %v| %v == %d", act_net.vmid2ip != nil, act_net.ip2vmid != nil, 
-									act_net.vmid2phost	 != nil, act_net.ip2mac != nil, act_net.mac2phost != nil, act_net.gwmap != nil, act_net.fip2ip != nil, state  )
+
+							net_sheep.Baa( 1, "net-state: v2ip=%v  ip2v=%v v2pho=%v ip2m=%v m2pho=%v gwm=%v/%v fip2ip=%v  state=%d", act_net.vmid2ip != nil, act_net.ip2vmid != nil, 
+									act_net.vmid2phost	 != nil, act_net.ip2mac != nil, act_net.mac2phost != nil, act_net.gwmap != nil, act_net.hupdate, act_net.fip2ip != nil, state  )
 							req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path

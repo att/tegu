@@ -48,6 +48,7 @@
 				07 Jul 2014 : Change to drop the request to network manager on delete; reservation manager
 					now sends that request to tighten up the timing between the two. 
 					Added support for reservation refresh.
+				17 Jul 2014 : Corrected typo in localhost validation check.
 */
 
 package managers
@@ -920,7 +921,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 				case "local":
 					priv_auth = p
 
-				case "locahost":
+				case "localhost":
 					priv_auth = p
 
 				case "token":

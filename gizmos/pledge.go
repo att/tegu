@@ -180,17 +180,17 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	}
 
 	tokens := strings.Split( *jp.Host1, ":" )
-	p.host1 = &tokens[1]
+	p.host1 = &tokens[0]
 	if len( tokens ) > 1 {
-		p.tpport1 = clike.Atoi( tokens[2] )
+		p.tpport1 = clike.Atoi( tokens[1] )
 	} else {
 		p.tpport1 = 0
 	}
 
 	tokens = strings.Split( *jp.Host2, ":" )
-	p.host2 = &tokens[1]
+	p.host2 = &tokens[0]
 	if len( tokens ) > 1 {
-		p.tpport2 = clike.Atoi( tokens[2] )
+		p.tpport2 = clike.Atoi( tokens[1] )
 	} else {
 		p.tpport2 = 0
 	}
@@ -323,7 +323,8 @@ func (p *Pledge) To_json( ) ( json string ) {
 		}
 	}
 	
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q }`, state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q }`, 
+			state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
 
 	return
 }
@@ -346,7 +347,8 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 		return
 	}
 	
-	chkpt = fmt.Sprintf( `{ "host1": %q, "host2": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q }`, *p.host1, *p.host2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey )
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q }`, 
+			*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey )
 
 	return
 }
