@@ -49,6 +49,7 @@
 					now sends that request to tighten up the timing between the two. 
 					Added support for reservation refresh.
 				17 Jul 2014 : Corrected typo in localhost validation check.
+				18 Jul 2014 : Added better error messaging when unable to open a listening port.
 */
 
 package managers
@@ -63,6 +64,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"forge.research.att.com/gopkgs/bleater"
@@ -934,7 +936,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	}
 
 	http.HandleFunc( "/tegu/api", deal_with )				// define callback 
-	if ssl_cert != nil && ssl_key != nil {
+	if ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "" {
 		if  create_cert {
 			http_sheep.Baa( 1, "creating SSL certificate and key: %s %s", *ssl_cert, *ssl_key )
 			dns_list := make( []string, 3 )
@@ -957,8 +959,10 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		err = http.ListenAndServe( ":" + *api_port, nil )		// drive the bus
 	}
 	
-	http_sheep.Baa( 0, "http listener is done" )
-	if( err != nil ) {
-		http_sheep.Baa( 1, "ERR: %s", err )
+	if err != nil {
+		http_sheep.Baa( 1, "ERR: unable to start http listener: %s", err )
+		syscall.Exit( 1 )								// bring the giant down hard if we cannot listen
+	} else {
+		http_sheep.Baa( 0, "http listener is done" )
 	}
 }
