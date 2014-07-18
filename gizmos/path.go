@@ -39,6 +39,7 @@
 				11 Jun 2014 - Changes to support finding all paths rather than shortest
 				13 Jun 2014 - Added to the doc.
 				29 Jun 2014 - Changes to support user link limits.
+				07 Jul 2014 - Changed to fix queue deletion when a reservation is deleted.
 */
 
 package gizmos
@@ -235,12 +236,16 @@ func (p *Path) Flip_endpoints( ) {
 	does inidcate wheter or not the assignment was successful to all (true) or if one or more
 	links could not be increased (false).
 */
-func (p *Path) Inc_utilisation( commence, conclude, delta int64, usr *Fence ) ( r bool ){
+func (p *Path) Inc_utilisation( commence, conclude, delta int64, qid *string, usr *Fence ) ( r bool ){
 	r = true
 
 	for i := 0; i < p.lidx; i++ {
-		if ! p.links[i].Inc_utilisation( commence, conclude, delta, usr ) {
-			r = false
+		if qid != nil {
+			p.links[i].Inc_queue( qid, commence, conclude, delta, usr ) 
+		} else {
+			if ! p.links[i].Inc_utilisation( commence, conclude, delta, usr ) {
+				r = false
+			}
 		}
 	}
 

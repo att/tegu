@@ -31,17 +31,22 @@
 	Date:		28 December 2013
 	Author:		E. Scott Daniels
 
-	Mods:		05 May 2014 : Changes to support digging the various maps out of openstack
+	Mods:		05 May 2014 - Changes to support digging the various maps out of openstack
 					that are needed when we are not using floodlight.
-				19 May 2014 : Changes to support floating ip translation map generation.
-				05 Jun 2014 : Added support for pulling all tenants rather than just those
+				19 May 2014 - Changes to support floating ip translation map generation.
+				05 Jun 2014 - Added support for pulling all tenants rather than just those
 					listed with credientials and building project to ID map.
-				07 Jun 2014 : Added function to validate hosts if supplied with token and 
+				07 Jun 2014 - Added function to validate hosts if supplied with token and 
 					to translate project (tenant) name into an ID. 
-				09 Jun 2014 : Converted the openstack cred list to a map.
-				10 Jun 2014 : Changes to ignore the "_ref_" entry in the cred map. 
-				21 Jun 2014 : Clarification in comment. 
+				09 Jun 2014 - Converted the openstack cred list to a map.
+				10 Jun 2014 - Changes to ignore the "_ref_" entry in the cred map. 
+				21 Jun 2014 - Clarification in comment. 
 				29 Jun 2014 - Changes to support user link limits.
+				06 Jul 2014 - Changes to support refresh reservations.
+				15 Jul 2014 - Added support for dash (-) as a token which skips authorisation
+					but marks the resulting ID as unauthorised with a leading dash.
+				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
+					vm names have a dash (gak).
 */
 
 package managers
@@ -129,11 +134,21 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				id = *idp
 			}
 
-			for _, os := range os_refs {								// find the project name in our list
+			if ! tok_req {										// using this for translation, skip the osif call
+				xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
+				return &xstr, nil
+			}
+
+			if tokens[0] == "!"	{								// special indication to skip validation and return ID with a lead dash indicating not authorised
+				xstr := fmt.Sprintf( "!%s/%s", id, tokens[2] )	// build and return the translated string
+				return &xstr, nil
+			}
+
+			for _, os := range os_refs {										// find the project name in our list
 				if os.Equals_id( &id ) {
-					ok, err := os.Valid_for_project( &(tokens[0]), false ) 
+					ok, err := os.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
 					if ok {
-						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
+						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
 						return &xstr, nil
 					} else {
 						osif_sheep.Baa( 1, "invalid token: %s: %s", *raw, err )
@@ -636,9 +651,14 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg.Response_data, msg.State = validate_token( s, os_refs, pname2id, req_token )
 				}
 
-			case REQ_VALIDATE_HOST:						// validate and translate a [token:]project-name/host  string
+			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, req_token )
+				}
+
+			case REQ_XLATE_HOST:						// accepts a [token/][project/]host name and translate project to an ID
+				if msg.Response_ch != nil {
+					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, false )		// same process as validation but token not required
 				}
 
 			case REQ_VALIDATE_ADMIN:					// validate an admin token passed in

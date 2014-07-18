@@ -44,7 +44,12 @@
 					the set of priv commands.
 				18 Jun 2014 : Corrected bug that was causing incorrect json goo when generating an error.
 				20 Jun 2014 : Corrected bug that allowed a reservation between the same host (VM) name. 
-				29 Jun 2014 - Changes to support user link limits.
+				29 Jun 2014 : Changes to support user link limits.
+				07 Jul 2014 : Change to drop the request to network manager on delete; reservation manager
+					now sends that request to tighten up the timing between the two. 
+					Added support for reservation refresh.
+				17 Jul 2014 : Corrected typo in localhost validation check.
+				18 Jul 2014 : Added better error messaging when unable to open a listening port.
 */
 
 package managers
@@ -59,6 +64,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"forge.research.att.com/gopkgs/bleater"
@@ -258,6 +264,59 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	return
 }
 
+
+/*
+	Given a reservation (pledge) ask network manager to reserve the bandwidth and set queues. If net mgr
+	is successful, then we'll send the reservation off to reservation manager to do the rest (push flow-mods
+	etc.)  The return values may seem odd, but are a result of breaking this out of the main parser which
+	wants two reason strings and a count of errors in order to report an overall status and a status of
+	each request that was received from the outside world. 
+*/
+func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string, jreason string, nerrors int ) {
+
+	nerrors = 0
+	jreason = ""
+	reason = ""
+
+	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
+
+	req := ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, my_ch, REQ_RESERVE, res, nil )		// send to network to verify a path
+	req = <- my_ch											// get response from the network thread
+
+	if req.Response_data != nil {
+		path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+		res.Set_path_list( path_list )
+
+		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+		req = <- my_ch										// wait for completion
+
+		if req.State == nil {
+			ckptreq := ipc.Mk_chmsg( )
+			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+			reason = fmt.Sprintf( "reservation accepted; reservation path has %d entries", len( path_list ) )
+			jreason =  res.To_json()
+		} else {
+			nerrors++
+			reason = fmt.Sprintf( "%s", req.State )
+		}
+
+		if res_paused {
+			rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
+			res.Pause( false )				// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+			res.Set_pushed( )
+		}
+	} else {
+		reason = fmt.Sprintf( "reservation rejected: %s", req.State )
+		nerrors++
+	}
+
+	return
+}
+
+
+
 // ---- main parsers ------------------------------------------------------------------------------------ 
 /*
 	parse and react to a POST request. we expect multiple, newline separated, requests
@@ -294,6 +353,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		my_ch		chan *ipc.Chmsg
 		auth_data	string					// data (token or sending address) sent for authorisation
 		is_token	bool					// flag when auth data is a token
+		ecount		int						// number of errors reported by function
 	)
 
 
@@ -451,8 +511,51 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				jreason += " ] }"
 				reason = "active queues"
 				
+			case "refresh":								// refresh reservations for named VM(s)
+				state = "OK"
+				if validate_auth( &auth_data, is_token ) {
+					for i := 1; i < ntokens; i++ {
+						req = ipc.Mk_chmsg( )
+						req.Send_req( osif_ch, my_ch, REQ_XLATE_HOST, &tokens[i], nil )		// translate [token/][project/]host-name into ID/hostname
+						req = <- my_ch														// wait for response
+						if req.Response_data != nil {
+							hname := req.Response_data.( *string )
+							req.Send_req( rmgr_ch, my_ch, REQ_PLEDGE_LIST, hname, nil )		// get a list of pledges that are associated with the hostname
+							req = <- my_ch
+							if req.Response_data != nil {
+								plist := req.Response_data.( []*gizmos.Pledge )
+								http_sheep.Baa( 1, "refreshing reservations for %s, %d pledge(s)", *hname, len( plist ) )
 
-			case "reserve":								// parse a reservation and make it so
+								for i := range plist {
+									req.Send_req( rmgr_ch, my_ch, REQ_YANK_RES, plist[i].Get_id(), nil )		// yank the reservation for this pledge
+									req = <- my_ch
+
+									if req.State == nil {	
+										plist[i].Reset_pushed()													// it's not pushed at this point
+										reason, jreason, ecount = finalise_reservation( plist[i], res_paused )	// allocate in network and add to res manager inventory
+										if ecount == 0 {
+											http_sheep.Baa( 1, "reservation refreshed: %s", *plist[i].Get_id() )
+										} else {
+											http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
+											state = "ERROR"
+										}
+										nerrors += ecount
+									} else {
+										http_sheep.Baa( 1, "unable to yank reservation: %s", req.State )
+									}
+								}
+							} else {
+								http_sheep.Baa( 1, "refreshing reservations for %s, no pledges", tokens[i] )
+							}
+						}
+					}
+				} else {
+					jreason = fmt.Sprintf( `"you are not authorised to submit a refresh request."` )
+					state = "ERROR"
+					nerrors++
+				}
+
+			case "reserve":
 					tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
 					if len( tmap ) < 1  {
 						if ntokens < 4  {		
@@ -501,38 +604,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 
-					if res != nil {												// able to make the reservation, continue and try to find a path with bandwidth
-						req = ipc.Mk_chmsg( )
-						req.Send_req( nw_ch, my_ch, REQ_RESERVE, res, nil )		// send to network to verify a path
-						req = <- my_ch											// get response from the network thread
-
-						if req.Response_data != nil {
-							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-							res.Set_path_list( path_list )
-
-							req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
-							req = <- my_ch										// wait for completion
-
-							if req.State == nil {
-								ckptreq := ipc.Mk_chmsg( )
-								ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
-								state = "OK"
-								reason = fmt.Sprintf( "reservation accepted; reservation path has %d entries", len( path_list ) )
-								jreason =  res.To_json()
-							} else {
-								nerrors++
-								reason = fmt.Sprintf( "%s", req.State )
-							}
-
-							if res_paused {
-								rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
-								res.Pause( false )				// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
-								res.Set_pushed( )
-							}
-						} else {
-							reason = fmt.Sprintf( "reservation rejected: %s", req.State )
-							nerrors++
-						}
+					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+						reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
+						nerrors += ecount													// number of errors added to the pile by the call
 					} else {
 						reason = fmt.Sprintf( "reservation rejected: %s", err )
 						nerrors++
@@ -769,7 +843,6 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		comment		string = ""							// comment about the state
 		my_ch		chan *ipc.Chmsg
 		del_data	[]*string								// data sent on delete
-		res			*gizmos.Pledge								// reservation fetched from resmgr
 	)
 
 	my_ch = make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
@@ -795,7 +868,7 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 					nerrors++
 					comment = fmt.Sprintf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received '%s'", recs[i] ); 
 				} else {
-					del_data = make( []*string, 2, 2 )			// deletee data is the reservation name and the cookie if supplied
+					del_data = make( []*string, 2, 2 )			// delete data is the reservation name and the cookie if supplied
 					del_data[0] = &tokens[1]
 					if ntokens < 3 {
 						del_data[1] = &empty_str
@@ -805,21 +878,12 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 					}
 
 					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view
+					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
 					req = <- my_ch										// wait for delete response 
 
-					if req.State == nil {								// no error deleting in res mgr
-						req.Send_req( nw_ch, my_ch, REQ_DEL, res, nil )		// delete from the network point of view
-						req = <- my_ch									// wait for response from network
-
-						if req.State == nil {
-							comment = "reservation successfully deleted"
-							state = "OK"
-						} else {
-							nerrors++
-							comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
-						}
-
+					if req.State == nil {
+						comment = "reservation successfully deleted"
+						state = "OK"
 					} else {
 						nerrors++
 						comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
@@ -967,7 +1031,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 				case "local":
 					priv_auth = p
 
-				case "locahost":
+				case "localhost":
 					priv_auth = p
 
 				case "token":
@@ -980,7 +1044,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	}
 
 	http.HandleFunc( "/tegu/api", deal_with )				// define callback 
-	if ssl_cert != nil && ssl_key != nil {
+	if ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "" {
 		if  create_cert {
 			http_sheep.Baa( 1, "creating SSL certificate and key: %s %s", *ssl_cert, *ssl_key )
 			dns_list := make( []string, 3 )
@@ -1003,8 +1067,10 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		err = http.ListenAndServe( ":" + *api_port, nil )		// drive the bus
 	}
 	
-	http_sheep.Baa( 0, "http listener is done" )
-	if( err != nil ) {
-		http_sheep.Baa( 1, "ERR: %s", err )
+	if err != nil {
+		http_sheep.Baa( 1, "ERR: unable to start http listener: %s", err )
+		syscall.Exit( 1 )								// bring the giant down hard if we cannot listen
+	} else {
+		http_sheep.Baa( 0, "http listener is done" )
 	}
 }

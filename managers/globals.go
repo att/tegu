@@ -12,6 +12,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		25 Jun 2014 - Added initial steering support
+				07 Jul 2014 - Added support for reservation refresh.
 */
 
 package managers
@@ -82,12 +83,15 @@ const (
 	REQ_SETULCAP				// set a user link capacity
 	REQ_GETGW					// give a tenant ID and get it's gateway
 	REQ_GETPHOST				// givn an IP address, get it's physical host
+	REQ_XLATE_HOST				// translate a [token/][project/]hostname into ID/hostname without validation of token if it exits.
+	REQ_PLEDGE_LIST				// causes res mgr to generate a list of pledges based on a host name
+	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
 )
 
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.1/17024"			// version bumped to 3.1 for steering 
+	version 	string = "v3.1/17184"			// version bumped to 3.1 for steering (merged 7/18/2014)
 )
 
 

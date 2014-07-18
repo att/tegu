@@ -19,12 +19,14 @@
 				need to check to ensure that a VM's IP address has not changed; repush 
 				reservation if it has and cancel the previous one (when skoogi allows drops)
 
-	Mods:		03 Apr 2014 : Added endpoint flowmod support.
-				30 Apr 2014 : Enhancements to send flow-mods and reservation request to agents (Tegu-light)
-				13 May 2014 : Changed to support exit dscp value in reservation.
-				18 May 2014 : Changes to allow cross tenant reservations.
-				19 May 2014 : Changes to support using destination floating IP address in flow mod.
-				28 Jun 2014 : Support for steering reservations.
+	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
+				30 Apr 2014 (sd) : Enhancements to send flow-mods and reservation request to agents (Tegu-light)
+				13 May 2014 (sd) : Changed to support exit dscp value in reservation.
+				18 May 2014 (sd) : Changes to allow cross tenant reservations.
+				19 May 2014 (sd) : Changes to support using destination floating IP address in flow mod.
+				07 Jul 2014 (sd) : Changed to send network manager a delete message when deleteing a reservation
+						rather than depending on the http manager to do that -- possible timing issues if we wait.
+						Added support for reservation refresh.
 */
 
 package managers
@@ -93,6 +95,7 @@ func name2ip( name *string ) ( ip *string ) {
 	}
 
 	ch := make( chan *ipc.Chmsg );	
+	defer close( ch )									// close it on return
 	msg := ipc.Mk_chmsg( )
 	msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
 	msg = <- ch
@@ -150,7 +153,7 @@ func get_physhost( ip *string ) ( *string ) {
 	has failed.  Issues a warning to the log, and resets the pushed flag for the associated reservation.
 */
 func (i *Inventory) failed_push( msg *ipc.Chmsg ) {
-	fq_data := msg.Req_data.( []interface{} ); 		// data that was passed to fq_mgr (we'll dig out pledge id
+	fq_data := msg.Req_data.( []interface{} ) 		// data that was passed to fq_mgr (we'll dig out pledge id
 	pid := fq_data[FQ_ID].( string )
 
 	rm_sheep.Baa( 1, "WRN: proactive ie reservation failed, pledge marked unpushed: %s", pid )
@@ -506,6 +509,11 @@ func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 */
 func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 	var (
+		fq_data	[]interface{}			// local work space to organise data for fq manager
+		fq_sdata	[]interface{}		// copy of data at time message is sent so that it 'survives' after msg sent and this continues to update fq_data
+		msg		*ipc.Chmsg
+		ip2		*string					// the ip ad
+
 		push_count	int = 0
 		pend_count	int = 0
 		pushed_count int = 0
@@ -528,7 +536,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 					case gizmos.PT_STEERING:
 							push_st_reservation( p, rname, ch )
 				}
-
 			} else {
 				pend_count++
 			}
@@ -576,9 +583,9 @@ func (i *Inventory) write_chkpt( ) {
 	}
 
 	for key, p := range i.cache {
-		s := p.To_chkpt();		
+		s := p.To_chkpt()		
 		if s != "expired" {
-			fmt.Fprintf( i.chkpt, "%s\n", s ); 					// we'll check the overall error state on close
+			fmt.Fprintf( i.chkpt, "%s\n", s ) 					// we'll check the overall error state on close
 		} else {
 			if p.Is_extinct( 120 ) && p.Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
 				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
@@ -611,6 +618,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 
 	err = nil
 	my_ch = make( chan *ipc.Chmsg )
+	defer close( my_ch )									// close it on return
 
 	f, err := os.Open( *fname )
 	if err != nil {
@@ -650,6 +658,28 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 
 	rm_sheep.Baa( 1, "read %d records from checkpoint file: %s", nrecs, *fname )
 	return
+}
+
+/*
+	Given a host name, return all pledges that involve that host as a list. 
+	Currently no error is detected and the list may be nill if there are no pledges.
+*/
+func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error ) {
+
+	if len( inv.cache ) <= 0 {
+		return nil, nil
+	}
+
+	plist := make( []*gizmos.Pledge, len( inv.cache ) )
+	i := 0
+	for _, p := range inv.cache {
+		if p.Has_host( vmname ) {
+			plist[i] = p
+			i++
+		}
+	}
+
+	return plist[0:i], nil
 }
 
 // --- Public ---------------------------------------------------------------------------
@@ -714,25 +744,36 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 	Deletion is affected by reetting the expiry time on the pledge to now + a few seconds. 
 	This will cause a new set of flow-mods to be sent out with an expiry time that will
 	take them out post haste and without the need to send "delete" flow-mods out. 
+
+	This function sends a request to the network manager to delete the related queues. This
+	must be done here so as to prevent any issues with the loosely coupled management of 
+	reservation and queue settings.  It is VERY IMPORTANT to delete the reservation from 
+	the network perspective BEFORE the expiry time is reset.  If it is reset first then 
+	the network splits timeslices based on the new expiry and queues end up dangling.
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
-	var (
-		p *gizmos.Pledge
-	)
 
-	p, state = inv.Get_res( name, cookie )
+	p, state := inv.Get_res( name, cookie )
 	if p != nil {
 		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", p.To_str() )
 		state = nil
-		//inv.cache[*name] = nil							// this may be unneeded since we
-		//delete( inv.cache, *name )
+
+		ch := make( chan *ipc.Chmsg )	
+		defer close( ch )										// close it on return
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
+		req = <- ch											// wait for response from network
+		state = req.State
+
 		p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
+		p.Reset_pushed()									// force push of flow-mods that reset the expiry
 	} else {
-		rm_sheep.Baa( 2, "resgmgr: unable to  delete reservation: %s", *name )
+		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
 	}
 
 	return
 }
+
 
 /*
 	delete all of the reservations provided that the cookie is the super cookie. If cookie
@@ -753,16 +794,65 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 	}
 
 	for _, pname := range plist {
-		err := inv.Del_res( pname,  cookie );
+		rm_sheep.Baa( 2, "delete all attempt to delete: %s", *pname )
+		err := inv.Del_res( pname,  cookie )
 		if err == nil {
 			ndel++;
-			rm_sheep.Baa( 1, "delete all deleted reservation %s", *pname );
+			rm_sheep.Baa( 1, "delete all deleted reservation %s", *pname )
 		} else {
-			rm_sheep.Baa( 1, "delete all skipped reservation %s", *pname );
+			rm_sheep.Baa( 1, "delete all skipped reservation %s", *pname )
 		}
 	}
 
-	rm_sheep.Baa( 1, "delete all deleted %d reservations %s", ndel );
+	rm_sheep.Baa( 1, "delete all deleted %d reservations %s", ndel )
+	return
+}
+
+
+/*
+	Pulls the reservation from the inventory. Similar to delete, but not quite the same.
+	This will clone the pledge. The clone is expired and left in the inventory to force
+	a reset of flowmods. The network manager is sent a request to delete the queues 
+	assocaited with the path and the path is removed from the original pledge. The orginal
+	pledge is returned so that it can be used to generate a new set of paths based on the 
+	hosts, expiry and bandwidth requirements of the initial reservation. 
+
+	Unlike the get/del functions, this is meant for internal support and does not
+	require a cookie. 
+
+	It is important to delete the reservation from the network manager point of view 
+	BEFORE the expiry is reset. If expiry is set first then the network manager will
+	cause queue timeslices to be split on that boundary leaving dangling queues. 
+*/
+func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) {
+
+	state = nil
+	p = inv.cache[*name]
+	if p != nil {
+		rm_sheep.Baa( 2, "resgmgr: yanked reservation: %s", p.To_str() )
+		cp := p.Clone( *name + ".yank" )				// clone but DO NOT set conclude time until after network delete!
+
+		inv.cache[*name + ".yank"] = cp					// insert the cloned pledge into the inventory
+
+		inv.cache[*name] = nil							// yank original from the list
+		delete( inv.cache, *name )
+		p.Set_path_list( nil )							// no path list for this pledge 	
+
+		ch := make( chan *ipc.Chmsg )	
+		defer close( ch )									// close it on return
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, ch, REQ_DEL, cp, nil )			// delete from the network point of view
+		req = <- ch											// wait for response from network
+		state = req.State
+
+														// now safe to set these
+		cp.Set_expiry( time.Now().Unix() + 1 )			// force clone to be expired
+		cp.Reset_pushed( )								// force it to go out again
+	} else {
+		state = fmt.Errorf( "no reservation with name: %s", *name )
+		rm_sheep.Baa( 2, "resgmgr: unable to yank, no reservation with name: %s", *name )
+	}
+
 	return
 }
 
@@ -817,7 +907,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
-	for ;; {
+	for {
 		msg = <- my_chan					// wait for next message
 		
 		rm_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
@@ -825,7 +915,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_NOOP:			// just ignore
 
 			case REQ_ADD:
-				p := msg.Req_data.( *gizmos.Pledge );	
+				p := msg.Req_data.( *gizmos.Pledge )	
 				msg.State = inv.Add_res( p )
 				msg.Response_data = nil
 
@@ -833,7 +923,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				rm_sheep.Baa( 3, "invoking checkpoint" )
 				inv.write_chkpt( )
 
-			case REQ_DEL:
+			case REQ_DEL:											// user initiated delete -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
 				if *data[0] == "all" {
 					inv.Del_all_res( data[1] )
@@ -841,11 +931,15 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				} else {
 					msg.State = inv.Del_res( data[0], data[1] )
 				}
+
 				msg.Response_data = nil
 
-			case REQ_GET:
-				data := msg.Req_data.( []*string )		// assume pointers to name and cookie
+			case REQ_GET:											// user initiated get -- requires cookie
+				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
 				msg.Response_data, msg.State = inv.Get_res( data[0], data[1] )
+
+			case REQ_LIST:											// list reservations	(for a client)
+				msg.Response_data, msg.State = inv.res2json( )
 
 			case REQ_LOAD:								// load from a checkpoint file
 				data := msg.Req_data.( *string )		// assume pointers to name and cookie
@@ -857,7 +951,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				msg.State = nil							// right now this cannot fail in ways we know about 
 				msg.Response_data = ""
 				inv.pause_on()
-				rm_sheep.Baa( 1, "pausing..." );
+				rm_sheep.Baa( 1, "pausing..." )
 
 			case REQ_RESUME:
 				msg.State = nil							// right now this cannot fail in ways we know about 
@@ -873,13 +967,13 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				}
 				last_qcheck = now
 
-			case REQ_PUSH:
+			case REQ_PUSH:								// driven every few seconds to push new reservations
 				inv.push_reservations( my_chan )
 
-			case REQ_LIST:								// list reservations
-				msg.Response_data, msg.State = inv.res2json( );
+			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
+				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) ) 
 
-			// CAUTION: these come back as asynch responses rather than as initial message
+			// CAUTION: the requests below come back as asynch responses rather than as initial message
 			case REQ_IE_RESERVE:						// an IE reservation failed
 				msg.Response_ch = nil					// immediately disable to prevent loop
 				inv.failed_push( msg )			// suss out the pledge and mark it unpushed
@@ -889,12 +983,16 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_GEN_EPQMAP:
 				rm_sheep.Baa( 1, "received queue map from network manager" )
-				msg.Response_ch = nil					// immediately disable to prevent loop
+				msg.Response_ch = nil											// immediately disable to prevent loop
 				fq_data := make( []interface{}, 1 )
 				fq_data[FQ_QLIST] = msg.Response_data 
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 				
+			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
+				if msg.Response_ch != nil {
+					msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
+				}
 
 			default:
 				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d", msg.Msg_type )

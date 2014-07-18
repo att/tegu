@@ -25,6 +25,8 @@
 	Author:		E. Scott Daniels
 
 	Mods:		29 Jun 2014 - Changes to support user link limits.
+				07 Jul 2014 - Now generates queue strings if the bandwidth amount is 
+					greater than zero.
 */
 
 package gizmos
@@ -306,8 +308,11 @@ func ( ts *Time_slice ) Queues2str( ) ( string ) {
 	sep := ""
 
 	for i := range ts.queues {
-		s += fmt.Sprintf( `%s%s`, sep, ts.queues[i].To_str() )
-		sep = " "
+		qs := ts.queues[i].To_str_pos( ) 				// queue string only if it's a positive value (allow queues with zero size to drop off)
+		if qs != "" {
+			s += fmt.Sprintf( `%s%s`, sep, qs )
+			sep = " "
+		}
 	}
 
 	return s
