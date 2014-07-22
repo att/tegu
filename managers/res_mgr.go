@@ -55,8 +55,9 @@ import (
 	Manages the reservation inventory
 */
 type Inventory struct {
-	cache	map[string]*gizmos.Pledge
-	chkpt	*chkpt.Chkpt
+	cache		map[string]*gizmos.Pledge		// cache of pledges 
+	ulcap_cache	map[string]int					// cache of user limit values (max value)
+	chkpt		*chkpt.Chkpt
 }
 
 // --- Private --------------------------------------------------------------------------
@@ -582,6 +583,10 @@ func (i *Inventory) write_chkpt( ) {
 		return
 	}
 
+	for nm, v := range i.ulcap_cache {							// write out user link capacity limits that have been set
+		fmt.Fprintf( i.chkpt, "ucap: %s %d\n", nm, v ) 			// we'll check the overall error state on close
+	}
+
 	for key, p := range i.cache {
 		s := p.To_chkpt()		
 		if s != "expired" {
@@ -631,23 +636,32 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 		nrecs++
 		rec, err = br.ReadString( '\n' )
 		if err == nil  {
-			p = new( gizmos.Pledge )
-			p.From_json( &rec )
+			switch rec[0:5] {
+				case "ucap:":
+					toks := strings.Split( rec, " " )
+					if len( toks ) == 3 {
+						i.add_ulcap( &toks[1], &toks[2] )
+					}
 
-			if  p.Is_expired() {
-				rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", p.To_str() )
-			} else {
-
-				req = ipc.Mk_chmsg( )
-				req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
-				req = <- my_ch									// should be OK, but the underlying network could have changed
-
-				if req.State == nil {						// reservation accepted, add to inventory
-					err = i.Add_res( p )
-				} else {
-
-					rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s", p.To_str() )
-				}
+				default:
+					p = new( gizmos.Pledge )
+					p.From_json( &rec )
+		
+					if  p.Is_expired() {
+						rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", p.To_str() )
+					} else {
+		
+						req = ipc.Mk_chmsg( )
+						req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
+						req = <- my_ch									// should be OK, but the underlying network could have changed
+		
+						if req.State == nil {						// reservation accepted, add to inventory
+							err = i.Add_res( p )
+						} else {
+		
+							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s", p.To_str() )
+						}
+					}
 			}
 		}
 	}
@@ -682,6 +696,36 @@ func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error )
 	return plist[0:i], nil
 }
 
+/*
+	Set the user link capacity and forward it on to the network manager. We expect this
+	to be a request from the far side (user/admin) or read from the chkpt file so 
+	the value is passed as a string (which is also what network wants too.
+*/
+func (inv *Inventory) add_ulcap( name *string, sval *string ) {
+	val := clike.Atoi( *sval )
+
+	pdata := make( []*string, 2 )		// parameters for message to network
+	pdata[0] = name
+	pdata[1] = sval
+
+	if val > 0 && val < 101 {
+		rm_sheep.Baa( 2, "adding user cap: %s %d", *name, val )
+		inv.ulcap_cache[*name] = val
+
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the netwok environment
+
+	} else {
+		if val == 0 {
+			delete( inv.ulcap_cache, *name )
+			req := ipc.Mk_chmsg( )
+			req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the netwok environment
+		} else {
+			rm_sheep.Baa( 1, "user link capacity not set %d is out of range (1-100)", val )
+		}
+	}
+}
+
 // --- Public ---------------------------------------------------------------------------
 /*
 	constructor
@@ -691,6 +735,7 @@ func Mk_inventory( ) (inv *Inventory) {
 	inv = &Inventory { } 
 
 	inv.cache = make( map[string]*gizmos.Pledge, 2048 )		// initial size is not a limit
+	inv.ulcap_cache = make( map[string]int, 64 )
 
 	return
 }
@@ -972,6 +1017,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) ) 
+
+			case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
+				data := msg.Req_data.( []*string )
+				inv.add_ulcap( data[0], data[1] )
+				inv.write_chkpt( )
 
 			// CAUTION: the requests below come back as asynch responses rather than as initial message
 			case REQ_IE_RESERVE:						// an IE reservation failed

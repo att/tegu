@@ -42,6 +42,7 @@
 				07 Jul 2014 : Added refresh API request.
 				15 Jul 2014 : Added support for parital reservation path when only one endpoint is given a
 							valid token on the reservation request. 
+				21 Jul 2014 : Fixed bug -- checkpoint not including user link caps
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
