@@ -286,6 +286,7 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 
 		ckpt
 		listhosts
+		listulcaps
 		listres
 		listconns
 		reserve <bandwidth[K|M|G][,outbandwidth[K|M|G]> [<start>-]<end> <host1>[-<host2] [cookie]
@@ -345,7 +346,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		req_count++
 		state = "ERROR"				// default for each loop; final set based on error count following loop
 		jreason = ""
-		reason = ""
+		reason = fmt.Sprintf( "you are not authorised to submit a %s command", tokens[0] )
 		http_sheep.Baa( 3, "processing request: %s", tokens[0] )
 		switch tokens[0] {
 
@@ -355,10 +356,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 					state = "OK"
 					reason = "checkpoint was requested"
-				} else {
-					state = "ERROR"
-					reason = fmt.Sprintf( "you are not authorised to submit a chkpt command" )
-				}
+				} 
 
 			case "graph":
 				if validate_auth( &auth_data, is_token ) {
@@ -369,34 +367,39 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					if req.Response_data != nil {
 						state = "OK"
 						jreason = string( req.Response_data.(string) )
+						reason = ""
 					} else {
-						nerrors++
 						reason = "no output from network thread"
 					}
-				} else {
-					state = "ERROR"
-					reason = fmt.Sprintf( "you are not authorised to submit a graph command" )
-				}
-
+				} 
 	
-			case "listhosts":											// list known host information
+			case "listulcaps":											// list user link capacities known to network manager
 				if validate_auth( &auth_data, is_token ) {
 					req = ipc.Mk_chmsg( )
-					req.Send_req( nw_ch, my_ch, REQ_HOSTLIST, nil, nil )
+					req.Send_req( nw_ch, my_ch, REQ_LISTULCAP, nil, nil )
 					req = <- my_ch
 					if req.State == nil {
 						state = "OK"
 						jreason = string( req.Response_data.(string) )
+						reason = ""
 					} else {
-						state = "ERROR"
 						reason = fmt.Sprintf( "%s", req.State )
-						nerrors++
 					}
-				} else {
-					state = "ERROR"
-					reason = fmt.Sprintf( "you are not authorised to submit a listhosts command" )
-				}
-
+				} 
+	
+			case "listhosts":											// list known host information
+				if validate_auth( &auth_data, is_token ) {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( nw_ch, my_ch, REQ_LISTHOSTS, nil, nil )
+					req = <- my_ch
+					if req.State == nil {
+						state = "OK"
+						jreason = string( req.Response_data.(string) )
+						reason = ""
+					} else {
+						reason = fmt.Sprintf( "%s", req.State )
+					}
+				} 
 			
 			case "listres":											// list reservations
 				req = ipc.Mk_chmsg( )
@@ -405,10 +408,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				if req.State == nil {
 					state = "OK"
 					jreason = string( req.Response_data.(string) )
+					reason = ""
 				} else {
-					state = "ERROR"
 					reason = fmt.Sprintf( "%s", req.State )
-					nerrors++
 				}
 				
 
@@ -423,10 +425,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					if req.State == nil {
 						state = "OK"
 						jreason = string( req.Response_data.(string) )
+						reason = ""
 					} else {
-						state = "ERROR"
 						reason = fmt.Sprintf( "%s", req.State )
-						nerrors++
 					}
 				}
 
@@ -443,38 +444,39 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							http_sheep.Baa( 1, "reservations are now paused" )	
 							state = "OK"
 							jreason = string( req.Response_data.( string ) )
+							reason = ""
 							res_paused = true
 						} else {
-							state = "ERROR"
 							reason = fmt.Sprintf( "s", req.State )
 						}
 					}
-				} else {
-					jreason = fmt.Sprintf( `"you are not authorised to submit a pause request."` )
-					state = "ERROR"
-				}
+				} 
 
 			case "ping":
+				reason = ""
 				jreason = fmt.Sprintf( "\"pong: %s\"", version )
 				state = "OK"
 
 			case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
-				req = ipc.Mk_chmsg( )
-				req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
-				req = <- my_ch															// get response from the network thread
-				state = "OK"
-				m :=  req.Response_data.( []string )
-				jreason = `{ "queues": [ `
-				sep := ""						// local scope not to trash the global var
-				for i := range m {
-					jreason += fmt.Sprintf( "%s%q", sep, m[i] )
-					sep = "," 
+				if validate_auth( &auth_data, is_token ) {
+					req = ipc.Mk_chmsg( )
+					req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
+					req = <- my_ch															// get response from the network thread
+					state = "OK"
+					m :=  req.Response_data.( []string )
+					jreason = `{ "queues": [ `
+					sep := ""						// local scope not to trash the global var
+					for i := range m {
+						jreason += fmt.Sprintf( "%s%q", sep, m[i] )
+						sep = "," 
+					}
+					jreason += " ] }"
+					reason = "active queues"
 				}
-				jreason += " ] }"
-				reason = "active queues"
 				
 			case "refresh":								// refresh reservations for named VM(s)
 				state = "OK"
+				reason = ""
 				if validate_auth( &auth_data, is_token ) {
 					for i := 1; i < ntokens; i++ {
 						req = ipc.Mk_chmsg( )
@@ -500,8 +502,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 										} else {
 											http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
 											state = "ERROR"
+											nerrors += ecount - 1
 										}
-										nerrors += ecount
 									} else {
 										http_sheep.Baa( 1, "unable to yank reservation: %s", req.State )
 									}
@@ -511,10 +513,6 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							}
 						}
 					}
-				} else {
-					jreason = fmt.Sprintf( `"you are not authorised to submit a refresh request."` )
-					state = "ERROR"
-					nerrors++
 				}
 
 			case "reserve":
@@ -568,10 +566,13 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
 						reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
-						nerrors += ecount													// number of errors added to the pile by the call
+						if ecount == 0 {
+							state = "OK"
+						} else {
+							nerrors += ecount - 1 												// number of errors added to the pile by the call
+						}
 					} else {
 						reason = fmt.Sprintf( "reservation rejected: %s", err )
-						nerrors++
 					}
 
 			case "resume":
@@ -587,102 +588,102 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							http_sheep.Baa( 1, "reservations are now resumed" )	
 							state = "OK"
 							jreason = string( req.Response_data.( string ) )
+							reason = ""
 							res_paused = false
 						} else {
-							state = "ERROR"
 							reason = fmt.Sprintf( "s", req.State )
 						}
 					}
-				} else {
-					jreason = fmt.Sprintf( `"you are not authorised to submit a resume request."` )
-					state = "ERROR"
 				}
 
 			case "setulcap":									// set a user link cap; expect user-name limit
-				if ! validate_auth( &auth_data, is_token ) {
-					jreason = fmt.Sprintf( `"you are not authorised to submit a verbose request."` )
-					state = "ERROR"
-					break
+				if validate_auth( &auth_data, is_token ) {
+					if ntokens == 3 {
+						req = ipc.Mk_chmsg( )
+						req.Send_req( osif_ch, my_ch, REQ_PNAME2ID, &tokens[1], nil )		// translate the name to virtulisation assigned ID
+						req = <- my_ch
+
+						pdata := make( []*string, 2 )
+						pdata[0] = req.Response_data.( *string )
+						pdata[1] = &tokens[2]
+
+						if pdata[0] != nil {
+							reason = fmt.Sprintf( "user link cap set for %s (%s): %s%%", tokens[1], *pdata[0], tokens[2] )
+							req.Send_req( rmgr_ch, nil, REQ_SETULCAP, pdata, nil ) 				// dont wait for a reply
+							state = "OK"
+						} else {
+							reason = fmt.Sprintf( "unable to translate name: %s", tokens[1] )
+							state = "ERROR"
+							nerrors++
+						}
+					} else {
+						state = "ERROR"
+						nerrors++
+						reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
+					}
 				}
-
-				if ntokens == 3 {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( osif_ch, my_ch, REQ_PNAME2ID, &tokens[1], nil )		// translate the name to virtulisation assigned ID
-					req = <- my_ch
-
-					pdata := make( []*string, 2 )
-					pdata[0] = req.Response_data.( *string )
-					pdata[1] = &tokens[2]
-					reason = fmt.Sprintf( "user link cap set for %s (%s): %s%%", tokens[1], pdata[0], tokens[2] )
-
-					req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// dont wait for a reply
-				} else {
-					state = "ERROR"
-					reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
-				}
-
 
 			case "verbose":									// verbose n [child-bleater]
-				if ! validate_auth( &auth_data, is_token ) {
-					jreason = fmt.Sprintf( `"you are not authorised to submit a verbose request."` )
-					state = "ERROR"
-					break
-				}
-
-				if ntokens > 1 {
-					state = "OK"
-					nv := clike.Atou( tokens[1] )
-					if nv < 0 {
-						nv = 0
-					}
-					if ntokens > 2 {
-						jreason = fmt.Sprintf( "\"verbose set: %s now %d\"",  tokens[2], nv )
-						switch( tokens[2] ) {
-							case "osif", "ostack", "osif_mgr":
-								osif_sheep.Set_level( nv )
-
-							case "resmgr", "res_mgr":
-								rm_sheep.Set_level( nv )
-
-							case "fq", "fq_mgr", "fqmgr":
-								fq_sheep.Set_level( nv )
-
-							case "http", "http_api":
-								http_sheep.Set_level( nv )
-
-							case "net", "network":
-								net_sheep.Set_level( nv )
-								
-							case "agent":
-								am_sheep.Set_level( nv )
-
-							case "tegu", "master":
-								tegu_sheep.Set_level( nv )
-
-							case "lib", "gizmos":
-								gizmos.Set_bleat_level( nv )
-
-							default:
-								state = "ERROR"
-								http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
-								jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
+				if validate_auth( &auth_data, is_token ) {
+					if ntokens > 1 {
+						state = "OK"
+						reason = ""
+						nv := clike.Atou( tokens[1] )
+						if nv < 0 {
+							nv = 0
 						}
+						if ntokens > 2 {
+							jreason = fmt.Sprintf( "\"verbose set: %s now %d\"",  tokens[2], nv )
+							switch( tokens[2] ) {
+								case "osif", "ostack", "osif_mgr":
+									osif_sheep.Set_level( nv )
 
-						http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
+								case "resmgr", "res_mgr":
+									rm_sheep.Set_level( nv )
+
+								case "fq", "fq_mgr", "fqmgr":
+									fq_sheep.Set_level( nv )
+
+								case "http", "http_api":
+									http_sheep.Set_level( nv )
+
+								case "net", "network":
+									net_sheep.Set_level( nv )
+									
+								case "agent":
+									am_sheep.Set_level( nv )
+
+								case "tegu", "master":
+									tegu_sheep.Set_level( nv )
+
+								case "lib", "gizmos":
+									gizmos.Set_bleat_level( nv )
+
+								default:
+									state = "ERROR"
+									http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
+									jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
+							}
+
+							http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
+						} else {
+							jreason = fmt.Sprintf( "\"verbose set: master level to %d\"",   nv )
+							http_sheep.Baa( 1, "verbose level set: master %d", nv )
+							tegu_sheep.Set_level( nv )
+						}
 					} else {
-						jreason = fmt.Sprintf( "\"verbose set: master level to %d\"",   nv )
-						http_sheep.Baa( 1, "verbose level set: master %d", nv )
-						tegu_sheep.Set_level( nv )
+						state = "ERROR"
+						reason = fmt.Sprintf( "missing parameters on verbose command" )
 					}
-				} else {
-					state = "ERROR"
-					reason = fmt.Sprintf( "missing parameters on verbose command" )
 				}
 
 			default:
-				nerrors++
 				reason = fmt.Sprintf( "unrecognised put and/or post action: reqest %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
 				http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
+		}
+
+		if state == "ERROR" {
+			nerrors++
 		}
 
 		if jreason != "" {

@@ -13,6 +13,7 @@
 
 	Mods:
 				07 Jul 2014 - Added support for reservation refresh.
+				21 Jul 2014 - Added support list ul caps.
 */
 
 package managers
@@ -52,7 +53,7 @@ const (
 	REQ_GETLMAX					// get max link allocation across the network
 	REQ_SETQUEUES				// fqmgr - tickle to cause queues to be set if needed
 	REQ_CHOSTLIST				// osif - get a list of compute hosts
-	REQ_HOSTLIST				// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
+	REQ_LISTHOSTS				// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
 	REQ_GEN_QMAP				// network - generate queue info needed by external process to set queues
 	REQ_IE_RESERVE				// fq-manager send ingress/egress reservations to skoogi
 	REQ_VM2IP					// xlate map VM name | VM ID to IP map is in the request
@@ -80,13 +81,14 @@ const (
 	REQ_XLATE_HOST				// translate a [token/][project/]hostname into ID/hostname without validation of token if it exits.
 	REQ_PLEDGE_LIST				// causes res mgr to generate a list of pledges based on a host name
 	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
+	REQ_LISTULCAP				// user link capacity list
 	
 )
 
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.0/17184"
+	version 	string = "v3.0/17224"
 )
 
 

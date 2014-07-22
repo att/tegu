@@ -1024,6 +1024,30 @@ func (n *Network) host_list( ) ( jstr string ) {
 	return
 }
 
+/*
+	Generate a json list of fences
+*/
+func (n *Network) fence_list( ) ( jstr string ) {
+	var( 	
+		sep 	string = ""
+	)
+
+	jstr = ` [ `						// an array of objects
+
+	if n != nil && n.limits != nil {
+		for _, f := range n.limits {
+			jstr += fmt.Sprintf( "%s%s", sep, f.To_json() )
+			sep = ", " 
+		}
+	} else {
+		net_sheep.Baa( 0, "limit list is nil, no list generated" )
+	}
+
+	jstr += ` ]`			// end of the array
+
+	return
+}
+
 
 /*
 	Generate a json representation of the network graph.
@@ -1120,7 +1144,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 														// enforce some sanity on config file settings
 	if refresh <= 15 {
-		net_sheep.Baa( 0, "WRN: refresh rate in config file (%d) was too small; set to 15s", refresh )
+		net_sheep.Baa( 0, "WRN: refresh rate in config file (%ds) was too small; set to 15s", refresh )
 		refresh = 15
 	}
 	if max_link_cap <= 0 {
@@ -1137,10 +1161,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		act_net.limits = limits
 	}
 
-	if refresh <= 10 {
-		net_sheep.Baa( 0,  "default network refresh (30s) used because config value missing or invalid" )
-		refresh = 30
-	}
 	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network 
 	
 	for {
@@ -1375,15 +1395,24 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					//	------------------ user api things ---------------------------------------------------------
 					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
 						data := req.Req_data.( []*string )
-						f := gizmos.Mk_fence( data[0], clike.Atoi64( *data[1] ), 0, 0 )			// get the default frame
-						act_net.limits[*data[0]] = f
-						net_sheep.Baa( 1, "user link capacity set: %s now %d%%", *data[0], f.Get_limit_max() )
+						val := clike.Atoi64( *data[1] )	
+						if val <= 0 {							// drop the user fence
+							delete( act_net.limits, *data[0] )
+							net_sheep.Baa( 1, "user link capacity deleted: %s", *data[0] )
+						} else {
+							f := gizmos.Mk_fence( data[0], val, 0, 0 )			// get the default frame
+							act_net.limits[*data[0]] = f
+							net_sheep.Baa( 1, "user link capacity set: %s now %d%%", *data[0], f.Get_limit_max() )
+						}
 						
 					case REQ_NETGRAPH:							// dump the current network graph
 						req.Response_data = act_net.to_json()
 
-					case REQ_HOSTLIST:							// json list of hosts with name, ip, switch id and port
+					case REQ_LISTHOSTS:							// json list of hosts with name, ip, switch id and port
 						req.Response_data = act_net.host_list( )
+
+					case REQ_LISTULCAP:							// user link capacity list
+						req.Response_data = act_net.fence_list( )
 
 					case REQ_LISTCONNS:							// for a given host spit out the switch(es) and port(s) 
 						hname := req.Req_data.( *string )
