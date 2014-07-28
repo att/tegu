@@ -301,7 +301,7 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 		rerr = err
 	}
 
-	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( inc_tenant )
+	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( gwmap, nil, inc_tenant, false )		// second true is use project which we need right now
 	if err != nil {
 		osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s", os_refs["_ref_"].To_str( ), err )
 	}
