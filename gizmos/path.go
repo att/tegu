@@ -40,6 +40,7 @@
 				13 Jun 2014 - Added to the doc.
 				29 Jun 2014 - Changes to support user link limits.
 				07 Jul 2014 - Changed to fix queue deletion when a reservation is deleted.
+				29 Jul 2014 : Mlag support
 */
 
 package gizmos
@@ -253,6 +254,20 @@ func (p *Path) Inc_utilisation( commence, conclude, delta int64, qid *string, us
 }
 
 /*
+*/
+func (p *Path) Inc_mlag( commence int64, conclude int64, delta int64, usr *Fence, mlags map[string]*Mlag ) {
+	for i := 0; i < p.lidx; i++ {
+		m := p.links[i].Get_mlag() 
+		if m != nil {
+			mlag := mlags[*m]
+			if mlag != nil {
+				mlag.Inc_utilisation( commence, conclude, delta, usr, p.links[i].Get_allotment() )		// bump everything except the link in our path 
+			}
+		}
+	}
+}
+
+/*
 	Sets the user name associated with the path
 */
 func (p *Path) Set_usr( usr *string ) {
@@ -287,6 +302,7 @@ func (p *Path) Set_extip( extip *string ) {
 
 	The user fence that is passed in provides the user name and the set of defaults that are to be used if
 	this is the first time a queue has been set for the user on a link that the path traverses.
+
 */
 func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in int64, amt_out int64, usr *Fence ) (err error) {
 	err = nil

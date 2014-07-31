@@ -36,6 +36,7 @@
 							is not validated.
 				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
 					vm names have a dash (gak).
+				29 Jul 2014 - Added mlag support.
 */
 
 package managers
@@ -83,6 +84,7 @@ type Network struct {
 	ip2fip		map[string]*string			// tenant/ip to floating ip address translation
 	fip2ip		map[string]*string			// floating ip address to tenant/ip translation
 	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
+	mlags		map[string]*gizmos.Mlag		// reference to each mlag link group by name
 	hupdate		bool						// set to true only if hosts is updated after gwmap has size (chkpt reload timing)
 }
 
@@ -107,6 +109,7 @@ func mk_network( mk_links bool ) ( n *Network ) {
 	if mk_links {
 		n.links = make( map[string]*gizmos.Link, 2048 )		// must maintain a list of links so when we rebuild we preserve obligations
 		n.vlinks = make( map[string]*gizmos.Link, 2048 )
+		n.mlags = make( map[string]*gizmos.Mlag, 2048 )
 	}
 
 	return
@@ -347,11 +350,13 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 
 	If the link between src-sw and dst-sw is not there, one is created and added to the map.
 
+	Mlag is a pointer to the string which is the name of the mlag group that this link belongs to.
+
 	We use this to reference the links from the previously created graph so as to preserve obligations.
 	(TODO: it would make sense to vet the obligations to ensure that they can still be met should
 	a switch depart from the network.)
 */
-func (n *Network) find_link( ssw string, dsw string, capacity int64, link_alarm_thresh int, lnk ...*gizmos.Link ) (l *gizmos.Link) {
+func (n *Network) find_link( ssw string, dsw string, capacity int64, link_alarm_thresh int, mlag  *string, lnk ...*gizmos.Link ) (l *gizmos.Link) {
 
 	id := fmt.Sprintf( "%s-%s", ssw, dsw )
 	l = n.links[id]
@@ -364,10 +369,20 @@ func (n *Network) find_link( ssw string, dsw string, capacity int64, link_alarm_
 
 	net_sheep.Baa( 3, "making link: %s", id )
 	if lnk == nil {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag );	
 	} else {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, lnk[0] );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag, lnk[0] );	
 	}
+
+	if mlag != nil {
+		ml := n.mlags[*mlag]
+		if ml == nil {
+			n.mlags[*mlag] = gizmos.Mk_mlag( mlag, l.Get_allotment() )		// creates the mlag group and adds the link
+		} else {
+			n.mlags[*mlag].Add_link( l.Get_allotment() ) 					// group existed, just add the link
+		}
+	}
+
 	n.links[id] = l
 	return
 }
@@ -445,12 +460,13 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 	}
 
 
-	n = mk_network( old_net == nil )			// new network, need links only if it's the first network
+	n = mk_network( old_net == nil )			// new network, need links and mlags only if it's the first network
 	if old_net == nil {
 		old_net = n								// prevents an if around every try to find an existing link.
 	} else {
-		n.links = old_net.links;				// might it be wiser to copy this rather than reference and update the 'live' copy?
-		n.vlinks = old_net.vlinks;
+		n.links = old_net.links					// might it be wiser to copy this rather than reference and update the 'live' copy?
+		n.vlinks = old_net.vlinks
+		n.mlags = old_net.mlags
 	}
 
 	if links == nil {
@@ -465,26 +481,43 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			links[i].Capacity = max_capacity			// default if it didn't come from the source
 		}
 
-		ssw = n.switches[links[i].Src_switch]; 
+		tokens := strings.SplitN( links[i].Src_switch, "@", 2 )	// if the 'id' is host@interface we need to drop interface so all are added to same switch
+		sswid := tokens[0]								
+		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 )
+		dswid := tokens[0]
+
+		//ssw = n.switches[links[i].Src_switch]
+		ssw = n.switches[sswid]
 		if ssw == nil {
-			ssw = gizmos.Mk_switch( &links[i].Src_switch )
-			n.switches[links[i].Src_switch] = ssw
+			//ssw = gizmos.Mk_switch( &links[i].Src_switch )
+			ssw = gizmos.Mk_switch( &sswid )
+			//n.switches[links[i].Src_switch] = ssw
+			n.switches[sswid] = ssw
 		}
 
-		dsw = n.switches[links[i].Dst_switch]; 
+		//dsw = n.switches[links[i].Dst_switch]; 
+		dsw = n.switches[dswid]
 		if dsw == nil {
-			dsw = gizmos.Mk_switch( &links[i].Dst_switch )
-			n.switches[links[i].Dst_switch] = dsw
+			//dsw = gizmos.Mk_switch( &links[i].Dst_switch )
+			dsw = gizmos.Mk_switch( &dswid )
+			//n.switches[links[i].Dst_switch] = dsw
+			n.switches[dswid] = dsw
 		}
 
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh )		// omitting the link causes reuse of the link if it existed so that obligations are kept
+if ssw == nil || dsw == nil {
+net_sheep.Baa( 1, ">>>> WTF ????  ssw is nil(%v)  dsw is nil(%v)", ssw == nil, dsw == nil )
+}
+		// omitting the link (last parm) causes reuse of the link if it existed so that obligations are kept; links _are_ created with the interface name
+		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )		
+		//lnk = old_net.find_link( sswid, dswid, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )		// omitting the link causes reuse of the link if it existed so that obligations are kept
 		lnk.Set_forward( dsw )
 		lnk.Set_backward( ssw )
 		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
 		lnk.Set_port( 2, links[i].Dst_port )		// port on dest to src
 		ssw.Add_link( lnk )
 
-		lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, lnk )	// including the link causes its obligation to be shared in this direction
+		// TODO: might want to check bidirectional flag and run this code only if set
+		lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag, lnk )	// including the link causes its obligation to be shared in this direction, don't reference mlag on backward link
 		lnk.Set_forward( ssw )
 		lnk.Set_backward( dsw )
 		lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
@@ -683,6 +716,13 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 	h2nm := h2.Get_mac()
 	path = nil
 
+	if usr_max <= 0 {
+		i41, _ := h1.Get_addresses()
+		i42, _ := h2.Get_addresses()
+		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *i41, *i42 )
+		return 
+	}
+
 	ssw.Cost = 0														// seed the cost in the source switch
 	tsw := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
@@ -780,7 +820,10 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 	Extip is an external IP address that will need to be associated with the flow-mods and thus needs to be 
 	added to any path we generate.
 
-	If find_all is set, then we will suss out all possible paths between h1 and h2 and not just the shortest path. 
+	If mlag_paths is true, then we will find shortest path but add usage to all related mlag links in the path. 
+
+	If find_all is set, and mlog_paths is false, then we will suss out all possible paths between h1 and h2 and not 
+	just the shortest path. 
 
 	DEPRECATED: if the second host is "0.0.0.0", then we will return a path list containing every link we know about :)
 */
@@ -907,7 +950,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	be confused with finding all paths when the network is split as that _always_ happens and by default
 	we find just the shortest path in each split network. 
 */
-func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool) ( pcount int, path_list []*gizmos.Path ) {
+func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool ) ( pcount int, path_list []*gizmos.Path ) {
 	var (
 		num int = 0				// must declare num as := assignment doesnt work when ipath[n] is in the list
 	)
@@ -1082,6 +1125,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		max_link_cap	int64 = 0
 		refresh	int = 30
 		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
+		mlag_paths 		bool = true			// can be set to false in config (mlag_paths); overrides find_all_paths
 		link_headroom int = 0				// percentage that each link capacity is reduced by
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence			// user link capacity boundaries
@@ -1122,7 +1166,29 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		}
 
 		if p := cfg_data["network"]["all_paths"]; p != nil {
-			find_all_paths = *p == "true"
+			find_all_paths = false
+			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use paths = {all|mlag|shortest}" )
+		}
+
+		if p := cfg_data["network"]["find_paths"]; p != nil {
+			switch( *p ) {
+				case "all":	
+					find_all_paths = true
+					mlag_paths = false
+
+				case "mlag":
+					find_all_paths = false
+					mlag_paths = true
+
+				case "shortest":
+					find_all_paths = false
+					mlag_paths = false
+
+				default:
+					net_sheep.Baa( 0, "WRN: invalid setting in config: network:find_paths %s is not valid; must be: all, mlag, or shortest; assuming mlag" )
+					find_all_paths = false
+					mlag_paths = true
+			}
 		}
 
 		if p := cfg_data["network"]["link_headroom"]; p != nil {
@@ -1243,6 +1309,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									fence := act_net.get_fence( path_list[i].Get_usr() )
 									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
 									path_list[i].Set_queue( qid, commence, expiry, bandw_in, bandw_out, fence )		// this causes the utilisation to be increased; no explicit Inc_util is needed
+									if mlag_paths {
+										net_sheep.Baa( 1, "increasing usage for mlag members" )
+										path_list[i].Inc_mlag( commence, expiry, bandw_in + bandw_out, fence, act_net.mlags )
+									}
 								}
 
 								req.Response_data = path_list[:pcount]
@@ -1253,7 +1323,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								net_sheep.Baa( 0,  "WRN: network: no path count %s", req.State )
 							}
 						} else {
-							net_sheep.Baa( 0,  "WRN: network: unable to map to an IP address: %s",  err )
+							net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
 							req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
 						}
 
@@ -1396,7 +1466,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
 						data := req.Req_data.( []*string )
 						val := clike.Atoi64( *data[1] )	
-						if val <= 0 {							// drop the user fence
+						if val < 0 {							// drop the user fence
 							delete( act_net.limits, *data[0] )
 							net_sheep.Baa( 1, "user link capacity deleted: %s", *data[0] )
 						} else {

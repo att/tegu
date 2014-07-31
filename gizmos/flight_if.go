@@ -10,6 +10,7 @@
 	Modifed:	19 Apr 2014 : Added generic Skoogi request. 
 				05 May 2014 : Added function to build a FL_host_json from raw data rather
 					than from json response data (supports running w/o floodlight).
+				29 Jul 2014 : Mlag support
 ------------------------------------------------------------------------------------------------
 */
 
@@ -108,6 +109,8 @@ type FL_link_json struct {
 	Type string
 	Direction string
 	Capacity int64
+
+	Mlag	*string		// extension for q-lite (floodlight did NOT return this)
 }
 
 // -----------------------------------------------------------------------------------------

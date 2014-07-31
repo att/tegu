@@ -35,6 +35,7 @@
 				12 Jun 2014 : Added abilty to alarm if a link reaches a threshold percentage
 					of the total link capacity.
 				29 Jun 2014 - Changes to support user link limits.
+				29 Jul 2014 : Mlag support
 */
 
 package gizmos
@@ -134,7 +135,7 @@ func (ob *Obligation) suss_open_qnum( commence int64, conclude int64 ) ( int ) {
 
 /*
 	Private function that actually does the work, and can accept queue information so that we can use 
-	it for eaither inc-usage or add queue public functions. Passing in a queue number of 0 will cause the 
+	it for either inc-usage or add queue public functions. Passing in a queue number of 0 will cause the 
 	amount to be added to an existing queue's amount, and discarded if the queue for qid doesn't exist 
 	(a function of the underlying time-slice object). If a queue number < 0 is passed in, no effort to 
 	set/manage queues is made.

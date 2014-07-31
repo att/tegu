@@ -35,6 +35,7 @@
 				29 Jun 2014 - Changes to support user link limits.
 				07 Jul 2014 - Inc queue changed to return status and fail if unable to increase
 					the utilisation of the link. 
+				28 Jul 2014 - Added mlag support
 
 */
 
@@ -44,7 +45,7 @@ import (
 	//"bufio"
 	"fmt"
 	//"os"
-	//"strings"
+	"strings"
 	//"time"
 )
 
@@ -64,6 +65,7 @@ type Link struct {
 	id			*string				// reference id for the link	
 	sw1			*string				// human name for forward switch
 	sw2			*string				// human name for backward switch
+	mlag		*string				// mlag group this link belongs to
 	allotment	*Obligation			// the obligation that exsists for the link (obligations are timesliced)
 
 	Cost		int					// the cost of traversing the link for shortest path computation
@@ -77,15 +79,22 @@ type Link struct {
 	allows for easy accounting of total usage allocated (both directions) for the
 	bidirectional path that the two links represent. 
 */
-func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, bond ...*Link ) ( l *Link ) {
+func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, mlag *string, bond ...*Link ) ( l *Link ) {
 	var id string
 
 	id = fmt.Sprintf( "%s-%s", *sw1, *sw2 )
+
+	tokens := strings.SplitN( *sw1, "@", 2 )		// for host@interface names we want only the host as the switch name
+	sw1 = &tokens[0]
+
+	tokens = strings.SplitN( *sw2, "@", 2 )
+	sw2 = &tokens[0]
 
 	l = &Link { 
 		id: &id,
 		sw1: sw1,
 		sw2: sw2,
+		mlag: mlag,
 		Cost:	1,				// for now all links are equal
 	}
 
@@ -148,6 +157,13 @@ func (l *Link) Nuke() {
 */
 func (l *Link) Get_allotment( ) ( *Obligation ) {
 	return l.allotment
+}
+
+/*
+	Return a poitner to the mlag name, or nil if this link isn't an mlag associated link.
+*/
+func (l *Link) Get_mlag( ) ( *string ) {
+	return l.mlag
 }
 
 /*
@@ -533,6 +549,11 @@ func (l *Link) To_json( ) ( s string ) {
 		return
 	}
 
-	s = fmt.Sprintf( `{ "id": %q, "sw1": %q, "sw1port": %d, "sw2": %q,  "sw2port": %d, "allotment": %s }`, *l.id, *l.sw1, l.port1, *l.sw2,  l.port2, l.allotment.To_json() )
+	mlag := ""
+	if l.mlag != nil {
+		mlag = *l.mlag
+	} 
+
+	s = fmt.Sprintf( `{ "id": %q, "sw1": %q, "sw1port": %d, "sw2": %q,  "sw2port": %d, "allotment": %s, "mlag": %q }`, *l.id, *l.sw1, l.port1, *l.sw2,  l.port2, l.allotment.To_json(), mlag )
 	return
 }
