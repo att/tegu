@@ -37,6 +37,7 @@
 				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
 					vm names have a dash (gak).
 				29 Jul 2014 - Added mlag support.
+				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given. 
 */
 
 package managers
@@ -314,7 +315,7 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
-	lname := *hname								// lookup name - we may have to strip leading -
+	lname := *hname								// lookup name - we may have to strip leading !
 
 	if  (*hname)[0:1] == "!" {					// ignore leading bang which indicate unvalidated IDs
 		lname = (*hname)[1:]
@@ -324,6 +325,13 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 		ip = hname
 	} else {
 		ip = n.vm2ip[lname]						// it's not an ip, try to translate it as either a VM name or VM ID
+		if ip == nil {							// maybe it's just an ID, try without 
+			idx := strings.Index( lname, "/" )
+			if idx >= 0 {
+				lname = lname[idx+1:]			// point past the slant
+				ip = n.vm2ip[lname]				// see if it's there just based on what we asssume is an ID
+			}
+		}
 		if ip != nil {							// the name translates, see if it's in the known net
 			if n.hosts[*ip] == nil {			// ip isn't in the network scope as a host, return nil
 				err = fmt.Errorf( "host unknown: %s maps to an IP, but IP not known to SDNC: %s", *hname, *ip )
@@ -1476,6 +1484,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 						
 					case REQ_NETGRAPH:							// dump the current network graph
+for k,v := range act_net.vm2ip {
+	net_sheep.Baa( 1, ">>>> %s %s", k, *v )
+}
 						req.Response_data = act_net.to_json()
 
 					case REQ_LISTHOSTS:							// json list of hosts with name, ip, switch id and port
