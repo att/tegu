@@ -1218,7 +1218,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	}
 
 														// enforce some sanity on config file settings
-	if refresh <= 15 {
+	if refresh < 15 {
 		net_sheep.Baa( 0, "WRN: refresh rate in config file (%ds) was too small; set to 15s", refresh )
 		refresh = 15
 	}

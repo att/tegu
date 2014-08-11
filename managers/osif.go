@@ -388,6 +388,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 */
 func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 
+	err_count := 0
 	osif_sheep.Baa( 1, "gen_maps sub-go is running" )
 
 	for {
@@ -397,36 +398,50 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				if vm2ip != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
+				} else {
+					err_count++
 				}
 	
 				if vmid2ip != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2IP, vmid2ip, nil )					
+				} else {
+					err_count++
 				}
 	
 				if ip2vmid != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2VMID, ip2vmid, nil )				
+				} else {
+					err_count++
 				}
 	
 				if vmid2host != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2PHOST, vmid2host, nil )		
+				} else {
+					err_count++
 				}
 	
 				if ip2mac != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
+				} else {
+					err_count++
 				}
 	
 				if gwmap != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_GWMAP, gwmap, nil )		
+				} else {
+					err_count++
 				}
 
 				if ip2fip != nil {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2FIP, ip2fip, nil )		
+				} else {
+					err_count++
 				}
 
 				if fip2ip != nil {
@@ -434,9 +449,10 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 					msg.Send_req( nw_ch, nil, REQ_FIP2IP, fip2ip, nil )		
 				} else {
 					osif_sheep.Baa( 1, "nil map not sent to network: fip2ip" )
+					err_count++
 				}
 
-				osif_sheep.Baa( 1, "gen_maps: VM maps were updated from openstack" )
+				osif_sheep.Baa( 1, "gen_maps: VM maps were updated from openstack %d issues detected", err_count )
 	}
 }
 
@@ -526,6 +542,11 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		} else {
 			id2pname = make( map[string]*string )				// empty maps and we'll never generate a translation from project name to tenant ID since there are no default admin creds
 			pname2id = make( map[string]*string )
+			if def_project != nil {
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, %s) to authorise with openstack", def_usr, def_project )
+			} else {
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, no-project) to authorise with openstack", def_usr )
+			}
 		}
 
 		if os_list == "all" {
