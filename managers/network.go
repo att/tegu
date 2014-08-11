@@ -38,6 +38,7 @@
 					vm names have a dash (gak).
 				29 Jul 2014 - Added mlag support.
 				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given. 
+				11 Aug 2014 - Corrected bleat message.
 */
 
 package managers
@@ -908,7 +909,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 					path_list[plidx] = path
 					plidx++
 				} else {
-					net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", inc_cap )
+					net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", plidx, inc_cap )
 				}
 			}  else {					// debugging only
 				net_sheep.Baa( 2,  "find-path: path[%d]: found target (%s) on same switch with same port: %s  %d, %d", plidx, *h2nm, ssw.To_str( ), p1, p2 )
