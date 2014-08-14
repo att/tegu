@@ -608,7 +608,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						pdata[1] = &tokens[2]
 
 						if pdata[0] != nil {
-							reason = fmt.Sprintf( "user link cap set for %s (%s): %s%%", tokens[1], *pdata[0], tokens[2] )
+							reason = fmt.Sprintf( "user link cap set for %s (%s): %s", tokens[1], *pdata[0], tokens[2] )
 							req.Send_req( rmgr_ch, nil, REQ_SETULCAP, pdata, nil ) 				// dont wait for a reply
 							state = "OK"
 						} else {
