@@ -201,7 +201,8 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 }
 
 /*
-	returns a list of openstack compute hosts
+	Returns a list of openstack compute and network hosts. Hosts where OVS is likely 
+	running. 
 */
 func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	var (
@@ -220,7 +221,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 
 	for k, os := range os_refs {
 		if k != "_ref_" {
-			list, err = os.List_hosts( ostack.COMPUTE )	
+			list, err = os.List_hosts( ostack.COMPUTE | ostack.NETWORK )	
 			if err != nil {
 				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s", os.To_str(), err )
 				return							// drop out on first error with no list
