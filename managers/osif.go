@@ -47,6 +47,7 @@
 					but marks the resulting ID as unauthorised with a leading dash.
 				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
 					vm names have a dash (gak).
+				14 Aug 2014 - Corrected comment.
 */
 
 package managers
@@ -139,7 +140,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-			if tokens[0] == "!"	{								// special indication to skip validation and return ID with a lead dash indicating not authorised
+			if tokens[0] == "!"	{								// special indication to skip validation and return ID with a lead bang indicating not authorised
 				xstr := fmt.Sprintf( "!%s/%s", id, tokens[2] )	// build and return the translated string
 				return &xstr, nil
 			}
