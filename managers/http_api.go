@@ -50,6 +50,7 @@
 					Added support for reservation refresh.
 				17 Jul 2014 : Corrected typo in localhost validation check.
 				18 Jul 2014 : Added better error messaging when unable to open a listening port.
+				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
 */
 
 package managers
@@ -475,9 +476,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				}
 				
 			case "refresh":								// refresh reservations for named VM(s)
-				state = "OK"
-				reason = ""
 				if validate_auth( &auth_data, is_token ) {
+					state = "OK"
+					reason = ""
 					for i := 1; i < ntokens; i++ {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( osif_ch, my_ch, REQ_XLATE_HOST, &tokens[i], nil )		// translate [token/][project/]host-name into ID/hostname
