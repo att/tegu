@@ -48,6 +48,7 @@
 				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
 					vm names have a dash (gak).
 				14 Aug 2014 - Corrected comment.
+				15 Aug 2014 - Changed pointer reference on calls to ostk for clarity (was os).
 */
 
 package managers
@@ -145,9 +146,9 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-			for _, os := range os_refs {										// find the project name in our list
-				if os.Equals_id( &id ) {
-					ok, err := os.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
+			for _, ostk := range os_refs {										// find the project name in our list
+				if ostk != nil  &&  ostk.Equals_id( &id ) {
+					ok, err := ostk.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
 					if ok {
 						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
 						return &xstr, nil
@@ -188,10 +189,10 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 	)
 	
 	m = nil
-	for k, os := range os_refs {
+	for k, ostk := range os_refs {
 		if k != "_ref_" {	
-			osif_sheep.Baa( 1, "mapping VMs from: %s", os.To_str( ) )
-			m, err = os.Mk_vm2ip( m )
+			osif_sheep.Baa( 1, "mapping VMs from: %s", ostk.To_str( ) )
+			m, err = ostk.Mk_vm2ip( m )
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s", err )
 			}
@@ -220,18 +221,18 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		return
 	}
 
-	for k, os := range os_refs {
+	for k, ostk := range os_refs {
 		if k != "_ref_" {
-			list, err = os.List_hosts( ostack.COMPUTE | ostack.NETWORK )	
+			list, err = ostk.List_hosts( ostack.COMPUTE | ostack.NETWORK )	
 			if err != nil {
-				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s", os.To_str(), err )
+				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s", ostk.To_str(), err )
 				return							// drop out on first error with no list
 			} else {
 				if *list != "" {
 					ts += sep + *list
 					sep = " "
 				} else {
-					osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s", os.To_str() )	
+					osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s", ostk.To_str() )	
 				}
 			}
 		}
@@ -279,18 +280,18 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 	fip2ip = nil
 	ip2fip = nil
 
-	for k, os := range os_refs {
+	for k, ostk := range os_refs {
 		if k != "_ref_" {
-			osif_sheep.Baa( 2, "creating VM maps from: %s", os.To_str( ) )
-			vmid2ip, ip2vmid, vm2ip, vmid2host, err = os.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
+			osif_sheep.Baa( 2, "creating VM maps from: %s", ostk.To_str( ) )
+			vmid2ip, ip2vmid, vm2ip, vmid2host, err = ostk.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
+				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", ostk.To_str( ), err )
 				rerr = err
 			}
 	
-			ip2fip, fip2ip, err = os.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
+			ip2fip, fip2ip, err = ostk.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
+				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", ostk.To_str( ), err )
 				rerr = err
 			}
 		}
@@ -315,9 +316,9 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 	Generate a map containing the translation from IP address to MAC address. 
 */
 func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
-	os := os_refs["_ref_"]
-	if os != nil {
-		m, _, err = os.Mk_mac_maps( nil, nil, inc_tenant )	
+	ostk := os_refs["_ref_"]
+	if ostk != nil {
+		m, _, err = ostk.Mk_mac_maps( nil, nil, inc_tenant )	
 		if err != nil {
 			osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs["_ref_"].To_str( ), err )
 		}
@@ -368,7 +369,8 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 	
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s", *v )
-				creds[*v] = nil
+				delete( creds, *v )
+				//creds[*v] = nil
 			}
 		} else {
 			creds[*v] = old_list[*v]					// reuse the data
