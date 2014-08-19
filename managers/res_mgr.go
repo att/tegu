@@ -510,10 +510,10 @@ func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 */
 func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 	var (
-		fq_data	[]interface{}			// local work space to organise data for fq manager
-		fq_sdata	[]interface{}		// copy of data at time message is sent so that it 'survives' after msg sent and this continues to update fq_data
-		msg		*ipc.Chmsg
-		ip2		*string					// the ip ad
+		//fq_data	[]interface{}			// local work space to organise data for fq manager
+		//fq_sdata	[]interface{}		// copy of data at time message is sent so that it 'survives' after msg sent and this continues to update fq_data
+		//msg		*ipc.Chmsg
+		//ip2		*string					// the ip ad
 
 		push_count	int = 0
 		pend_count	int = 0
