@@ -46,6 +46,8 @@
 				29 Jul 2014 : Added mlag support.
 				13 Aug 2014 : Changes to include network hosts in the list of hosts (incorporate library
 							changes)
+				15 Aug 2014 : Bug fix (201) and stack dump fix (nil ptr in osif). 
+				19 Aug 2014 : Bug fix (208) prevent duplicate tegu's from running on same host/port.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -75,7 +77,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/18134"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.0/18194"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -86,7 +88,6 @@ func main() {
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager 
-		qm_ch	chan *ipc.Chmsg		// quantus manager
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager 
 		osif_ch chan *ipc.Chmsg		// openstack interface
 		fq_ch chan *ipc.Chmsg		// flow queue manager
@@ -126,7 +127,6 @@ func main() {
 	}
 
 	nw_ch = make( chan *ipc.Chmsg )					// create the channels that the threads will listen to
-	qm_ch = make( chan *ipc.Chmsg, 128 )					
 	fq_ch = make( chan *ipc.Chmsg, 128 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
 	am_ch = make( chan *ipc.Chmsg, 128 )			// agent manager channel
 	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
@@ -138,16 +138,17 @@ func main() {
 		os.Exit( 1 )
 	}
 
-	go managers.Quantus_mgr( qm_ch )
-	go managers.Res_manager( rmgr_ch, super_cookie ); 						// manage the reservation inventory
-	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
-	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph
+	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// start early so we bind to port quickly, but don't allow requests until late
+	go managers.Res_manager( rmgr_ch, super_cookie ); 				// manage the reservation inventory
+	go managers.Osif_mgr( osif_ch )									// openstack interface; early so we get a list of stuff before we start network
+	go managers.Network_mgr( nw_ch, fl_host )						// manage the network graph
 	go managers.Agent_mgr( am_ch )
 	go managers.Fq_mgr( fq_ch, fl_host ); 
 
-	//TODO:  chicken and egg -- we need to block until network has a good graph, but we need the network reading from it's channel
-	//       first so that if we are in Tegu-lite mode (openstack providing the graph) it can send the data to network manager 
-	//		 must implement a 'have data' ping in network and loop here until the answer is yes.
+	// if there is a checkpoint file, then we need to block until we have a full network topology which includes:
+	// openstack data, json data, and physical data from the agent(s).  Once that's in place, then we can 
+	// load the checkpoint file.  Once the checkpoint is loaded then we can open the api for real work. 
+	// 
 	if *chkpt_file != "" {
 		my_chan := make( chan *ipc.Chmsg )
 		req := ipc.Mk_chmsg( )
@@ -161,7 +162,7 @@ func main() {
 				break
 			}
 
-			sheep.Baa( 1, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
+			sheep.Baa( 2, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
 			time.Sleep( 5 * time.Second )
 		}
 
@@ -175,7 +176,7 @@ func main() {
 		}
 	}
 
-	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// finally, turn on the HTTP interface after _everything_ else is running.
+	managers.Set_accept_state( true )			// it's now safe to allow http interface to accept requests
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)
 	wgroup.Wait( )
