@@ -169,12 +169,11 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 */
 func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
 
-osif_sheep.Baa( 1, "validating admin token" )
 	err := admin.Token_validation( token, user ) 		// ensure token is good and was issued for user
 	if err == nil {
-osif_sheep.Baa( 1, "admin token validated successfully: %s", *token )
+		osif_sheep.Baa( 2, "admin token validated successfully: %s", *token )
 	} else {
-osif_sheep.Baa( 1, "admin token invalid: %s", err )
+		osif_sheep.Baa( 1, "admin token invalid: %s", err )
 }
 
 	return err
@@ -252,7 +251,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	Tegu-lite
 	Build all vm translation maps -- requires two actual calls out to openstack
 */
-func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
+func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool, pre_icehouse bool  ) (
 			vmid2ip map[string]*string,
 			ip2vmid map[string]*string,
 			vm2ip map[string]*string,
@@ -290,20 +289,47 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", os.To_str( ), err )
 				rerr = err
 			}
+
+			if !pre_icehouse {												// bloody openstack changed with icehouse
+				ip2mac, _, err = os.Mk_mac_maps( ip2mac, nil, inc_tenant )	
+				if err != nil {
+					osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os.To_str( ), err )
+					rerr = err
+				}
+
+osif_sheep.Baa( 1, ">>>> icehouse code: fetching gateway map for: %s", os.To_str() )
+				gwmap, _, err = os.Mk_gwmaps( gwmap, nil, inc_tenant, true )		// bloody icehouse requires a fetch per project
+				if err != nil {
+					osif_sheep.Baa( 1, "WRN: unable to fetch gateway info: %s; %s", os.To_str( ), err )
+					rerr = err
+				} else {
+}
+			}
 		}
 	}
 
 	// ---- use the reference pointer for these as we get everything from one call
-	ip2mac, _, err = os_refs["_ref_"].Mk_mac_maps( nil, nil, inc_tenant )	
-	if err != nil {
-		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs["_ref_"].To_str( ), err )
-		rerr = err
+	if pre_icehouse {														// icehouse no longer returns all with one call
+		if os_refs["_ref_"] != nil {
+osif_sheep.Baa( 1, ">>>> old code fetching gateway map with reference: %s", os_refs["_ref"].To_str() )
+			ip2mac, _, err = os_refs["_ref_"].Mk_mac_maps( nil, nil, inc_tenant )	
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs["_ref_"].To_str( ), err )
+				rerr = err
+			}
+
+			gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( nil, nil, inc_tenant, false )
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s", os_refs["_ref_"].To_str( ), err )
+			}
+		} else {
+			osif_sheep.Baa( 1, ">>>> old code: ref is nil" )		# DEBUG
+		}
 	}
 
-	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( nil, nil, inc_tenant, true )
-	if err != nil {
-		osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s", os_refs["_ref_"].To_str( ), err )
-	}
+for k, v := range gwmap {
+	osif_sheep.Baa( 2, ">>>> %s %s", k, *v )
+}
 
 	return
 }
@@ -350,6 +376,7 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string 
 func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id2pname map[string]*string ) ( creds map[string]*ostack.Ostack, err error ) {
 	var (
 		r	*ostack.Ostack
+		have_service bool = false						// for icehouse and beyond there is a service project; we use that as the reference project
 	)
 
 	creds = make( map[string]*ostack.Ostack )			// new map to fill in
@@ -358,7 +385,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 	}
 
 	r = nil
-	for k, v := range id2pname {
+	for k, v := range id2pname {						// run the list of projects and add creds to the map if we don't have them
 		if old_list[*v] == nil  {	
 			osif_sheep.Baa( 1, "adding creds for: %s/%s", k, *v )
 			creds[*v], err = admin.Dup( v )				// duplicate creds for this project and then authorise to get a token
@@ -372,7 +399,12 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			osif_sheep.Baa( 2, "reusing credentials for: %s", *v )
 		}
 
-		r = creds[*v]
+		if !have_service {								// pick up service as reference, or use last one for pre-icehouse
+			r = creds[*v]
+		}
+		if *v == "service" {
+			have_service = true
+		}
 	}
 
 	creds["_ref_"] = r				// set the reference entry
@@ -385,13 +417,13 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 	it doesn't block the main event processing.  It blocks waiting for an updated list
 	of openstack credentials, so it will run each time the credentials are updated. 
 */
-func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
+func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool, pre_icehouse bool  ) {
 
 	osif_sheep.Baa( 1, "gen_maps sub-go is running" )
 
 	for {
 			os_refs :=<- data_ch
-				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, ip2fip, fip2ip, _ := map_all( *os_refs, inc_tenant )
+				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, ip2fip, fip2ip, _ := map_all( *os_refs, inc_tenant, pre_icehouse )
 				// ignore errors as a bad entry for one ostack credential shouldn't spoil the rest of the info gathering; we send only non-nil maps
 				if vm2ip != nil {
 					msg := ipc.Mk_chmsg( )
@@ -463,6 +495,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		def_usr		*string
 		def_url		*string
 		def_project	*string
+		pre_icehouse bool = true				// bloody openstack icehouse changed the interface with no back compat
 	)
 
 	osif_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
@@ -506,10 +539,16 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			req_token = true
 			inc_tenant = true					// implied if token is required
 		}
+
+		p = cfg_data["osif"]["pre_icehouse"]
+		if p != nil  &&  *p == "false" {		// default is true, so check only for false
+			pre_icehouse = false
+			osif_sheep.Baa( 1, "openstack mode is set to icehouse and beyond" )
+		}
 	}
 
 	gen_maps_ch := make( chan *map[string]*ostack.Ostack, 10 )					// channel to send gen_maps data to work on
-	go gen_maps( gen_maps_ch,  inc_tenant )
+	go gen_maps( gen_maps_ch,  inc_tenant, pre_icehouse )
 
 	if os_list == " " || os_list == "" || os_list == "off" {
 		osif_sheep.Baa( 0, "WRN: osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )

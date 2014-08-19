@@ -366,6 +366,11 @@ func table10_fmods( rname *string ) {
 	Either source (ep1) or dest (ep2) may be nil which indicates a "to any" or "from any"
 	intention. 
 
+	DANGER:  We generate the flowmods in reverse order which _should_ generate the highest 
+			priority f-mods first. This is absolutely necessary to prevent packet loops
+			on the switches which can happen if a higher priority rule isn't in place 
+			that would cause the lower priority rule to be skipped over. 
+
 	TODO: add transport layer port support
 */
 func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string  ) {
@@ -379,13 +384,57 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 	mstr := "0x00/0x02"								// meta data match string; match if mask 0x02 is not set
 	nmb := len( mblist )
-	for i := 0; i < nmb; i++ {						// forward direction ep1->ep2
-		fq_match := &Fq_parms{						// new structs each time round as the others still might be queued with fq-mgr
+	for i := 0; i < nmb; i++ {						// check value of each in list and bail if any are nil
+		if mblist[i] == nil {
+			rm_sheep.Baa( 1, "IER: steer_fmods: unexpected nil mb i=%d nmb=%d", i,  nmb )
+			return
+		}
+	}
+
+	for i :=  nmb -1; i >= 0;  i-- {					// backward direction ep2->ep1
+		resub := "10 0"									// we resubmit to table 10 to set our meta data and then resub to 0 to catch openstack rules
+
+		if i == nmb - 1 {								// for last mb we need a rule that causes steering to be skipped based on mb mac
+			mb = mblist[i]
+			fq_match := &Fq_parms{						// new structs for each since they sit in fq manages quwue
+				Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
+				Meta:	&mstr,
+				Ip1:  	ep1,
+			}
+
+			fq_action := &Fq_parms{
+				Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
+			}
+
+			fq_data := &Fq_req {							// generate data with just what need to be there
+				Pri:	300,
+				Id:		rname,
+				Expiry:	expiry,
+				Match:	fq_match,
+				Action:	fq_action,
+			}
+			if ep1 != nil {								// if source is a specific address, then we need only one 300 rule
+				fq_data.Match.Ip1 = nil												// there is no source to match at this point
+				fq_data.Match.Smac = nil
+				fq_data.Match.Ip2 = ep2
+				fq_data.Swid, fq_data.Match.Swport = mb.Get_sw_port( )	// specific switch and input port needed for this fmod
+				fq_data.Lbmac = mb.Get_mac()							// fqmgr will need the mac if the port is late binding
+			} else {													// if no specific src, 100 rule lives on each switch, so we must put a 300 on each too
+				fq_data.Swid = nil										// force to all switches
+				fq_data.Match.Smac = mb.Get_mac()						// src for 300 is the last mbox
+			}
+
+			rm_sheep.Baa( 2, "write final fmod: %s", fq_data.To_json() )
+
+			msg := ipc.Mk_chmsg()
+			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// final flow-mod from the last middlebox out
+		}
+
+		fq_match := &Fq_parms{
 			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 			Meta:	&mstr,
 		}
 
-		resub := "10 0"
 		fq_action := &Fq_parms{
 			Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
 		}
@@ -415,7 +464,8 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			msg := ipc.Mk_chmsg()
 			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// no response right now -- eventually we want an asynch error
 		} else {																// push fmod on the switch that connects the previous mbox matching packets from it and directing to next mbox
-																				// CAUTION: pull info from the previous middle box _before_ getting next middlebox in list
+
+			mb = mblist[i-1] 													// pull previous middlebox which will be the source and define the swtich and port for this rule
 			fq_data.Swid, fq_data.Match.Swport = mb.Get_sw_port( )	 			// specific switch and input port needed for this fmod
 			fq_data.Lbmac = mb.Get_mac()										// fqmgr will need the mac if the port is late binding (-128)
 			fq_data.Match.Smac = nil											// we match based on input port and dest mac, so no need for this
@@ -423,52 +473,11 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 			fq_data.Pri = 200						// priority for intermediate flow-mods
 			mb = mblist[i]	 						// now safe to get next middlebox in the list
-			if mb == nil {
-				rm_sheep.Baa( 1, "WRN: unexpected nil mb i=%d", i )
-			} else {
-				fq_data.Nxt_mac = mb.Get_mac( )
-				rm_sheep.Baa( 2, "write intemed fmod: %s", fq_data.To_json() )
-	
-				msg := ipc.Mk_chmsg()
-				msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// flow mod for each intermediate link in backwards direction
-			}
-		}
-
-		if i == nmb - 1 {								// for last mb we need a rule that causes steering to be skipped based on mb mac
-			fq_match = &Fq_parms{						// new struct as the one used above is likely still queued with fq-mgr
-				Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
-				Meta:	&mstr,
-				Ip1:  	ep1,
-			}
-
-			fq_action = &Fq_parms{
-				Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
-			}
-
-			fq_data = &Fq_req {							// generate data with just what need to be there
-				Pri:	300,
-				Id:		rname,
-				Expiry:	expiry,
-				Match:	fq_match,
-				Action:	fq_action,
-			}
-			if ep1 != nil {								// if source is a specific address, then we need only one 300 rule
-				fq_data.Match.Ip1 = nil												// there is no source to match at this point
-				fq_data.Match.Smac = nil
-				fq_data.Match.Ip2 = ep2
-				fq_data.Swid, fq_data.Match.Swport = mb.Get_sw_port( )	 			// specific switch and input port needed for this fmod
-				fq_data.Lbmac = mb.Get_mac()							// fqmgr will need the mac if the port is late binding
-			} else {													// if no specific src, 100 rule lives on each switch, so we must put a 300 on each too
-				fq_data.Swid = nil								// force to all switches
-				fq_data.Match.Smac = mb.Get_mac()					// src for 300 is the last mbox
-			}
-
-			//fq_data.Swid, fq_data.Action.Swport = mb.Get_sw_port()
-
-			rm_sheep.Baa( 2, "write final fmod: %s", fq_data.To_json() )
+			fq_data.Nxt_mac = mb.Get_mac( )
+			rm_sheep.Baa( 2, "write intemed fmod: %s", fq_data.To_json() )
 
 			msg := ipc.Mk_chmsg()
-			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// final flow-mod from the last middlebox out
+			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// flow mod for each intermediate link in backwards direction
 		}
 	}
 }

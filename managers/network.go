@@ -231,9 +231,9 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 		if len( k ) < 36 || strings.Index( k, "/" ) > 0  || i2v[*v] == nil {		// IDs seem to be 36, but we'll save something regardless and miss if user went wild with long name and we hit it second
 			dup_str := k							// 'dup' the string so we don't reference the string associated with the other map
 			i2v[*v] = &dup_str
-			net_sheep.Baa( 2, "build_ip2vm %s --> %s %d", k, *v, *i2v[*v], len( k ) )
+			net_sheep.Baa( 2, "build_ip2vm %s --> %s %d", k, *v, len( k ) )
 		} else {
-			net_sheep.Baa( 2, "build_ip2vm skipped:  cur value: %s --> %s %d", k, *v, *i2v[*v], len( k ) )
+			net_sheep.Baa( 2, "build_ip2vm skipped:  cur value: %s --> %s %d", k, *v, len( k ) )
 		}
 	}
 
@@ -1352,6 +1352,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_GWMAP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.gwmap = req.Req_data.( map[string]*string )
+							net_sheep.Baa( 1, "gw map received, contains %d items", len( act_net.gwmap ) )
 							for k, v := range act_net.gwmap {
 								net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
 							}
