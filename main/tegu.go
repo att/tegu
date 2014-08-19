@@ -72,7 +72,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1/17184"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.1/18014"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
