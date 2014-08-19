@@ -150,6 +150,7 @@ var (
 		http manager needs globals because the http callback doesn't allow private data to be passed
 	*/
 	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
+	accept_requests bool = false		// until main says we can, we don't accept requests
 )
 
 //--------------------------------------------------------------------------------------------------------------------------
@@ -212,4 +213,14 @@ func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, 
 	}
 
 	return
+}
+
+/*
+	Allows the setting of accept requests to be toggled.
+*/
+func Set_accept_state( state bool ) {
+	if state != accept_requests {
+		accept_requests = state
+		tegu_sheep.Baa( 1, "accept requests state changed to: %v", state )
+	}
 }

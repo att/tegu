@@ -49,6 +49,7 @@
 					vm names have a dash (gak).
 				14 Aug 2014 - Corrected comment.
 				15 Aug 2014 - Changed pointer reference on calls to ostk for clarity (was os).
+				19 Aug 2014 - Fix for bug #202 -- need to return nil if project ID not known.
 */
 
 package managers
@@ -678,8 +679,12 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			case REQ_PNAME2ID:							// user, project, tenant (what ever) name to ID
 				if msg.Response_ch != nil {
 					msg.Response_data = pname2id[*(msg.Req_data.( *string ))] 
-					if msg.Response_data.( *string ) == nil  {
-						msg.Response_data = msg.Req_data.( *string )			// if not in table assume it was an ID that was given
+					if msg.Response_data.( *string ) == nil  {						// maybe it was an ID that came in
+						if id2pname[*(msg.Req_data.( *string ))] != nil {			// if in id map, then return the stirng (the id) they passed (#202)
+							msg.Response_data = msg.Req_data.( *string )
+						} else {
+							msg.Response_data = nil									// couldn't translate 
+						}
 					} 
 				} 
 				
