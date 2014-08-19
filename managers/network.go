@@ -513,9 +513,6 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			n.switches[dswid] = dsw
 		}
 
-if ssw == nil || dsw == nil {
-net_sheep.Baa( 1, ">>>> WTF ????  ssw is nil(%v)  dsw is nil(%v)", ssw == nil, dsw == nil )
-}
 		// omitting the link (last parm) causes reuse of the link if it existed so that obligations are kept; links _are_ created with the interface name
 		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )		
 		//lnk = old_net.find_link( sswid, dswid, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )		// omitting the link causes reuse of the link if it existed so that obligations are kept
@@ -898,7 +895,8 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 			p2 := h2.Get_port( ssw )
 			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
 				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2 )
-				if lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) {		// room for the reservation
+				has_room, err := lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 
+				if has_room {										// room for the reservation
 					lnk.Add_lbp( *h1nm )
 					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
 					path = gizmos.Mk_path( h1, h2 )							// empty path
@@ -909,7 +907,11 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 					path_list[plidx] = path
 					plidx++
 				} else {
-					net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", plidx, inc_cap )
+					if err != nil {
+						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d: %s", plidx, inc_cap, err )
+					} else {
+						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", plidx, inc_cap )
+					}
 				}
 			}  else {					// debugging only
 				net_sheep.Baa( 2,  "find-path: path[%d]: found target (%s) on same switch with same port: %s  %d, %d", plidx, *h2nm, ssw.To_str( ), p1, p2 )
@@ -1329,7 +1331,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							} else {
 								req.Response_data = nil
 								req.State = fmt.Errorf( "unable to generate a path; no capacity or no path" )
-								net_sheep.Baa( 0,  "WRN: network: no path count %s", req.State )
+								net_sheep.Baa( 0,  "no paths in list: %s", req.State )
 							}
 						} else {
 							net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
@@ -1485,9 +1487,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 						
 					case REQ_NETGRAPH:							// dump the current network graph
-for k,v := range act_net.vm2ip {
-	net_sheep.Baa( 1, ">>>> %s %s", k, *v )
-}
 						req.Response_data = act_net.to_json()
 
 					case REQ_LISTHOSTS:							// json list of hosts with name, ip, switch id and port
