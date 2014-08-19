@@ -36,7 +36,7 @@
 				07 Jul 2014 - Inc queue changed to return status and fail if unable to increase
 					the utilisation of the link. 
 				28 Jul 2014 - Added mlag support
-
+				18 Aug 2014 - Has_capacity now passes back error message.
 */
 
 package gizmos
@@ -298,25 +298,28 @@ func (l *Link) Connects( sw *Switch ) ( bool ) {
 	debugging or verification to know which links are causing the reservation to fail, so 
 	we provide the mechanism to bleat that information here.
 */
-func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( bool ) {
+func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( able bool, err error ) {
+	able = false
 	if usr_max < 101 {
 		if amt > (l.allotment.Get_max_capacity() * int64( usr_max ))/100 {
-			obj_sheep.Baa( 2, "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
-			return false
+			obj_sheep.Baa( 1, "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			err = fmt.Errorf( "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			return 
 		}
 	} else {
 		if amt > usr_max {				// seems silly to check, but we will
-			obj_sheep.Baa( 2, "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
-			return false
+			obj_sheep.Baa( 1, "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			err = fmt.Errorf( "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			return 
 		}
 	}
 
-	able, err := l.allotment.Has_capacity( commence, conclude, amt, usr )
-	if err != nil {
-		obj_sheep.Baa( 2, "no capacity on link %s: %s", *l.id, err )
-	}
+	able, err = l.allotment.Has_capacity( commence, conclude, amt, usr )
+	//if err != nil {
+		//obj_sheep.Baa( 2, "no capacity on link %s: %s", *l.id, err )
+	//}
 
-	return able
+	return 
 }
 
 /*

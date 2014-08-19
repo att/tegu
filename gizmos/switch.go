@@ -187,27 +187,33 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 
 	//fmt.Printf( "\n\nsearching neighbours of (%s) for %s\n", s.To_str(), *target )
 	for i := 0; i < s.lidx; i++ {
-		if s != fsw  &&  s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) {
-			fsw = s.links[i].forward				// at the switch on the other side of the link
-			if (fsw.Flags & tegu.SWFL_VISITED) == 0 {
-				obj_sheep.Baa( 3, "switch:probe_neigbour: following link %d -- has capacity to (%s) and NOT visited", i, fsw.To_str() )
-				if s.Cost + s.links[i].Cost < fsw.Cost {
-					//fmt.Printf( "\tsetting cost: %d\n", s.Cost + s.links[i].Cost )
-					fsw.Cost = s.Cost + s.links[i].Cost
-					fsw.Prev = s								// shortest path to this node is through s
-					fsw.Plink = i								// using its ith link
+		//if s != fsw  &&  s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) {
+		if s != fsw  {
+  			has_room, err := s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) 
+			if has_room {
+				fsw = s.links[i].forward				// at the switch on the other side of the link
+				if (fsw.Flags & tegu.SWFL_VISITED) == 0 {
+					obj_sheep.Baa( 3, "switch:probe_neigbour: following link %d -- has capacity to (%s) and NOT visited", i, fsw.To_str() )
+					if s.Cost + s.links[i].Cost < fsw.Cost {
+						//fmt.Printf( "\tsetting cost: %d\n", s.Cost + s.links[i].Cost )
+						fsw.Cost = s.Cost + s.links[i].Cost
+						fsw.Prev = s								// shortest path to this node is through s
+						fsw.Plink = i								// using its ith link
+					}
+	
+					obj_sheep.Baa( 3, "compare: (%s) (%s)", *target, *(fsw.Get_id()) )
+					if fsw.Has_host( target ) || *(fsw.Get_id()) == *target {			// target is attahced to this switch, or the target is a swtich that is the forward switch
+						fsw.Prev = s
+						fsw.Plink = i
+						found = fsw
+						return
+					}
+	
 				}
-
-				obj_sheep.Baa( 3, "compare: (%s) (%s)", *target, *(fsw.Get_id()) )
-				if fsw.Has_host( target ) || *(fsw.Get_id()) == *target {			// target is attahced to this switch, or the target is a swtich that is the forward switch
-					fsw.Prev = s
-					fsw.Plink = i
-					found = fsw
-					return
-				}
-
+			}  else {
+				obj_sheep.Baa( 2, "no capacity on link: %s", err )
 			}
-		} 
+		}
 	}
 
 	return
@@ -256,7 +262,8 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr
 		
 		if sw.Flags & tegu.SWFL_VISITED == 0 {				// possible that it was pushed multiple times and already had it's neighbours queued
 			for i := 0; i < sw.lidx; i++ {
-				if sw.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) {
+				has_room, err := sw.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) 
+				if has_room {
 					if sw.links[i].forward.Flags & tegu.SWFL_VISITED == 0 {
 						fifo[push] = sw.links[i].forward
 						push++
@@ -264,6 +271,8 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr
 							push = 0; 
 						}
 					}
+				} else {
+					obj_sheep.Baa( 2, "no capacity on link: %s", err )
 				}
 			}
 		}
@@ -368,8 +377,10 @@ func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, i
 		i := 0
 		for _, v := range ulinks {
 			// TODO:  Add tenant based check
-			if ! v.Has_capacity( commence, conclude, inc_amt, usr, usr_max ) {
+			_, err := v.Has_capacity( commence, conclude, inc_amt, usr, usr_max ) 
+			if err != nil {
 				err = fmt.Errorf( "no capacity found between switch (%s) and target (%s)", *s.id, *target )
+				obj_sheep.Baa( 2, "all_paths: no capacity on link: %s", err )
 				links = nil
 				break
 			}
