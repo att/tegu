@@ -23,7 +23,7 @@
 				12 May 2014 (sd) - Reverts dscp values to 'original' at the egress switch
 				19 May 2014 (sd) - Changes to allow floating ip to be supplied as a part of the flow mod.
 				07 Jul 2014 - Added support for reservation refresh.
-
+				20 Aug 2014 - Corrected shifting of mdscp value in the match portion of the flowmod (it wasn't being shifted) (bug 210)
 */
 
 package managers
@@ -192,9 +192,9 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 	
 			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d aT=%d tp_ports=%d/%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp, wdscp, tp_sport, tp_dport, sw )
+			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d/%02x aT=%d/%02x tp_ports=%d/%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp, mdscp << 2, wdscp, wdscp << 2, tp_sport, tp_dport, sw )
 
-			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp, *m1, *m2 ) 		// MUST always match a dscp value to prevent loops on resubmit
+			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp << 2, *m1, *m2 ) 	// MUST always match a dscp value (even 0) to prevent loops on resubmit  (fix #210)
 			if extip != "" {
 				qjson += fmt.Sprintf( `%s `,  extip )																		// external IP is assumed to be prefixed with the correct -S or -D flag
 			}
