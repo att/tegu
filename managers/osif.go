@@ -323,7 +323,7 @@ osif_sheep.Baa( 1, ">>>> old code fetching gateway map with reference: %s", os_r
 				osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s", os_refs["_ref_"].To_str( ), err )
 			}
 		} else {
-			osif_sheep.Baa( 1, ">>>> old code: ref is nil" )		# DEBUG
+			osif_sheep.Baa( 1, ">>>> old code: ref is nil" )		// DEBUG
 		}
 	}
 
