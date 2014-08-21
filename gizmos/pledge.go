@@ -285,6 +285,11 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	p.bandw_out = jp.Bandwout
 	p.bandw_in = jp.Bandwin
 
+	p.protocol = jp.Protocol
+	if p.protocol == nil {					// we don't tollerate nil ptrs
+		p.protocol = &empty_str
+	}
+
 	return
 }
 
