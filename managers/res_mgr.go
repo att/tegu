@@ -27,6 +27,7 @@
 				07 Jul 2014 (sd) : Changed to send network manager a delete message when deleteing a reservation
 						rather than depending on the http manager to do that -- possible timing issues if we wait.
 						Added support for reservation refresh.
+				29 Jul 2014 : Change set user link cap such that 0 is a valid value, and -1 will delete. 
 */
 
 package managers
@@ -717,7 +718,7 @@ func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 	pdata[0] = name
 	pdata[1] = sval
 
-	if val > 0 && val < 101 {
+	if val >= 0 && val < 101 {
 		rm_sheep.Baa( 2, "adding user cap: %s %d", *name, val )
 		inv.ulcap_cache[*name] = val
 
@@ -725,7 +726,7 @@ func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 		req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the netwok environment
 
 	} else {
-		if val == 0 {
+		if val == -1 {
 			delete( inv.ulcap_cache, *name )
 			req := ipc.Mk_chmsg( )
 			req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the netwok environment

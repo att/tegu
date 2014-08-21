@@ -17,6 +17,7 @@
 				11 Jun 2014 - Changes to support finding all paths between two VMs rather than just 
 					the shortest one.
 				29 Jun 2014 - Changes to support user link limits.
+				29 Jul 2014 : Mlag support
 */
 
 package gizmos
@@ -30,7 +31,7 @@ import (
 	//"html"
 	//"net/http"
 	//"os"
-	//"strings"
+	"strings"
 	//"time"
 
 	//"forge.research.att.com/gopkgs/clike"
@@ -43,7 +44,7 @@ import (
 	defines a switch.
 */
 type Switch struct {
-	id			*string				// reference id for the link	
+	id			*string				// reference id for the switch
 	links		[]*Link
 	lidx		int					// next open index in links
 	hosts		map[string] bool
@@ -61,6 +62,9 @@ type Switch struct {
 	Constructor.  Generates a switch object with the given id.
 */
 func Mk_switch( id *string ) ( s *Switch ) {
+	tokens := strings.SplitN( *id, "@", 2 )			// in q-lite world we get host@interface and we need only host portion
+	id = &tokens[0]
+
 	s = &Switch { 
 		id: id,
 		lidx: 0,
@@ -99,6 +103,10 @@ func (s *Switch) Add_link( link *Link ) {
 		new_links	[]*Link
 		i			int
 	)
+
+	if s == nil {
+		return
+	}
 
 	if s.lidx >= len( s.links ) {
 		new_links = make( []*Link, s.lidx + 32 )

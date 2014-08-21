@@ -9,6 +9,7 @@
 				messy).
 	Date:		28 April 2014
 	Author:		E. Scott Daniels
+				29 Jul 2014 : Mlag support
 
 */
 
@@ -19,7 +20,7 @@ import (
 	"encoding/json"
 	//"fmt"
 	"os"
-	"strings"
+	//"strings"
 	//"time"
 )
 
@@ -45,12 +46,14 @@ func Read_json_links( fname string ) ( links []FL_link_json, err error ) {
 
 	//TODO:	parse the list of links and create 'internal' linkes e.g. br-em1...br-int and br-em2...br-int
 	// for now we strip @interface name from the switch id
+/*
 	for i := range links {
 		n := strings.Index( links[i].Dst_switch, "@" ) 
 		if  n >= 0 {											// if this is indicates the interface name
 			links[i].Dst_switch = links[i].Dst_switch[0:n]		// ditch it for now
 		}
 	}
+*/
 
 	return
 }
