@@ -213,8 +213,8 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 			if tp_sport > 0 || tp_dport > 0 {					// need to match on a transport port too
 				qjson2 = qjson									// dup the string
 				if tp_sport > 0 {
-					qjson += fmt.Sprintf( "-p 6:%d ", tp_sport )		// add in prototype 6 == tcp
-					qjson2 += fmt.Sprintf( "-p 17:%d ", tp_sport )		// add in prototype 17 == udp
+					qjson += fmt.Sprintf( "-p 6:%d ", tp_sport )		// add in protocol 6 == tcp
+					qjson2 += fmt.Sprintf( "-p 17:%d ", tp_sport )		// add in protocol 17 == udp
 				}
 				if tp_dport > 0 {										// repeat if a dest port was given
 					qjson += fmt.Sprintf( "-P 6:%d ", tp_dport )
@@ -339,6 +339,10 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		match_opts += " -d " + *dmac
 	}
 
+	if data.Protocol != nil  { 					// protocol to be used (tcp:port or udp:port port can be 0)
+		match_opts += fmt.Sprintf( " -p %s", *data.Protocol )
+	}
+
 	action_opts := ""
 
 	if data.Action.Dmac != nil {						
@@ -375,12 +379,12 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	if on_all {											// blast the fmod to all switches
 		hosts := strings.Split( *hlist, " " )
 		for i := range hosts {
-			tmsg := ipc.Mk_chmsg( )						// must have one per since we dont wait for an ack
 
 			json := base_json
 			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0xe5d br-int"`, hosts[i], table, data.Expiry, data.Pri, match_opts, action_opts )
 			json += ` ] } ] }`
 			fq_sheep.Baa( 1, ">>> json: %s", json )
+			tmsg := ipc.Mk_chmsg( )						// must have one per since we dont wait for an ack
 			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
 		}
 	} else {															// fmod goes only to the named switch
@@ -394,8 +398,6 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	}
 	
 }
-
-
 
 /*
 	Send a newly arrived host list to the agent manager.
@@ -538,7 +540,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				msg.Response_ch = nil						// for now, nothing goes back
 				if msg.Req_data != nil {
 					fq_data := msg.Req_data.( *Fq_req ); 			// request data
-					if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled (not supported)
+					if uri_prefix != "" {							// an sdn controller -- skoogi -- is enabled (not supported)
 						fq_sheep.Baa( 0, "ERR: steering reservations are not supported with skoogi (SDNC); no flow-mods pushed" )
 					} else {
 						send_stfmod_agent( fq_data, ip2mac, host_list )	

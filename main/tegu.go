@@ -44,6 +44,7 @@
 							valid token on the reservation request. 
 				21 Jul 2014 : Fixed bug -- checkpoint not including user link caps
 				29 Jul 2014 : Added mlag support.
+				22 Aug 2014 : Added protocol support to steering.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -73,7 +74,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1/18204"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.1/18224"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool

@@ -374,7 +374,7 @@ func table10_fmods( rname *string ) {
 
 	TODO: add transport layer port support
 */
-func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string  ) {
+func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string, proto *string ) {
 	var (
 		mb	*gizmos.Mbox							// current middle box being worked with (must span various blocks)
 	)
@@ -413,6 +413,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Expiry:	expiry,
 				Match:	fq_match,
 				Action:	fq_action,
+				Protocol: proto,
 			}
 			if ep1 != nil {								// if source is a specific address, then we need only one 300 rule
 				fq_data.Match.Ip1 = nil												// there is no source to match at this point
@@ -445,6 +446,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			Expiry:	expiry,
 			Match: 	fq_match,
 			Action: fq_action,
+			Protocol: proto,
 		}
 		fq_data.Match.Ip1 = ep1
 		fq_data.Match.Ip2 = ep2
@@ -501,13 +503,13 @@ func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 	for i := range mblist {
 		mblist[i] = p.Get_mbox( i )
 	}
-	steer_fmods( ep1, ep2, mblist, conclude - now, &rname )			// set forward fmods
+	steer_fmods( ep1, ep2, mblist, conclude - now, &rname, p.Get_proto() )			// set forward fmods
 
 	nmb--
 	for i := range mblist {											// build middlebox list in reverse
 		mblist[nmb-i] = p.Get_mbox( i )
 	}
-	steer_fmods( ep2, ep1, mblist, conclude - now, &rname )			// set backward fmods
+	steer_fmods( ep2, ep1, mblist, conclude - now, &rname, p.Get_proto() )			// set backward fmods
 
 	p.Set_pushed()
 }

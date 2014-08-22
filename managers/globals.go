@@ -14,6 +14,7 @@
 	Mods:		25 Jun 2014 - Added initial steering support
 				07 Jul 2014 - Added support for reservation refresh.
 				21 Jul 2014 - Added support list ul caps.
+				21 Aug 2014 - Added protocol support in generic fmod description.
 */
 
 package managers
@@ -94,7 +95,7 @@ const (
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.1/17184"			// version bumped to 3.1 for steering (merged 7/18/2014)
+	version 	string = "v3.1/18224"			// version bumped to 3.1 for steering (merged 7/18/2014)
 )
 
 
@@ -197,6 +198,7 @@ type Fq_req struct {
 	Spq		int					// switch's port for queue
 	Extip	*string				// exterior IP address necessary for inter-tenant reservations
 	Exttyp	*string				// external IP type (either -D or -S)
+	Protocol	*string			// protocol (steering) udp:port or tcp:port, port may be 0
 
 	Nxt_mac	*string				// mac of next hop
 	Lbmac	*string				// late binding mac

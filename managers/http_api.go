@@ -658,17 +658,17 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					req = <- my_ch
 					tmap["usrsp"] = req.Response_data.( *string )
 
-					startt, endt = gizmos.Str2start_end( *tmap["window"] )																// split time token into start/end timestamps
-					res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-					res, err := gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"] )
+					if tmap["proto"] != nil { // DEBUG
+						http_sheep.Baa( 1, "steering using  proto: %s", *tmap["proto"] )
+					}
+
+					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
+					res_name := mk_resname( )									// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+					res, err := gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"], tmap["proto"] )
 					if err != nil {
 						reason = fmt.Sprintf( "unable to create a steering reservation  %s", err )
 						nerrors++
 						break
-					}
-
-					if tmap["proto"] != nil {									// specific prototype for steering
-						http_sheep.Baa( 1, "would set proto: %s", *tmap["proto"] )
 					}
 
 					mbnames := strings.Split( *tmap["mblist"], "," )

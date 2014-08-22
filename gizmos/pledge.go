@@ -172,7 +172,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 
 	TODO: eventually steering needs to match on protocol.
 */
-func Mk_steer_pledge( ep1 *string, ep2 *string, p1 int, p2 int, commence int64, expiry int64, id *string, usrkey *string ) ( p *Pledge, err error ) {
+func Mk_steer_pledge( ep1 *string, ep2 *string, p1 int, p2 int, commence int64, expiry int64, id *string, usrkey *string, proto *string ) ( p *Pledge, err error ) {
 	err = nil
 	p = nil
 
@@ -190,7 +190,7 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 int, p2 int, commence int64, 
 		expiry:		expiry,
 		id:			id,
 		ptype:		PT_STEERING,
-		protocol:	&empty_str,
+		protocol:	proto,
 	}
 
 	s := "none"
@@ -389,6 +389,13 @@ func (p *Pledge) Add_proto( proto *string ) {
 	}
 
 	p.protocol = proto
+}
+
+/*
+	Return the protocol associated with the pledge.
+*/
+func (p *Pledge) Get_proto( ) ( *string ) {
+	return p.protocol
 }
 
 

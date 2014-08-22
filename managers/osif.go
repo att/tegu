@@ -47,6 +47,7 @@
 					but marks the resulting ID as unauthorised with a leading dash.
 				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
 					vm names have a dash (gak).
+				21 Aug 2014 - Fixed cause of core dump (ln 148)
 */
 
 package managers
@@ -145,7 +146,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			}
 
 			for _, os := range os_refs {										// find the project name in our list
-				if os.Equals_id( &id ) {
+				if os != nil  &&  os.Equals_id( &id ) {
 					ok, err := os.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
 					if ok {
 						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
