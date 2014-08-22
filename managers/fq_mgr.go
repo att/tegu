@@ -339,7 +339,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		match_opts += " -d " + *dmac
 	}
 
-	if data.Protocol != nil  { 					// protocol to be used (tcp:port or udp:port port can be 0)
+	if data.Protocol != nil  && *data.Protocol != "" { 					// protocol to be used (tcp:port or udp:port port can be 0)
 		match_opts += fmt.Sprintf( " -p %s", *data.Protocol )
 	}
 
