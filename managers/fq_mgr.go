@@ -365,7 +365,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	if data.Action.Resub != nil { 						// action options order may be sensitive; ensure -R is last
 		toks := strings.Split( *data.Action.Resub, " " )
 		for i := range toks {
-			action_opts += " -R " + toks[i]
+			action_opts += " -R ," + toks[i]
 		}
 	}
 
