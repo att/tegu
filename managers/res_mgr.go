@@ -407,7 +407,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
 			}
 
-			fq_data := &Fq_req {							// generate data with just what need to be there
+			fq_data := &Fq_req {							// generate data with just what needs to be there
 				Pri:	300,
 				Id:		rname,
 				Expiry:	expiry,
