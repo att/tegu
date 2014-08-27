@@ -96,6 +96,8 @@ func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, mlag *
 		sw2: sw2,
 		mlag: mlag,
 		Cost:	1,				// for now all links are equal
+		port1:	-2,
+		port2:	-2,
 	}
 
 	if bond == nil || bond[0] == nil {
@@ -129,6 +131,8 @@ func Mk_vlink( sw *string, p1 int, p2 int, capacity int64, bond ...*Link ) ( l *
 		sw1: sw,
 		sw2: sw,
 		Cost:	1,				// for now all links are equal
+		port1:	p1,
+		port2:	p2,
 	}
 
 	if bond == nil || bond[0] == nil {
