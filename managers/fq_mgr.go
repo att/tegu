@@ -24,6 +24,8 @@
 				19 May 2014 (sd) - Changes to allow floating ip to be supplied as a part of the flow mod.
 				07 Jul 2014 - Added support for reservation refresh.
 				20 Aug 2014 - Corrected shifting of mdscp value in the match portion of the flowmod (it wasn't being shifted) (bug 210)
+				25 Aug 2014 - Major rewrite to send_fmod_agent; now uses the fq_req struct to make it more
+					generic and flexible.
 */
 
 package managers
@@ -33,7 +35,6 @@ import (
 	//"errors"
 	"fmt"
 	//"io"
-	"math"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -144,6 +145,12 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 }
 
 /*
+	DEPRECATED -- send_gfmod_agent to send a flow-mod from a generic structure rather
+		than from the specific reservation oriented list. 
+
+
+
+
 	Send a flow-mod request to the agent. If send_all is false, then only ingress/egress
 	flow-mods are set; those indicateing queue 1 are silently skipped. This is controlled
 	by the queue_type setting in the config file. 
@@ -165,6 +172,10 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 	wdscp is the dscp value that should be written on the outgoing datagram.
 
 	DSCP values are assumed to NOT have been shifted!
+
+
+	*** TODO: Eventually calls to this should be changed to use the generic struct and the 
+		generic function for generating flow mod requests.
 */
 func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_sport int, tp_dport int, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
 	var (
@@ -192,7 +203,8 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 	
 			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d/%02x aT=%d/%02x tp_ports=%d/%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp, mdscp << 2, wdscp, wdscp << 2, tp_sport, tp_dport, sw )
+			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d/%02x aT=%d/%02x tp_ports=%d/%d sw=%s", 
+				timeout, *m1, *m2, extip, host, qnum, mdscp, mdscp << 2, wdscp, wdscp << 2, tp_sport, tp_dport, sw )
 
 			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp << 2, *m1, *m2 ) 	// MUST always match a dscp value (even 0) to prevent loops on resubmit  (fix #210)
 			if extip != "" {
@@ -229,6 +241,179 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
 			}
 		}
+	}
+}
+
+/*
+	Send a flow-mod to the agent using a generic struct to represnt the match and action criteria.
+
+	The fq_req contains data that are neither match or action specific (priority, expiry, etc) or 
+	are single purpose (match or action only) e.g. late binding mac value. It also contains  a set 
+	of match and action paramters that are applied depending on where they are found. 
+	Data expected in the fq_req:
+		Nxt_mac - the mac address that is to be set on the action as dest (steering)
+		Expiry  - the timeout for the fmod(s)
+		Ip1/2	- The src/dest IP addresses for match (one must be supplied)
+		Meta	- The meta value to set/match (both optional)
+		Swid	- The switch DPID or host name (ovs) (used as -h option)
+		Swport	- The switch port to match (inbound)
+		Table	- Table number to put the flow mod into
+		Rsub    - A list (space separated) of table numbers to resub to in the order listed.
+		Lbmac	- Assumed to be the mac address associated with the switch port when
+					switch port is -128. This is passed on the -i option to the 
+					agent allowing the underlying interface to do late binding
+					of the port based on the mac address of the mbox.
+		Pri		- Fmod priority
+
+	TODO: this needs to be expanded to be generic and handle all possible match/action parms
+		not just the ones that are specific to res and/or steering.  It will probably need 
+		an on-all flag in the main request struct rather than deducing it from parms. 
+*/
+func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) {
+
+	if data == nil {
+		return
+	}
+
+	if data.Pri <= 0 {
+		data.Pri = 100
+	}
+
+	timeout := int64( 0 )									// never expiring if expiry isn't given 
+	if data.Expiry > 0 {
+		timeout = data.Expiry - time.Now().Unix()			// figure the timeout and skip if invalid
+	}
+	if timeout < 0 {
+		fq_sheep.Baa( 1, "timeout for flow-mod was too small, not generated: %d", timeout )
+		return
+	}
+
+	table := ""
+	if data.Table > 0 {
+		table = fmt.Sprintf( "-T %d ", data.Table )
+	} 
+
+	match_opts := "--match"					// build match options
+
+	if data.Match.Meta != nil {
+		if *data.Match.Meta != "" {
+			match_opts += " -m " + *data.Match.Meta
+		}
+	} 
+
+	if data.Match.Swport > 0  {						// valid port
+		match_opts += fmt.Sprintf( " -i %d", data.Match.Swport )
+	} else {
+		if data.Match.Swport == -128 {				// late binding port, we sub in the late binding MAC that was given
+			if data.Lbmac != nil {
+				match_opts += fmt.Sprintf( " -i %s", *data.Lbmac )
+			} else {
+				fq_sheep.Baa( 1, "ERR: creating fmod: late binding port supplied, but late binding MAC was nil" )
+			}
+		}
+	}
+
+	smac := data.Match.Smac								// smac wins if both smac and sip are given
+	if smac == nil {
+		if data.Match.Ip1 != nil {						// src supplied, match on src
+			smac = ip2mac[*data.Match.Ip1]
+			if smac == nil {
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s", *data.Match.Ip1 )
+				return
+			}
+		}
+	}
+	if smac != nil {
+		match_opts += " -s " + *smac
+	}
+
+	dmac := data.Match.Dmac								// dmac wins if both dmac and sip are given
+	if dmac == nil {
+		if data.Match.Ip2 != nil {						// src supplied, match on src
+			dmac = ip2mac[*data.Match.Ip2]
+			if dmac == nil {
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s", *data.Match.Ip2 )
+				return
+			}
+		}
+	}
+	if dmac != nil {
+		match_opts += " -d " + *dmac
+	}
+
+	if data.Extip != nil  &&   *data.Extip != "" {					// an external IP address must be matched in addition to gw mac
+		match_opts += " " + *data.Exttyp + " " + *data.Extip		// caller must set the direction (-S or -D) as we don't know
+	}
+
+	if data.Match.Dscp >= 0  {
+		match_opts += fmt.Sprintf( " -T %d", data.Match.Dscp << 2 )	// agent expects value shifted off of the TOS bits.
+	}
+
+
+	action_opts := "--action"										// build the action options
+
+	if data.Action.Dmac != nil {						
+		action_opts += " -d " + *data.Action.Dmac
+	}
+	if data.Action.Smac != nil {
+		action_opts += " -s " + *data.Action.Smac
+	}
+
+	if data.Nxt_mac != nil {					// ??? is this really needed; steering should just set the dest in action
+		action_opts += " -d " + *data.Nxt_mac						// change the dest for steering if next hop supplied
+	}
+
+	if data.Action.Dscp >= 0  {
+		action_opts += fmt.Sprintf( " -T %d", data.Action.Dscp << 2 )	// MUST shift; agent expects dscp to have lower two bits as 0
+	}
+
+	if data.Espq != nil && data.Espq.Queuenum >= 0 {
+		action_opts += fmt.Sprintf( " -q %d", data.Espq.Queuenum )
+	}
+
+	if data.Action.Meta != nil {
+		if *data.Action.Meta != "" {
+			action_opts += " -m " + *data.Action.Meta
+		}
+	}
+
+	output := ""												// output direction (none, normal, etc.)
+	if data.Resub != nil {				 						// action options order may be sensitive; ensure -R is last
+		toks := strings.Split( *data.Resub, " " )
+		for i := range toks {
+			action_opts += " -R ," + toks[i]
+		}
+
+		output = "-N"												// for resub there is no output or resub doesn't work
+	} else {
+		output = "-n"												// if no resub, then output is normal (TODO: allow drop)
+	}
+
+
+	action_opts = fmt.Sprintf( "%s %s", action_opts, output )		// set up actions
+
+	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+
+	if data.Swid == nil {											// blast the fmod to all named hosts if a single target is not named
+		hosts := strings.Split( *hlist, " " )
+		for i := range hosts {
+			tmsg := ipc.Mk_chmsg( )									// must have one per since we dont wait for an ack
+
+			json := base_json
+			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0x%x %s"`, hosts[i], table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
+			json += ` ] } ] }`
+			fq_sheep.Baa( 2, "json: %s", json )
+			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+		}
+	} else {															// fmod goes only to the named switch
+		json := base_json
+		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s add 0x%x %s"`, 
+			data.Espq.Switch, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
+		json += ` ] } ] }`
+		fq_sheep.Baa( 2, "json: %s", json )
+
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
 	}
 }
 
@@ -282,7 +467,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	var (
 		uri_prefix	string = ""
 		msg			*ipc.Chmsg
-		data		[]interface{}
+		data		[]interface{}			// generic list of data on some requests
+		fdata		*Fq_req					// flow-mod request data
 		qcheck_freq	int64 = 5
 		hcheck_freq	int64 = 180
 		host_list	*string					// current set of openstack real hosts
@@ -332,8 +518,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	
 		if p := cfg_data["fqmgr"]["host_check"]; p != nil {		// frequency of checking for new _real_ hosts from openstack
 			hcheck_freq = clike.Atoi64( *p )
-			if hcheck_freq < 180 {
-				hcheck_freq = 180
+			if hcheck_freq < 30 {
+				hcheck_freq = 30
 			}
 		}
 	
@@ -365,49 +551,94 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	fq_sheep.Baa( 1, "flowmod-queue manager is running, sdn host: %s", *sdn_host )
 	for {
 		msg = <- my_chan					// wait for next message 
-		msg.State = nil					// default to all OK
+		msg.State = nil						// default to all OK
 		
 		fq_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
 		switch msg.Msg_type {
-			case REQ_IE_RESERVE:							// the new proactive ingress/egress reservation format
-				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, *Spq
-				spq := data[FQ_SPQ].( *gizmos.Spq )
+			case REQ_GEN_FMOD:							// generic fmod; just pass it along w/o any special handling
+				if msg.Req_data != nil {
+					fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of our expected goodies
+					send_gfmod_agent( fdata,  ip2mac, host_list )
+				}
+
+			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod
+				fdata = msg.Req_data.( *Fq_req ); 		// user view of what the flow-mod should be
 
 				if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled
-					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
+					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, *fdata.Match.Ip1, *fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 
-					if msg.State == nil {				// no error, we are silent
+					if msg.State == nil {					// no error, no response to requestor
 						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d dscp=%d",  
-									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, data[FQ_DSCP].(int) )
+									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 						msg.Response_ch = nil
 					} else {
 						// do we need to suss out the id and mark it failed, or set a timer on it,  so as not to flood reqmgr with errors?
 						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
-									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
+									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 					}
 				} else {
-					//fq_sheep.Baa( 2,  "proactive reservation not sent, no sdn-host defined: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
-						//uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
-					// three flowmods 
-					extip := data[FQ_EXTIP].(string)
-					if extip != "" {
-						extip = data[FQ_EXTTY].(string) + " " + extip			// add the type qualifier if it's not empty
+					rdscp := 0
+					if fdata.Preserve_dscp > 0 {					
+						rdscp = fdata.Preserve_dscp				// reservation supplied value that is to be preserved
+					}
+																// q-lite generates three flowmods  in each direction
+					if send_all || fdata.Espq.Queuenum > 1 {	// if sending all fmods, or this has a non-intermediate queue
+						cdata := fdata.Clone()					// copy so we can alter w/o affecting sender's copy
+						if cdata.Espq.Port == -128 {			// we'll assume in this case that the switch given is the host name and we need to set the switch to br-int
+							swid := "br-int"
+							cdata.Swid = &swid
+						}
+
+						resub_list := "10 0"						// resub to table 10 to pick up meta character, then to table 0 to hit openstack junk
+						cdata.Resub = &resub_list
+				
+						meta := "0x00/0x02"						// match-value/mask; match only when meta 0x2 is 0
+						cdata.Match.Meta = &meta
+
+						if fdata.Dir_in  {						// inbound to this switch we need to revert dscp from our settings to the 'origianal' settings
+							if cdata.Single_switch {
+								cdata.Match.Dscp =  -1													// no dscp adjustment when it is a single switch
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+							} else {
+								cdata.Match.Dscp = dscp								// our value used to keep priority as it wanders through the net
+								cdata.Action.Dscp = rdscp							// translate our value to the one in the reservation (0 by default)
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+
+																	// TODO:  these translations need to be loaded from config, and a loop used to generate all fmods
+								cdata := cdata.Clone()				// clone the clone so we pick up our changes from above, and modify for next fmod
+								cdata.Match.Dscp = 40
+								cdata.Action.Dscp = 32
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+	
+								cdata = cdata.Clone()
+								cdata.Match.Dscp = 41
+								cdata.Action.Dscp = 46
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+							}
+						} else {													// outbound from this switch we need to translate dscp values to our values
+							if cdata.Single_switch {
+								cdata.Match.Dscp =  -1								// no dscp processing for a single switch
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+							} else {
+								cdata.Match.Dscp = rdscp							// match the dscp provided on the reservation (0 by default)
+								cdata.Action.Dscp = dscp							// translate to our special value which gets priority on intermediate switches
+	
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+	
+																	// TODO:  these translations need to be loaded from config, and a loop used to generate all fmods
+								cdata = cdata.Clone()				// copy for next request, fill in and send
+								cdata.Match.Dscp = 32
+								cdata.Action.Dscp = 40
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+	
+								cdata = cdata.Clone()				// copy for next request, fill in and send
+								cdata.Match.Dscp = 46
+								cdata.Action.Dscp = 41
+								send_gfmod_agent( cdata,  ip2mac, host_list )
+							}
+						}
 					}
 
-					if data[FQ_DIR_IN].(bool)  {			// inbound to this switch we need to revert from our settings to the 'origianal' settings
-						udscp := math.Abs( float64( data[FQ_DSCP].(int) ) )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, dscp, int( udscp ), send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 40, 32, send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 41, 46, send_all )
-					} else {								// outbound from this switch we need to translate dscp values to our values
-						udscp := 0							// if DSCP is > 0 it's an 'exit' value that we leave set and translate 0 to dscp; if < 0 we assume we must match the abs() value
-						if data[FQ_DSCP].(int) < 0 {
-							udscp = -data[FQ_DSCP].(int)
-						}
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, udscp, dscp, send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 32, 40, send_all )
-						send_fmod_agent( "add", data[FQ_IP1].(string), data[FQ_IP2].(string), extip, data[FQ_TPSPORT].(int), data[FQ_TPDPORT].(int), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port, ip2mac, 46, 41, send_all )
-					}
 					msg.Response_ch = nil
 				}
 

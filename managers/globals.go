@@ -14,6 +14,7 @@
 	Mods:
 				07 Jul 2014 - Added support for reservation refresh.
 				21 Jul 2014 - Added support list ul caps.
+				27 Aug 2014 - Added Fq_req support.
 */
 
 package managers
@@ -56,6 +57,7 @@ const (
 	REQ_LISTHOSTS				// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
 	REQ_GEN_QMAP				// network - generate queue info needed by external process to set queues
 	REQ_IE_RESERVE				// fq-manager send ingress/egress reservations to skoogi
+	REQ_GEN_FMOD				// send generic flow-mod
 	REQ_VM2IP					// xlate map VM name | VM ID to IP map is in the request
 	REQ_VMID2IP					// xlate map VM-ID to ip is in request
 	REQ_IP2VMID					// xlate map IP address to VM-ID
@@ -88,27 +90,12 @@ const (
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.0/18204"
+	version 	string = "v3.0/18274"
 )
 
 
 // fq_mgr constants	(resets iota)
 const (
-				// offsets into the array of data passed to fq_mgr on requests
-	FQ_IP1		int = iota		// ip address of host 1					(ie proactive reservation request)
-	FQ_IP2						// ip address of host 2
-	FQ_EXPIRY					// reservation expiry time 
-	FQ_SPQ						// queue to map traffic to
-	FQ_ID						// id used if reporting error asynch
-	FQ_DIR_IN					// bool flag that indicates whether the flowmod direction is into switch or out of switch
-	FQ_DSCP						// user supplied dscp that the data should have on egress
-	FQ_EXTIP					// an external IP that is needed to setup flow mods when session traveling through a gateway
-	FQ_EXTTY					// external IP type used in fmod command (either -D or -S)
-	FQ_TPSPORT					// transport source port number
-	FQ_TPDPORT					// transport dest port number
-
-	FQ_SIZE						// CAUTION:  this must be LAST as it indicates the size of the array needed
-
 	FQ_QLIST	int = 0			// the list of current queue settings 	(set queues)
 )
 
@@ -152,6 +139,53 @@ var (
 	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
 	accept_requests bool = false		// until main says we can, we don't accept requests
 )
+
+//-- fq-manager data passing structs ---------------------------------------------------------------------------------------
+
+
+/*
+	Paramters that may need to be passed to fq-mgr for either matching or setting in the action. All 
+	fields are public for easier access and eventual conversion to json as a means to pass to the 
+	agent. 
+*/
+type Fq_parms struct {
+	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
+	Ip2		*string
+	Tpsport	int					// transport layer source port
+	Tpdport int					// transport layer dest port
+	Swport	int					// the switch port 
+	Smac	*string				// source mac
+	Dmac	*string				// dest mac
+	Dscp	int					// dscp mask to match if non-zero
+	Meta	*string				// meta 
+}
+
+/*
+	Main struct passed to fq-mgr that references the set of match and action parameters
+*/
+type Fq_req struct {
+	Pri		int					// fmod priority
+	Cookie	int					// cookie that is added to the flow-mod (not a reservation cookie)
+	Expiry	int64				// either a hard time or a timeout depending on the situation
+	Id		*string				// id that fq-mgr will pass back if it indicates an error
+	Table	int					// table to put the fmod into
+
+	Dir_in	bool				// true if direction is inbound (bandwidth fmods)
+	Spq		int					// switch's port for queue
+	Extip	*string				// exterior IP address necessary for inter-tenant reservations
+	Exttyp	*string				// external IP type (either -D or -S)
+	Resub	*string				// list of tables (space sep numbers) to resubmit to
+	Preserve_dscp int			// dscp value that should be matched and preserved
+
+	Nxt_mac	*string				// mac of next hop (steering)
+	Lbmac	*string				// late binding mac
+	Swid	*string				// switch ID (either a dpid or host name for ovs)
+	Espq	*gizmos.Spq			// a collection of swtich, port, queue information (might replace spq and swid)
+	Single_switch bool			// indicates that only one switch is involved (dscp handling is different)
+
+	Match	*Fq_parms			// things to match on
+	Action	*Fq_parms			// things to set in action
+}
 
 //--------------------------------------------------------------------------------------------------------------------------
 

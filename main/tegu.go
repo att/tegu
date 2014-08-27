@@ -49,6 +49,7 @@
 				15 Aug 2014 : Bug fix (201) and stack dump fix (nil ptr in osif). 
 				19 Aug 2014 : Bug fix (208) prevent duplicate tegu's from running on same host/port.
 				20 Aug 2014 : Bug fix (210) shift dscp values properly in the match part of a flowmod.
+				27 Aug 2014 : Fq-mgr changes to allow for metadata checking on flowmods.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -78,7 +79,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/18204"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.0/18274"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
