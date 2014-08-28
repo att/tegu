@@ -169,6 +169,7 @@ type Fq_req struct {
 	Expiry	int64				// either a hard time or a timeout depending on the situation
 	Id		*string				// id that fq-mgr will pass back if it indicates an error
 	Table	int					// table to put the fmod into
+	Output	*string				// output directive: none, normal, drop (resub will force none)
 
 	Dir_in	bool				// true if direction is inbound (bandwidth fmods)
 	Spq		int					// switch's port for queue
