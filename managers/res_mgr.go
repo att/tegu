@@ -120,7 +120,7 @@ func (i *Inventory) failed_push( msg *ipc.Chmsg ) {
 	fq_data := msg.Req_data.( *Fq_req ) 		// data that was passed to fq_mgr (we'll dig out pledge id
 
 	// TODO: set a counter in pledge so that we only try to push so many times before giving up.
-	rm_sheep.Baa( 1, "WRN: proactive ie reservation push failed, pledge marked unpushed: %s", *fq_data.Id )
+	rm_sheep.Baa( 1, "WRN: proactive ie reservation push failed, pledge marked unpushed: %s  [TGURMG002]", *fq_data.Id )
 	p := i.cache[*fq_data.Id]
 	if p != nil {
 		p.Reset_pushed()
@@ -158,32 +158,28 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 }
 
 /*
-	Push table 10 flow-mods. Table 10 is used to set meta values so that a resub to 
-	table 0 doesn't loop, or match lower priority entries that we've added. 
+	Push table 9x flow-mods. The flowmods we toss into the 90 range of 
+	tables generally serve to mark metadata in a packet since metata
+	cannot be marked prior to a resub action (flaw in OVS if you ask me).
+
+	Marking metadata is needed so that when one of our f-mods match we can 
+	resubmit into table 0 without triggering a loop, or a match of any
+	of our other rules. 
+
+	Table is the table number (we assume 9x, but it could be anything)
+	Meta is a string supplying the value/mask that is used on the action (e.g. 0x02/0x02)
+	to set the 00000010 bit as an and operation. 
+	Cookie is the cookie value used on the f-mod.
 */
-func table10_fmods( rname *string ) {
-		fq_match := &Fq_parms{
-			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
-			Meta:	&empty_str,
-		}
+func table9x_fmods( rname *string, table int, meta string, cookie int ) {
+		fq_data := Mk_fqreq( rname )							// f-mod request with defaults (output==none)
+		fq_data.Table = table
+		fq_data.Cookie = cookie	
+		fq_data.Espq = gizmos.Mk_spq( "br-int", -1, -1 )		// these only need to go on br-int
+		fq_data.Expiry = 0										// never expire
 
-		mstr := "0x02/0x02"							// sets the meta value
-		fq_action := &Fq_parms{
-			Meta:	&mstr,
-		}
-
-		espq := gizmos.Mk_spq( "br-int", -1, -1 )				// these only need to go on br-int
+		fq_data.Action.Meta = &meta								// sole purpose is to set metadata
 		
-		fq_data := &Fq_req {							// fq-mgr request data
-			Id:		rname,
-			Cookie:	0xe5d,
-			Espq:	espq,
-			Expiry:	0,
-			Match: 	fq_match,
-			Action: fq_action,
-			Table:	10,
-		}
-
 		msg := ipc.Mk_chmsg()
 		msg.Send_req( fq_ch, nil, REQ_GEN_FMOD, fq_data, nil )			// no response right now -- eventually we want an asynch error
 }
@@ -215,13 +211,13 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 	)
 
 	rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
-	set_10 := false
+	set_90 := false
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-				if ! set_10 {
-					table10_fmods( &rname )					// ensure there is a table 10 mod
-					set_10 = true
+				if ! set_90 {
+					table9x_fmods( &rname, 90, "0x02/0x02", 0xe5d )		// ensure there is a table 90 fmod
+					set_90 = true
 				}
 
 				h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
@@ -388,7 +384,7 @@ func (i *Inventory) write_chkpt( ) {
 
 	err := i.chkpt.Create( )
 	if err != nil {
-		rm_sheep.Baa( 0, "CRI: resmgr: unable to create checkpoint file: %s", err )
+		rm_sheep.Baa( 0, "CRI: resmgr: unable to create checkpoint file: %s  [TGURMG003]", err )
 		return
 	}
 
@@ -410,7 +406,7 @@ func (i *Inventory) write_chkpt( ) {
 
 	ckpt_name, err := i.chkpt.Close( )
 	if err != nil {
-		rm_sheep.Baa( 0, "CRI: resmgr: checkpoint write failed: %s: %s", ckpt_name, err )
+		rm_sheep.Baa( 0, "CRI: resmgr: checkpoint write failed: %s: %s  [TGURMG004]", ckpt_name, err )
 	} else {
 		rm_sheep.Baa( 1, "resmgr: checkpoint successful: %s", ckpt_name )
 	}
@@ -468,7 +464,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 							err = i.Add_res( p )
 						} else {
 		
-							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s", p.To_str() )
+							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
 						}
 					}
 			}
@@ -856,7 +852,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				}
 
 			default:
-				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d", msg.Msg_type )
+				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )
 				msg.Response_data = nil
 				msg.State = fmt.Errorf( "res_mgr: unknown message (%d)", msg.Msg_type )
 		}

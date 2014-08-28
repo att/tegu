@@ -195,7 +195,7 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 			osif_sheep.Baa( 1, "mapping VMs from: %s", ostk.To_str( ) )
 			m, err = ostk.Mk_vm2ip( m )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s", err )
+				osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s   [TGUOSI000]", err )
 			}
 		}
 	}
@@ -226,14 +226,14 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		if k != "_ref_" {
 			list, err = ostk.List_hosts( ostack.COMPUTE | ostack.NETWORK )	
 			if err != nil {
-				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s", ostk.To_str(), err )
+				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
 				return							// drop out on first error with no list
 			} else {
 				if *list != "" {
 					ts += sep + *list
 					sep = " "
 				} else {
-					osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s", ostk.To_str() )	
+					osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
 				}
 			}
 		}
@@ -286,13 +286,13 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 			osif_sheep.Baa( 2, "creating VM maps from: %s", ostk.To_str( ) )
 			vmid2ip, ip2vmid, vm2ip, vmid2host, err = ostk.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", ostk.To_str( ), err )
+				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s   [TGUOSI003]", ostk.To_str( ), err )
 				rerr = err
 			}
 	
 			ip2fip, fip2ip, err = ostk.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s", ostk.To_str( ), err )
+				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s   [TGUOSI004]", ostk.To_str( ), err )
 				rerr = err
 			}
 		}
@@ -301,13 +301,13 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 	// ---- use the reference pointer for these as we get everything from one call
 	ip2mac, _, err = os_refs["_ref_"].Mk_mac_maps( nil, nil, inc_tenant )	
 	if err != nil {
-		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs["_ref_"].To_str( ), err )
+		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
 		rerr = err
 	}
 
 	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( gwmap, nil, inc_tenant, false )		// second true is use project which we need right now
 	if err != nil {
-		osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s", os_refs["_ref_"].To_str( ), err )
+		osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", os_refs["_ref_"].To_str( ), err )
 	}
 
 	return
@@ -321,7 +321,7 @@ func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[st
 	if ostk != nil {
 		m, _, err = ostk.Mk_mac_maps( nil, nil, inc_tenant )	
 		if err != nil {
-			osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s", os_refs["_ref_"].To_str( ), err )
+			osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI007]", os_refs["_ref_"].To_str( ), err )
 		}
 	}
 
@@ -369,7 +369,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			creds[*v], err = admin.Dup( v )				// duplicate creds for this project and then authorise to get a token
 	
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s", *v )
+				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s   [TGUOSI008]", *v )
 				delete( creds, *v )
 				//creds[*v] = nil
 			}
@@ -534,7 +534,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	go gen_maps( gen_maps_ch,  inc_tenant )
 
 	if os_list == " " || os_list == "" || os_list == "off" {
-		osif_sheep.Baa( 0, "WRN: osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )
+		osif_sheep.Baa( 0, "osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )
 	} else {
 		// TODO -- investigate getting id2pname maps from each specific set of creds defined if an overarching admin name is not given
 
@@ -548,9 +548,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			id2pname = make( map[string]*string )				// empty maps and we'll never generate a translation from project name to tenant ID since there are no default admin creds
 			pname2id = make( map[string]*string )
 			if def_project != nil {
-				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, %s) to authorise with openstack", def_usr, def_project )
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, %s) to authorise with openstack  [TGUOSI009]", def_usr, def_project )
 			} else {
-				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, no-project) to authorise with openstack", def_usr )
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, no-project) to authorise with openstack  [TGUOSI009]", def_usr )	// YES msg ids are duplicated here
 			}
 		}
 
@@ -620,7 +620,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 						pname2id = new_name2id
 						id2pname = new_id2pname
 					} else {
-						osif_sheep.Baa( 1, "WRN: unable to get tenant name/ID translation data: %s", err )
+						osif_sheep.Baa( 1, "WRN: unable to get tenant name/ID translation data: %s  [TGUOSI010]", err )
 					}
 	
 					if os_list == "all" {
@@ -650,14 +650,14 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
 					msg.Response_data, msg.State = get_ip2mac( os_refs, inc_tenant )
 				} else {
-					osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
+					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011]" )
 				}
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
 					msg.Response_data, msg.State = get_hosts( os_refs )
 				} else {
-					osif_sheep.Baa( 0, "WRN: no response channel for host list request" )
+					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI012]" )
 				}
 
 			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string

@@ -144,22 +144,22 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
 				for mac, ip := range n.gwmap {
 					if n.mac2phost[mac] == nil {
-						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find gw mac in mac2phost list: mac=%s  ip=%s", mac, *ip )
+						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find gw mac in mac2phost list: mac=%s  ip=%s  [TGUNET000]", mac, *ip )
 					} else {
 						if ip != nil {
 							net_sheep.Baa( 2, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
 							hlist[i] = gizmos.FL_mk_host( *ip, "", mac, *(n.mac2phost[mac]), -128 ) 		// use phys host collected from OVS as switch
 							i++
 						} else {
-							net_sheep.Baa( 1, "WRN:  build_hlist: ip was nil for mac: %s", mac )
+							net_sheep.Baa( 1, "WRN:  build_hlist: ip was nil for mac: %s  [TGUNET001]", mac )
 						}
 					}
 				}
 			} else {
-				net_sheep.Baa( 1, "WRN: no phost2mac map -- agent likely not returned sp2uuid list" )
+				net_sheep.Baa( 1, "WRN: no phost2mac map -- agent likely not returned sp2uuid list  [TGUNET002]" )
 			}
 		} else {
-			net_sheep.Baa( 1, "WRN: no gateway map" )
+			net_sheep.Baa( 1, "WRN: no gateway map  [TGUNET003]" )
 		}
 
 		hlist = hlist[0:i]
@@ -463,7 +463,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		hlist = old_net.build_hlist()						// simulate output from floodlight by building the host list from openstack maps
 		links, err = gizmos.Read_json_links( *flhost )
 		if err != nil {
-			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s", *flhost, err )
+			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
 			links = nil										// kicks us out later, but must at least create an empty network first
 		}
 	}
@@ -865,7 +865,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	if h1nm == nil || h2nm == nil {			// this has never happened, but be parinoid
 		pcount = 0
 		path_list = nil
-		net_sheep.Baa( 0, "CRI: find-path: internal error: either h1nm or h2nm was nil after get mac" )
+		net_sheep.Baa( 0, "CRI: find-path: internal error: either h1nm or h2nm was nil after get mac  [TGUNET005]" )
 		return
 	}
 
@@ -874,7 +874,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 	for {													// we'll break after we've looked at all of the connection points for h1 
 		if plidx >= len( path_list ) {
-			net_sheep.Baa( 0,  "CRI: find-path: internal error -- unable to find a path between hosts, loops in the graph? Edges exceeded number of total links." )
+			net_sheep.Baa( 0,  "CRI: find-path: internal error -- unable to find a path between hosts, loops in the graph? Edges exceeded number of total links.  [TGUNET006]" )
 			return
 		}
 
@@ -1070,7 +1070,7 @@ func (n *Network) host_list( ) ( jstr string ) {
 			}
 		}
 	} else {
-		net_sheep.Baa( 0, "ERR: host_list: n is nil (%v) or n.hosts is nil", n == nil )
+		net_sheep.Baa( 0, "ERR: host_list: n is nil (%v) or n.hosts is nil  [TGUNET007]", n == nil )
 	}
 
 	jstr += ` ]`			// end of hosts array
@@ -1152,9 +1152,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 			sdn_host = cfg_data["default"]["static_phys_graph"] 
 			if sdn_host == nil {
 				sdn_host = &default_sdn;
-				net_sheep.Baa( 1, "WRN: using default openflow host: %s", sdn_host )
+				net_sheep.Baa( 1, "WRN: using default openflow host: %s  [TGUNET008]", sdn_host )
 			} else {
-				net_sheep.Baa( 1, "WRN: using static map of physical network and openstack VM lists to build the network graph" )
+				net_sheep.Baa( 1, "WRN: using static map of physical network and openstack VM lists to build the network graph  [TGUNET009]" )
 			}
 		}
 	}
@@ -1196,7 +1196,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					mlag_paths = false
 
 				default:
-					net_sheep.Baa( 0, "WRN: invalid setting in config: network:find_paths %s is not valid; must be: all, mlag, or shortest; assuming mlag" )
+					net_sheep.Baa( 0, "WRN: invalid setting in config: network:find_paths %s is not valid; must be: all, mlag, or shortest; assuming mlag  [TGUNET010]" )
 					find_all_paths = false
 					mlag_paths = true
 			}
@@ -1221,7 +1221,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 														// enforce some sanity on config file settings
 	if refresh < 15 {
-		net_sheep.Baa( 0, "WRN: refresh rate in config file (%ds) was too small; set to 15s", refresh )
+		net_sheep.Baa( 0, "refresh rate in config file (%ds) was too small; set to 15s", refresh )
 		refresh = 15
 	}
 	if max_link_cap <= 0 {
@@ -1232,7 +1232,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
 	if act_net == nil {
-		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!" )		// this is bad and WILL cause a core dump
+		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!  [TGUNET011]" )		// this is bad and WILL cause a core dump
 	} else {
 		net_sheep.Baa( 1, "initial network graph has been built" )
 		act_net.limits = limits

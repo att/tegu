@@ -26,6 +26,7 @@
 				20 Aug 2014 - Corrected shifting of mdscp value in the match portion of the flowmod (it wasn't being shifted) (bug 210)
 				25 Aug 2014 - Major rewrite to send_fmod_agent; now uses the fq_req struct to make it more
 					generic and flexible.
+				27 Aug 2014 - Small fixes during testing. 
 */
 
 package managers
@@ -80,7 +81,7 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 	f, err := os.Create( fname )
 	if err != nil {
-		fq_sheep.Baa( 0, "ERR: unable to create data file: %s: %s", fname, err )
+		fq_sheep.Baa( 0, "ERR: unable to create data file: %s: %s  [TGUFQM000]", fname, err )
 		return
 	}
 	
@@ -91,7 +92,7 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 	err = f.Close( )
 	if err != nil {
-		fq_sheep.Baa( 0, "ERR: unable to create data file (close): %s: %s", fname, err )
+		fq_sheep.Baa( 0, "ERR: unable to create data file (close): %s: %s  [TGUFQM001]", fname, err )
 		return
 	}
 
@@ -99,7 +100,7 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	cmd := exec.Command( shell_cmd, *cmd_base, "-d", fname, *hlist )
 	err = cmd.Run()
 	if err != nil  {
-		fq_sheep.Baa( 0, "ERR: unable to execute set queue command: %s: %s", cmd_str, err )
+		fq_sheep.Baa( 0, "ERR: unable to execute set queue command: %s: %s  [TGUFQM002]", cmd_str, err )
 	} else {
 		fq_sheep.Baa( 1, "queues adjusted via %s", *cmd_base )
 	}
@@ -188,7 +189,7 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 		m2 := ip2mac[ip2]
 
 		if m1 == nil || m2 == nil {
-			fq_sheep.Baa( 1, "WRN: unable to set flow mod ip2mac could not be translated for either %s (%v) or %s (%v)", ip1, m1 == nil, ip2, m2 == nil )
+			fq_sheep.Baa( 1, "WRN: unable to set flow mod ip2mac could not be translated for either %s (%v) or %s (%v)  [TGUFQM003]", ip1, m1 == nil, ip2, m2 == nil )
 			return
 		}
 
@@ -308,7 +309,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 			if data.Lbmac != nil {
 				match_opts += fmt.Sprintf( " -i %s", *data.Lbmac )
 			} else {
-				fq_sheep.Baa( 1, "ERR: creating fmod: late binding port supplied, but late binding MAC was nil" )
+				fq_sheep.Baa( 1, "ERR: creating fmod: late binding port supplied, but late binding MAC was nil  [TGUFQM004]" )
 			}
 		}
 	}
@@ -318,7 +319,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		if data.Match.Ip1 != nil {						// src supplied, match on src
 			smac = ip2mac[*data.Match.Ip1]
 			if smac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s", *data.Match.Ip1 )
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Ip1 )
 				return
 			}
 		}
@@ -332,7 +333,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		if data.Match.Ip2 != nil {						// src supplied, match on src
 			dmac = ip2mac[*data.Match.Ip2]
 			if dmac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s", *data.Match.Ip2 )
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s  [TGUFQM006]", *data.Match.Ip2 )
 				return
 			}
 		}
@@ -359,11 +360,11 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		action_opts += " -s " + *data.Action.Smac
 	}
 
-	if data.Nxt_mac != nil {					// ??? is this really needed; steering should just set the dest in action
-		action_opts += " -d " + *data.Nxt_mac						// change the dest for steering if next hop supplied
+	if data.Nxt_mac != nil {								// ??? is this really needed; steering should just set the dest in action
+		action_opts += " -d " + *data.Nxt_mac				// change the dest for steering if next hop supplied
 	}
 
-	if data.Action.Dscp >= 0  {
+	if data.Action.Dscp >= 0  && data.Match.Dscp != data.Action.Dscp {	// no need to set it if it's what we matched on{
 		action_opts += fmt.Sprintf( " -T %d", data.Action.Dscp << 2 )	// MUST shift; agent expects dscp to have lower two bits as 0
 	}
 
@@ -377,16 +378,24 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		}
 	}
 
-	output := ""												// output direction (none, normal, etc.)
+	output := "-N"												// output default to none
+	if data.Output != nil {
+		switch *data.Output {
+			case "none":		output = "-N"
+			case "normal":		output = "-n"
+			case "drop":		output = "-X"
+
+			default:
+				fq_sheep.Baa( 1, "WRN: defaulting to no output: unknown fmod-output type specified: %s  [TGUFQM007]", *data.Output )
+		}
+	}
 	if data.Resub != nil {				 						// action options order may be sensitive; ensure -R is last
 		toks := strings.Split( *data.Resub, " " )
 		for i := range toks {
 			action_opts += " -R ," + toks[i]
 		}
 
-		output = "-N"												// for resub there is no output or resub doesn't work
-	} else {
-		output = "-n"												// if no resub, then output is normal (TODO: allow drop)
+		output = "-N"											// for resub there is no output or resub doesn't work (override Output if given)
 	}
 
 
@@ -573,7 +582,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						msg.Response_ch = nil
 					} else {
 						// do we need to suss out the id and mark it failed, or set a timer on it,  so as not to flood reqmgr with errors?
-						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
+						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d  [TGUFQM008]",  
 									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 					}
 				} else {
@@ -668,7 +677,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						send_hlist_agent( host_list )							// send to agent_manager
 						fq_sheep.Baa( 1, "host list received from osif: %s", *host_list )
 					} else {
-						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string" )
+						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
 					}
 				} else {
 					fq_sheep.Baa( 2, "requesting lists from osif" )
@@ -684,7 +693,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						ip2mac = msg.Response_data.( map[string]*string )
 						fq_sheep.Baa( 1, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
 					} else {
-						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected ip2mac translation map" )
+						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected ip2mac translation map  [TGUFQM010]" )
 					}
 				}
 

@@ -942,7 +942,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 					priv_auth = p
 
 				default:
-					http_sheep.Baa( 0, `WRN: invalid local authorisation type (%s), defaulting to "localhost"`, *p )
+					http_sheep.Baa( 0, `WRN: invalid local authorisation type (%s), defaulting to "localhost"  [TGUHTP000]`, *p )
 			}
 		}
 	}
@@ -960,7 +960,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 			cert_name := "tegu_cert"
 			err = security.Mk_cert( 1024, &cert_name, dns_list, ssl_cert, ssl_key )
     		if err != nil {
-				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s", ssl_cert, ssl_key, err )
+				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s  [TGUHTP001]", ssl_cert, ssl_key, err )
 			}
 		}
 
@@ -972,7 +972,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	}
 	
 	if err != nil {
-		http_sheep.Baa( 1, "ERR: unable to start http listener: %s", err )
+		http_sheep.Baa( 1, "ERR: unable to start http listener: %s  [TGUHTP002]", err )
 		syscall.Exit( 1 )								// bring the giant down hard if we cannot listen
 	} else {
 		http_sheep.Baa( 0, "http listener is done" )

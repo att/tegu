@@ -210,8 +210,8 @@ func ( a *agent ) process_input( buf []byte ) {
     	err := json.Unmarshal( jblob, &req )           // unpack the json 
 
 		if err != nil {
-			am_sheep.Baa( 0, "ERR: unable to unpack agent_message: %s", err )
-			am_sheep.Baa( 2, "ERR: offending json: %s", string( buf ) )
+			am_sheep.Baa( 0, "ERR: unable to unpack agent_message: %s  [TGUAGT000]", err )
+			am_sheep.Baa( 2, "offending json: %s", string( buf ) )
 		} else {
 			am_sheep.Baa( 1, "%s/%s received from agent", req.Ctype, req.Rtype )
 	
@@ -224,18 +224,18 @@ func ( a *agent ) process_input( buf []byte ) {
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
 			
 							default:	
-								am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s", req.Rtype )
+								am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s  [TGUAGT001]", req.Rtype )
 						}
 				} else {
-					am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s", req.Rtype )
+					am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s  [TGUAGT002]", req.Rtype )
 				}
 
 				default:
-					am_sheep.Baa( 1, "WRN:  unrecognised command type type from agent: %s", req.Ctype )
+					am_sheep.Baa( 1, "WRN:  unrecognised command type type from agent: %s  [TGUAGT003]", req.Ctype )
 			}
 		}
 
-		jblob = a.jcache.Get_blob()			// get next blob if the buffer completed one and containe a second
+		jblob = a.jcache.Get_blob()								// get next blob if the buffer completed one and containe a second
 	}
 
 	return
@@ -274,7 +274,7 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 		am_sheep.Baa( 3, "sending mac2phost request: %s", jmsg )
 		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
-		am_sheep.Baa( 1, "WRN: unable to bundle mac2phost request into json: %s", err )
+		am_sheep.Baa( 1, "WRN: unable to bundle mac2phost request into json: %s  [TGUAGT004]", err )
 		am_sheep.Baa( 2, "offending json: %s", jmsg )
 	}
 }
@@ -299,7 +299,7 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 		am_sheep.Baa( 1, "sending intermediate queue setup request: hosts=%s dscp=%s", *hlist, *dscp )
 		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
-		am_sheep.Baa( 0, "WRN: creating json intermedq command failed: %s", err )
+		am_sheep.Baa( 0, "WRN: creating json intermedq command failed: %s  [TGUAGT005]", err )
 	}
 }
 
