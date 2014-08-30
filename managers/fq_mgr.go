@@ -145,105 +145,6 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 	}
 }
 
-/*
-	DEPRECATED -- send_gfmod_agent to send a flow-mod from a generic structure rather
-		than from the specific reservation oriented list. 
-
-
-
-
-	Send a flow-mod request to the agent. If send_all is false, then only ingress/egress
-	flow-mods are set; those indicateing queue 1 are silently skipped. This is controlled
-	by the queue_type setting in the config file. 
-
-	act_type is either "add" or "del" as this can be used to delete flow-mods when a 
-	reservation is canceled. 
-
-	destip is the IP address of the destination if different than either ip1 or ip2. 
-	This is used in the case of a split path where there are gateways between and 
-	we need to match the mac of the gateway as the dest, but also match the destination
-	ip to further limit the sessions which match. This string is assumed to have been
-	prepended with the necessary type (-D or -S) as set by the sender of the request.
-
-	tp_sport and tp_dport are the transport port for source and dest.  We assume both 
-	UDP and TCP traffic is implied and thus need to generate two fmods when either 
-	is set. 
-
-	mdscp is the dscp to match; a value of 0 causes no dscp value to be matched
-	wdscp is the dscp value that should be written on the outgoing datagram.
-
-	DSCP values are assumed to NOT have been shifted!
-
-
-	*** TODO: Eventually calls to this should be changed to use the generic struct and the 
-		generic function for generating flow mod requests.
-*/
-func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_sport int, tp_dport int, expiry int64, qnum int, sw string, port int, ip2mac map[string]*string, mdscp int, wdscp int, send_all bool ) {
-	var (
-		host	string
-		qjson2	string = ""
-	)
-
-	if send_all || qnum != 1 {					// ignore if skipping intermediate and this isn't ingress/egress
-		m1 := ip2mac[ip1]						// set with mac addresses
-		m2 := ip2mac[ip2]
-
-		if m1 == nil || m2 == nil {
-			fq_sheep.Baa( 1, "WRN: unable to set flow mod ip2mac could not be translated for either %s (%v) or %s (%v)  [TGUFQM003]", ip1, m1 == nil, ip2, m2 == nil )
-			return
-		}
-
-		timeout := expiry - time.Now().Unix()	// figure the timeout and skip if too small
-		if timeout > 0 {
-			if port <= 0 {						// we'll assume that the switch is actually the phy host and br-int is what needs to be set
-				host = sw
-				sw = "br-int"
-			} else {							// port known, so switch must ben known too
-				host = "all"
-			}
-	
-			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
-
-			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d/%02x aT=%d/%02x tp_ports=%d/%d sw=%s", 
-				timeout, *m1, *m2, extip, host, qnum, mdscp, mdscp << 2, wdscp, wdscp << 2, tp_sport, tp_dport, sw )
-
-			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp << 2, *m1, *m2 ) 	// MUST always match a dscp value (even 0) to prevent loops on resubmit  (fix #210)
-			if extip != "" {
-				qjson += fmt.Sprintf( `%s `,  extip )																		// external IP is assumed to be prefixed with the correct -S or -D flag
-			}
-
-			action := fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  %s 0xdead %s"`, qnum, wdscp << 2, act_type, sw )			// action will be the same for each set of json
-			if tp_sport > 0 || tp_dport > 0 {					// need to match on a transport port too
-				qjson2 = qjson									// dup the string
-				if tp_sport > 0 {
-					qjson += fmt.Sprintf( "-p 6:%d ", tp_sport )		// add in prototype 6 == tcp
-					qjson2 += fmt.Sprintf( "-p 17:%d ", tp_sport )		// add in prototype 17 == udp
-				}
-				if tp_dport > 0 {										// repeat if a dest port was given
-					qjson += fmt.Sprintf( "-P 6:%d ", tp_dport )
-					qjson2 += fmt.Sprintf( "-P 17:%d ", tp_dport )
-				}
-
-				qjson2 += action
-				qjson2 += ` ] } ] }`
-			}
-
-			qjson += fmt.Sprintf( `--action -q %d -T %d -R ,0 -N  %s 0xdead %s"`, qnum, wdscp << 2, act_type, sw )			// set queue and dscp value, then resub table 0 to match openstack fmod
-			qjson += ` ] } ] }`
-
-
-			tmsg := ipc.Mk_chmsg( )
-			fq_sheep.Baa( 2, "1st/only json >>>> %s", qjson )
-			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
-
-			if qjson2 != "" {
-				tmsg := ipc.Mk_chmsg( )
-				fq_sheep.Baa( 2, "2nd json >>>> %s", qjson2 )
-				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send as a short request to one agent
-			}
-		}
-	}
-}
 
 /*
 	Send a flow-mod to the agent using a generic struct to represnt the match and action criteria.
@@ -486,6 +387,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
 		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
 		dscp		int = 42	 			// generic diffserv value used to mark packets as priority
+		alt_table	int = DEF_ALT_TABLE		// meta data marking table
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
 	)
@@ -508,6 +410,10 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			send_all = true
 		}
 	}
+	if p := cfg_data["default"]["alttable"]; p != nil {
+		alt_table = clike.Atoi( *p )
+	} 
+	
 
 	if cfg_data["fqmgr"] != nil {								// pick up things in our specific setion
 		if dp := cfg_data["fqmgr"]["ssq_cmd"]; dp != nil {		// set switch queue command
@@ -598,7 +504,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 							cdata.Swid = &swid
 						}
 
-						resub_list := "10 0"						// resub to table 10 to pick up meta character, then to table 0 to hit openstack junk
+						resub_list := fmt.Sprintf( "%d 0", alt_table )			// resub to table 90 to pick up meta character, then to table 0 to hit openstack junk
 						cdata.Resub = &resub_list
 				
 						meta := "0x00/0x02"						// match-value/mask; match only when meta 0x2 is 0
