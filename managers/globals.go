@@ -91,6 +91,9 @@ const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
 	version 	string = "v3.0/18274"
+
+								// defaults
+	DEF_ALT_TABLE	int = 90	// alternate table in OVS for metadata marking
 )
 
 

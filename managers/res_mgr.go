@@ -3,20 +3,23 @@
 /*
 
 	Mnemonic:	res_mgr
-	Abstract:	Manages the inventory of reservations. 
+	Abstract:	Manages the inventory of reservations.
 				We expect it to be executed as a goroutine and requests sent via a channel.
 	Date:		02 December 2013
 	Author:		E. Scott Daniels
 
 	CFG:		These config file variables are used when present:
+					default:alttable = n  The OVS table number to be used for metadata marking.
+
 					resmgr:ckpt_dir	- name of the directory where checkpoint data is to be kept (/var/lib/tegu)
-									FWIW: /var/lib/tegu selected based on description: http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
+									FWIW: /var/lib/tegu selected based on description:
+									http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
 
 
 	TODO:		need a way to detect when skoogie/controller has been reset meaning that all
-				pushed reservations need to be pushed again. 
+				pushed reservations need to be pushed again.
 
-				need to check to ensure that a VM's IP address has not changed; repush 
+				need to check to ensure that a VM's IP address has not changed; repush
 				reservation if it has and cancel the previous one (when skoogi allows drops)
 
 	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
@@ -27,9 +30,11 @@
 				07 Jul 2014 (sd) : Changed to send network manager a delete message when deleteing a reservation
 						rather than depending on the http manager to do that -- possible timing issues if we wait.
 						Added support for reservation refresh.
-				29 Jul 2014 : Change set user link cap such that 0 is a valid value, and -1 will delete. 
+				29 Jul 2014 : Change set user link cap such that 0 is a valid value, and -1 will delete.
 				27 Aug 2014 (sd) : Changes to support using Fq_req for generating flowmods (support of
 						meta marking of reservation traffic).
+				28 Aug 2014 : Added message tags to crit/err/warn messages.
+				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
 */
 
 package managers
@@ -58,7 +63,7 @@ import (
 	Manages the reservation inventory
 */
 type Inventory struct {
-	cache		map[string]*gizmos.Pledge		// cache of pledges 
+	cache		map[string]*gizmos.Pledge		// cache of pledges
 	ulcap_cache	map[string]int					// cache of user limit values (max value)
 	chkpt		*chkpt.Chkpt
 }
@@ -128,7 +133,7 @@ func (i *Inventory) failed_push( msg *ipc.Chmsg ) {
 }
 
 /*
-	Checks to see if any reservations expired in the recent past (seconds). Returns true if there were. 
+	Checks to see if any reservations expired in the recent past (seconds). Returns true if there were.
 */
 func (i *Inventory) any_concluded( past int64 ) ( bool ) {
 
@@ -143,7 +148,7 @@ func (i *Inventory) any_concluded( past int64 ) ( bool ) {
 
 /*
 	Checks to see if any reservations became active between (now - past) and the current time, or will become
-	active between now and now + future seconds. (Past and future are number of seconds on either side of 
+	active between now and now + future seconds. (Past and future are number of seconds on either side of
 	the current time to check and are NOT timestamps.)
 */
 func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
@@ -158,17 +163,17 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 }
 
 /*
-	Push table 9x flow-mods. The flowmods we toss into the 90 range of 
+	Push table 9x flow-mods. The flowmods we toss into the 90 range of
 	tables generally serve to mark metadata in a packet since metata
 	cannot be marked prior to a resub action (flaw in OVS if you ask me).
 
-	Marking metadata is needed so that when one of our f-mods match we can 
+	Marking metadata is needed so that when one of our f-mods match we can
 	resubmit into table 0 without triggering a loop, or a match of any
-	of our other rules. 
+	of our other rules.
 
 	Table is the table number (we assume 9x, but it could be anything)
 	Meta is a string supplying the value/mask that is used on the action (e.g. 0x02/0x02)
-	to set the 00000010 bit as an and operation. 
+	to set the 00000010 bit as an and operation.
 	Cookie is the cookie value used on the f-mod.
 */
 func table9x_fmods( rname *string, table int, meta string, cookie int ) {
@@ -185,22 +190,22 @@ func table9x_fmods( rname *string, table int, meta string, cookie int ) {
 }
 
 /*
-	Runs the list of reservations in the cache and pushes out any that are about to become active (in the 
-	next 15 seconds).  We push the reservation request to fq_manager which does the necessary formatting 
-	and communication with skoogi.  With the new method of managing queues per reservation on ingress/egress 
+	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
+	next 15 seconds).  We push the reservation request to fq_manager which does the necessary formatting
+	and communication with skoogi.  With the new method of managing queues per reservation on ingress/egress
 	hosts, we now send to fq_mgr:
 		h1, h2 -- hosts
 		expiry
 		switch/port/queue
 	
 	for each 'link' in the forward direction, and then we reverse the path and send requests to fq_mgr
-	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but 
+	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but
 	asycnh; we do not wait for responses to each message generated here.
 
 	Returns the number of reservations that were pushed.
 	TODO: we need to handle the special case where both h1 and h2 attach to the same switch.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npushed int ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -211,13 +216,13 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 	)
 
 	rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
-	set_90 := false
+	set_alt := false
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-				if ! set_90 {
-					table9x_fmods( &rname, 90, "0x02/0x02", 0xe5d )		// ensure there is a table 90 fmod
-					set_90 = true
+				if ! set_alt {
+					table9x_fmods( &rname, alt_table, "0x02/0x02", 0xe5d )		// ensure there is an alternate table fmod
+					set_alt = true
 				}
 
 				h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
@@ -235,14 +240,13 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 
 					timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
-					for i := range plist { 								// for each path in the list, send fmod requests for each endpoint and each intermediate link, both forwards and backwards
-						fm_match := &Fq_parms{							// match description
-						}
-						fm_action := &Fq_parms{}						// action description
+					for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
+						fm_match := &Fq_parms{ }						// match description; initially empty, values added based on specific case later
+						fm_action := &Fq_parms{ }						// action description
 						fmod := &Fq_req{ 								// flow-mod description; new for each path
 							Pri:	400,
 							Cookie:	0xdead,
-							Single_switch: false,
+							Single_switch: false,						// path involves multiple switches by default
 							Preserve_dscp: p.Get_dscp(),				// reservation supplied dscp value that we're to match and preserve
 							Action: fm_action,
 							Match:	fm_match,
@@ -266,10 +270,10 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						dup_str := "-D"													// external reference is the destination for forward component
 						fmod.Exttyp = &dup_str
 
-						fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split) 
+						fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
 						fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s h1=%s --> h2=%s ip1/2= %s/%s exp=%d", 
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s h1=%s --> h2=%s ip1/2= %s/%s exp=%d",
 							i, rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, expiry )
 
 						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
@@ -313,7 +317,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						fmod.Match.Ip2, _ = plist[i].Get_h1().Get_addresses()			// for egress and backwards intermediates, the dest is h1, so reverse them
 						fmod.Match.Ip1, _ = plist[i].Get_h2().Get_addresses()
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s dir=%s extip=%s exp=%d", 
+						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s dir=%s extip=%s exp=%d",
 							i, rev_rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Exttyp, *fmod.Extip, expiry )
 
 						if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
@@ -340,8 +344,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						}
 					}
 
-					p.Set_pushed()				// safe to mark the pledge as having been pushed. 
-				} 
+					p.Set_pushed()				// safe to mark the pledge as having been pushed.
+				}
 			} else {
 				pend_count++
 			}
@@ -376,7 +380,7 @@ func (i *Inventory) pause_off( ) {
 }
 
 /*
-	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.  
+	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file. 
 	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
 	seconds).
 */
@@ -402,7 +406,7 @@ func (i *Inventory) write_chkpt( ) {
 				delete( i.cache, key )
 			}
 		}
-	} 
+	}
 
 	ckpt_name, err := i.chkpt.Close( )
 	if err != nil {
@@ -413,9 +417,9 @@ func (i *Inventory) write_chkpt( ) {
 }
 
 /*
-	Opens the filename passed in and reads the reservation data from it. The assumption is that records in 
-	the file were saved via the write_chkpt() function and are json pledges.  We will drop any that 
-	expired while 'sitting' in the file. 
+	Opens the filename passed in and reads the reservation data from it. The assumption is that records in
+	the file were saved via the write_chkpt() function and are json pledges.  We will drop any that
+	expired while 'sitting' in the file.
 */
 func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	var (
@@ -480,7 +484,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 }
 
 /*
-	Given a host name, return all pledges that involve that host as a list. 
+	Given a host name, return all pledges that involve that host as a list.
 	Currently no error is detected and the list may be nill if there are no pledges.
 */
 func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error ) {
@@ -503,7 +507,7 @@ func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error )
 
 /*
 	Set the user link capacity and forward it on to the network manager. We expect this
-	to be a request from the far side (user/admin) or read from the chkpt file so 
+	to be a request from the far side (user/admin) or read from the chkpt file so
 	the value is passed as a string (which is also what network wants too.
 */
 func (inv *Inventory) add_ulcap( name *string, sval *string ) {
@@ -537,7 +541,7 @@ func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 */
 func Mk_inventory( ) (inv *Inventory) {
 
-	inv = &Inventory { } 
+	inv = &Inventory { }
 
 	inv.cache = make( map[string]*gizmos.Pledge, 2048 )		// initial size is not a limit
 	inv.ulcap_cache = make( map[string]int, 64 )
@@ -564,7 +568,7 @@ func (inv *Inventory) Add_res( p *gizmos.Pledge ) (state error) {
 
 /*
 	Return the reservation that matches the name passed in provided that the cookie supplied
-	matches the cookie on the reservation as well.  The cookie may be either the cookie that 
+	matches the cookie on the reservation as well.  The cookie may be either the cookie that
 	the user supplied when the reservation was created, or may be the 'super cookie' admin
 	'root' as you will, which allows access to all reservations.
 */
@@ -589,16 +593,16 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 }
 
 /*
-	Looks for the named reservation and deletes it if found. The cookie must be either the 
+	Looks for the named reservation and deletes it if found. The cookie must be either the
 	supper cookie, or the cookie that the user supplied when the reservation was created.
-	Deletion is affected by reetting the expiry time on the pledge to now + a few seconds. 
+	Deletion is affected by reetting the expiry time on the pledge to now + a few seconds.
 	This will cause a new set of flow-mods to be sent out with an expiry time that will
-	take them out post haste and without the need to send "delete" flow-mods out. 
+	take them out post haste and without the need to send "delete" flow-mods out.
 
 	This function sends a request to the network manager to delete the related queues. This
-	must be done here so as to prevent any issues with the loosely coupled management of 
-	reservation and queue settings.  It is VERY IMPORTANT to delete the reservation from 
-	the network perspective BEFORE the expiry time is reset.  If it is reset first then 
+	must be done here so as to prevent any issues with the loosely coupled management of
+	reservation and queue settings.  It is VERY IMPORTANT to delete the reservation from
+	the network perspective BEFORE the expiry time is reset.  If it is reset first then
 	the network splits timeslices based on the new expiry and queues end up dangling.
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
@@ -662,17 +666,17 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 /*
 	Pulls the reservation from the inventory. Similar to delete, but not quite the same.
 	This will clone the pledge. The clone is expired and left in the inventory to force
-	a reset of flowmods. The network manager is sent a request to delete the queues 
+	a reset of flowmods. The network manager is sent a request to delete the queues
 	assocaited with the path and the path is removed from the original pledge. The orginal
-	pledge is returned so that it can be used to generate a new set of paths based on the 
-	hosts, expiry and bandwidth requirements of the initial reservation. 
+	pledge is returned so that it can be used to generate a new set of paths based on the
+	hosts, expiry and bandwidth requirements of the initial reservation.
 
 	Unlike the get/del functions, this is meant for internal support and does not
-	require a cookie. 
+	require a cookie.
 
-	It is important to delete the reservation from the network manager point of view 
+	It is important to delete the reservation from the network manager point of view
 	BEFORE the expiry is reset. If expiry is set first then the network manager will
-	cause queue timeslices to be split on that boundary leaving dangling queues. 
+	cause queue timeslices to be split on that boundary leaving dangling queues.
 */
 func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) {
 
@@ -711,7 +715,7 @@ rm_sheep.Baa( 1, "requesting delete" )
 //---- res-mgr main goroutine -------------------------------------------------------------------------------
 
 /*
-	Executes as a goroutine to drive the resevration manager portion of tegu. 
+	Executes as a goroutine to drive the resevration manager portion of tegu.
 */
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
@@ -721,6 +725,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		ckptd	string
 		last_qcheck	int64				// time that the last queue check was made to set window
 		queue_gen_type = REQ_GEN_EPQMAP
+		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -738,7 +743,12 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		}
 	}
 
-	cdp := cfg_data["resmgr"]["chkpt_dir"] 
+	p = cfg_data["default"]["alttable"]				// alt table for meta marking
+	if p != nil {
+		alt_table = clike.Atoi( *p )
+	}
+
+	cdp := cfg_data["resmgr"]["chkpt_dir"]
 	if cdp == nil {
 		ckptd = "/var/lib/tegu/resmgr"							// default directory and prefix
 	} else {
@@ -749,6 +759,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	if p != nil {
 		rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 	}
+
+	rm_sheep.Baa( 1, "ovs table number %d used for metadata marking", alt_table )
 
 	inv = Mk_inventory( )
 	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )
@@ -800,13 +812,13 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				rm_sheep.Baa( 1, "checkpoint file loaded" )
 	
 			case REQ_PAUSE:
-				msg.State = nil							// right now this cannot fail in ways we know about 
+				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
 				inv.pause_on()
 				rm_sheep.Baa( 1, "pausing..." )
 
 			case REQ_RESUME:
-				msg.State = nil							// right now this cannot fail in ways we know about 
+				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
 				inv.pause_off()
 
@@ -820,10 +832,10 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				last_qcheck = now
 
 			case REQ_PUSH:								// driven every few seconds to push new reservations
-				inv.push_reservations( my_chan )
+				inv.push_reservations( my_chan, alt_table )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
-				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) ) 
+				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
 
 			case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
 				data := msg.Req_data.( []*string )
@@ -842,7 +854,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				rm_sheep.Baa( 1, "received queue map from network manager" )
 				msg.Response_ch = nil											// immediately disable to prevent loop
 				fq_data := make( []interface{}, 1 )
-				fq_data[FQ_QLIST] = msg.Response_data 
+				fq_data[FQ_QLIST] = msg.Response_data
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 				
