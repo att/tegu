@@ -874,7 +874,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 	for {													// we'll break after we've looked at all of the connection points for h1 
 		if plidx >= len( path_list ) {
-			net_sheep.Baa( 0,  "CRI: find-path: internal error -- unable to find a path between hosts, loops in the graph? Edges exceeded number of total links.  [TGUNET006]" )
+			net_sheep.Baa( 0,  "CRI: find-path: internal error -- path size > num of links.  [TGUNET006]" )
 			return
 		}
 
