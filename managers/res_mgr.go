@@ -35,6 +35,7 @@
 						meta marking of reservation traffic).
 				28 Aug 2014 : Added message tags to crit/err/warn messages.
 				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
+				03 Sep 2014 : Correcte bug introduced with fq_req changes (ignored protocol and port)
 */
 
 package managers
@@ -241,16 +242,21 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 					timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
 					for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
-						fm_match := &Fq_parms{ }						// match description; initially empty, values added based on specific case later
-						fm_action := &Fq_parms{ }						// action description
-						fmod := &Fq_req{ 								// flow-mod description; new for each path
-							Pri:	400,
-							Cookie:	0xdead,
-							Single_switch: false,						// path involves multiple switches by default
-							Preserve_dscp: p.Get_dscp(),				// reservation supplied dscp value that we're to match and preserve
-							Action: fm_action,
-							Match:	fm_match,
-						}
+						fmod := Mk_fqreq( &rname )								// default flow mod request with empty match/actions
+						//fm_match := fmod.Match
+						//fmaction := fmod.Action
+
+						fmod.Pri =	400									// override the defaults
+						fmod.Cookie =	0xdead
+						fmod.Single_switch = false						// path involves multiple switches by default
+						fmod.Preserve_dscp = p.Get_dscp()				// reservation supplied dscp value that we're to match and preserve
+
+						//fmod := &Fq_req{ 								// flow-mod description; new for each path
+						//}
+						//fm_match := &Fq_parms{ }						// match description; initially empty, values added based on specific case later
+						//fm_action := &Fq_parms{ }						// action description
+						//fmod.Match =	fm_match
+						//fmod.Acton =	fm_action
 
 						if p.Is_paused( ) {
 							fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
@@ -258,8 +264,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 							fmod.Expiry = expiry
 						}
 						fmod.Id = &rname
-						fmod.Match.Tpsport= p1							// forward direction transport ports are h1==src h2==dest
-						fmod.Match.Tpdport= p2
+//Tpsport set was here
 
 						extip := plist[i].Get_extip()
 						if extip != nil {
@@ -267,80 +272,97 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 						} else {
 							fmod.Extip = &empty_str
 						}
-						dup_str := "-D"													// external reference is the destination for forward component
-						fmod.Exttyp = &dup_str
+//Extyp set was here
+						ext_dst_str := "-D"								// if an external address is involved we must set the direction (dest or src)
+						ext_src_str := "-S"
 
-						fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
-						fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
-
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s h1=%s --> h2=%s ip1/2= %s/%s exp=%d",
-							i, rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, expiry )
+	// IP1/2 set was here
 
 						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
 
-						// ---- push flow-mods in the h1->h2 direction -----------
-						if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
-																							// ep will be nil if both VMs are on the same switch
-							cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgrs queue
-							cfmod.Dir_in = true
-							cfmod.Espq = espq1
-							msg = ipc.Mk_chmsg()
-							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-						} else {
-							fmod.Single_switch = true
+						tptype_list := "none"
+						if p1 > 0 || p2 > 0 {					// if either port is specified, then we need to generate for both udp and tcp
+							tptype_list = "udp tcp"
 						}
+						tptype_toks := strings.Split( tptype_list, " " )
+		
+						for tidx := range( tptype_toks ) {
+							fmod.Tptype = &tptype_toks[tidx]
 
-						cfmod := fmod.Clone( )
-						cfmod.Espq = plist[i].Get_ilink_spq( &rname, timestamp )			// send fmod to ingress switch on first link out from h1
-						cfmod.Dir_in = false
-						msg = ipc.Mk_chmsg()
-						msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )				// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+							fmod.Match.Tpsport= p1							// forward direction transport ports are h1==src h2==dest
+							fmod.Match.Tpdport= p2
+							fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
+							fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
+							fmod.Exttyp = &ext_dst_str										// ext dest (if there) is in the dest direction first
 
-						ilist := plist[i].Get_forward_im_spq( timestamp )						// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
-						for ii := range ilist {
-							cfmod = fmod.Clone( )												// copy to pass which we'll alter a wee bit
-							cfmod.Espq = ilist[ii]
-							rm_sheep.Baa( 2, "send forward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
+							rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s type=%s h1=%s --> h2=%s ip1/2= %s/%s exp=%d",
+								i, rname, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, expiry )
+
+		
+							// ---- push flow-mods in the h1->h2 direction -----------
+							if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
+																								// ep will be nil if both VMs are on the same switch
+								cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgrs queue
+								cfmod.Dir_in = true
+								cfmod.Espq = espq1
+								msg = ipc.Mk_chmsg()
+								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+							} else {
+								fmod.Single_switch = true
+							}
+
+							cfmod := fmod.Clone( )
+							cfmod.Espq = plist[i].Get_ilink_spq( &rname, timestamp )				// send fmod to ingress switch on first link out from h1
+							cfmod.Dir_in = false
 							msg = ipc.Mk_chmsg()
-							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
-						}
+							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )					// queue work to send to skoogi (errors come back asynch, successes do not generate response)
 
-						// ---- push flow-mods in the h2->h1 direction -----------
-						rev_rname := "R" + rname				// the egress link has an R(name) queue name
-						fmod.Match.Tpsport = p2
-						fmod.Match.Tpdport = p1
+							ilist := plist[i].Get_forward_im_spq( timestamp )						// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
+							for ii := range ilist {
+								cfmod = fmod.Clone( )												// copy to pass which we'll alter a wee bit
+								cfmod.Espq = ilist[ii]
+								rm_sheep.Baa( 2, "send forward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
+								msg = ipc.Mk_chmsg()
+								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
+							}
 
-						dup_str = "-S"													// external reference is the destination for forward component
-						fmod.Exttyp = &dup_str
+							// ---- push flow-mods in the h2->h1 direction -----------
+							rev_rname := "R" + rname				// the egress link has an R(name) queue name
+							fmod.Match.Tpsport = p2
+							fmod.Match.Tpdport = p1
 
-						fmod.Match.Ip2, _ = plist[i].Get_h1().Get_addresses()			// for egress and backwards intermediates, the dest is h1, so reverse them
-						fmod.Match.Ip1, _ = plist[i].Get_h2().Get_addresses()
+							fmod.Exttyp = &ext_src_str										// ext dest (if there) is in the src direction now
 
-						rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s dir=%s extip=%s exp=%d",
-							i, rev_rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Exttyp, *fmod.Extip, expiry )
+							fmod.Match.Ip2, _ = plist[i].Get_h1().Get_addresses()			// for egress and backwards intermediates, the dest is h1, so reverse them
+							fmod.Match.Ip1, _ = plist[i].Get_h2().Get_addresses()
 
-						if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
-							fmod.Dir_in = true
-							fmod.Espq = espq0
-							cfmod = fmod.Clone( )									// copy to send
+							rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s dir=%s extip=%s exp=%d",
+								i, rev_rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Exttyp, *fmod.Extip, expiry )
+
+							if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
+								fmod.Dir_in = true
+								fmod.Espq = espq0
+								cfmod = fmod.Clone( )									// copy to send
+								msg = ipc.Mk_chmsg()
+								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+							}
+
+							fmod.Espq = plist[i].Get_elink_spq( &rev_rname, timestamp )				// send res to egress switch on first link towards h1
+							fmod.Dir_in = false
+							cfmod = fmod.Clone( )											// need a copy to send
 							msg = ipc.Mk_chmsg()
-							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-						}
+							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )		// queue work to send to skoogi
 
-						fmod.Espq = plist[i].Get_elink_spq( &rev_rname, timestamp )				// send res to egress switch on first link towards h1
-						fmod.Dir_in = false
-						cfmod = fmod.Clone( )											// need a copy to send
-						msg = ipc.Mk_chmsg()
-						msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )		// queue work to send to skoogi
+							ilist = plist[i].Get_backward_im_spq( timestamp )		// get list of intermediate switch/port/qnum data in backwards direction
+							for ii := range ilist {
+								fmod.Espq = ilist[ii]
+								cfmod = fmod.Clone( )												// must send a copy
+								rm_sheep.Baa( 2, "send backward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
+								msg = ipc.Mk_chmsg()
+								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in backwards direction
+							}
 
-						ilist = plist[i].Get_backward_im_spq( timestamp )		// get list of intermediate switch/port/qnum data in backwards direction
-						for ii := range ilist {
-							fmod.Espq = ilist[ii]
-							cfmod = fmod.Clone( )												// must send a copy
-							rm_sheep.Baa( 2, "send backward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
-							msg = ipc.Mk_chmsg()
-							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in backwards direction
 						}
 					}
 

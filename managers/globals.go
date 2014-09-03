@@ -15,6 +15,7 @@
 				07 Jul 2014 - Added support for reservation refresh.
 				21 Jul 2014 - Added support list ul caps.
 				27 Aug 2014 - Added Fq_req support.
+				03 Sep 2014 - Added transport type field to fq_req struct.
 */
 
 package managers
@@ -90,7 +91,7 @@ const (
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.0/18274"
+	version 	string = "v3.0/19034"
 
 								// defaults
 	DEF_ALT_TABLE	int = 90	// alternate table in OVS for metadata marking
@@ -178,6 +179,7 @@ type Fq_req struct {
 	Spq		int					// switch's port for queue
 	Extip	*string				// exterior IP address necessary for inter-tenant reservations
 	Exttyp	*string				// external IP type (either -D or -S)
+	Tptype	*string				// transport type (i.e. protocol: tcp, udp, etc)
 	Resub	*string				// list of tables (space sep numbers) to resubmit to
 	Preserve_dscp int			// dscp value that should be matched and preserved
 

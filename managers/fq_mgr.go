@@ -27,6 +27,7 @@
 				25 Aug 2014 - Major rewrite to send_fmod_agent; now uses the fq_req struct to make it more
 					generic and flexible.
 				27 Aug 2014 - Small fixes during testing. 
+				03 Sep 2014 : Correcte bug introduced with fq_req changes (ignored protocol and port)
 */
 
 package managers
@@ -241,6 +242,14 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 	}
 	if dmac != nil {
 		match_opts += " -d " + *dmac
+	}
+
+	if data.Match.Tpsport > 0 {
+		match_opts += fmt.Sprintf( " -p %s:%d", *data.Tptype, data.Match.Tpsport )
+	}
+
+	if data.Match.Tpdport > 0 {
+		match_opts += fmt.Sprintf( " -P %s:%d", *data.Tptype, data.Match.Tpdport )
 	}
 
 	if data.Extip != nil  &&   *data.Extip != "" {					// an external IP address must be matched in addition to gw mac
@@ -504,7 +513,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 							cdata.Swid = &swid
 						}
 
-						resub_list := fmt.Sprintf( "%d 0", alt_table )			// resub to table 90 to pick up meta character, then to table 0 to hit openstack junk
+						resub_list := fmt.Sprintf( "%d 0", alt_table )			// resub to alternate table to pick up meta mark, then to table 0 to hit openstack junk
 						cdata.Resub = &resub_list
 				
 						meta := "0x00/0x02"						// match-value/mask; match only when meta 0x2 is 0

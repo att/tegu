@@ -50,6 +50,8 @@
 				19 Aug 2014 : Bug fix (208) prevent duplicate tegu's from running on same host/port.
 				20 Aug 2014 : Bug fix (210) shift dscp values properly in the match part of a flowmod.
 				27 Aug 2014 : Fq-mgr changes to allow for metadata checking on flowmods.
+				30 Aug 2014 : Pick up bug fix made to ostack library.
+				03 Sep 2014 : Corrected bug in resmgr/fqmgr introduced with 27 Aug changes (transport type ignored).
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -79,7 +81,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/18274"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.0/19034"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
