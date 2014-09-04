@@ -134,7 +134,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 		for ip, mac := range n.ip2mac {				// add in regular VMs
 			vmid := n.ip2vmid[ip]
 			if vmid != nil {						// skip if we don't find a vmid
-				net_sheep.Baa( 2, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+				net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
 				hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
 				i++
 			}
@@ -147,7 +147,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find gw mac in mac2phost list: mac=%s  ip=%s  [TGUNET000]", mac, *ip )
 					} else {
 						if ip != nil {
-							net_sheep.Baa( 2, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
+							net_sheep.Baa( 3, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
 							hlist[i] = gizmos.FL_mk_host( *ip, "", mac, *(n.mac2phost[mac]), -128 ) 		// use phys host collected from OVS as switch
 							i++
 						} else {
@@ -236,9 +236,9 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 		if len( k ) < 36 || strings.Index( k, "/" ) > 0  || i2v[*v] == nil {		// IDs seem to be 36, but we'll save something regardless and miss if user went wild with long name and we hit it second
 			dup_str := k							// 'dup' the string so we don't reference the string associated with the other map
 			i2v[*v] = &dup_str
-			net_sheep.Baa( 2, "build_ip2vm %s --> %s %d", k, *v, *i2v[*v], len( k ) )
+			net_sheep.Baa( 3, "build_ip2vm %s --> %s %d", k, *v, *i2v[*v], len( k ) )
 		} else {
-			net_sheep.Baa( 2, "build_ip2vm skipped:  cur value: %s --> %s %d", k, *v, *i2v[*v], len( k ) )
+			net_sheep.Baa( 3, "build_ip2vm skipped:  cur value: %s --> %s %d", k, *v, *i2v[*v], len( k ) )
 		}
 	}
 
@@ -296,6 +296,7 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	qmap = make( []string, len( seen ) )
 	i := 0
 	for data := range seen {
+		net_sheep.Baa( 2, "gen_queue_map[%d] = %s", i, data )
 		qmap[i] = data
 		i++
 	}
@@ -566,12 +567,12 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
 				if ssw != nil {							// it should always be known, but no chances
 					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
-					net_sheep.Baa( 3, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
+					net_sheep.Baa( 4, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
 				}
 			}
 
 			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 2, "build: saving host ip4=%s as mac: %s", ip4, hlist[i].Mac[0] )
+			net_sheep.Baa( 3, "build: saving host ip4=%s as mac: %s", ip4, hlist[i].Mac[0] )
 			if ip4 != "" {
 				n.hosts[ip4] = h
 			}
