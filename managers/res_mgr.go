@@ -204,7 +204,6 @@ func table9x_fmods( rname *string, table int, meta string, cookie int ) {
 	asycnh; we do not wait for responses to each message generated here.
 
 	Returns the number of reservations that were pushed.
-	TODO: we need to handle the special case where both h1 and h2 attach to the same switch.
 */
 func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npushed int ) {
 	var (
@@ -242,21 +241,12 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 					timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
 					for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
-						fmod := Mk_fqreq( &rname )								// default flow mod request with empty match/actions
-						//fm_match := fmod.Match
-						//fmaction := fmod.Action
+						fmod := Mk_fqreq( &rname )						// default flow mod request with empty match/actions
 
 						fmod.Pri =	400									// override the defaults
 						fmod.Cookie =	0xdead
 						fmod.Single_switch = false						// path involves multiple switches by default
 						fmod.Preserve_dscp = p.Get_dscp()				// reservation supplied dscp value that we're to match and preserve
-
-						//fmod := &Fq_req{ 								// flow-mod description; new for each path
-						//}
-						//fm_match := &Fq_parms{ }						// match description; initially empty, values added based on specific case later
-						//fm_action := &Fq_parms{ }						// action description
-						//fmod.Match =	fm_match
-						//fmod.Acton =	fm_action
 
 						if p.Is_paused( ) {
 							fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
@@ -264,33 +254,30 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 							fmod.Expiry = expiry
 						}
 						fmod.Id = &rname
-//Tpsport set was here
 
-						extip := plist[i].Get_extip()
+						extip := plist[i].Get_extip()					// if an external IP address is necessary on the fmod get it
 						if extip != nil {
 							fmod.Extip = extip
 						} else {
 							fmod.Extip = &empty_str
 						}
-//Extyp set was here
+
 						ext_dst_str := "-D"								// if an external address is involved we must set the direction (dest or src)
 						ext_src_str := "-S"
 
-	// IP1/2 set was here
-
 						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
-
-						tptype_list := "none"
-						if p1 > 0 || p2 > 0 {					// if either port is specified, then we need to generate for both udp and tcp
-							tptype_list = "udp tcp"
+														//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
+						tptype_list := "none"							// default to no specific protocol 
+						if p1 > 0 || p2 > 0 {							// if either port is specified, then we need to generate for both udp and tcp
+							tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
 						}
 						tptype_toks := strings.Split( tptype_list, " " )
 		
 						for tidx := range( tptype_toks ) {
 							fmod.Tptype = &tptype_toks[tidx]
 
-							fmod.Match.Tpsport= p1							// forward direction transport ports are h1==src h2==dest
+							fmod.Match.Tpsport= p1											// forward direction transport ports are h1==src h2==dest
 							fmod.Match.Tpdport= p2
 							fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
 							fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
@@ -328,7 +315,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 							}
 
 							// ---- push flow-mods in the h2->h1 direction -----------
-							rev_rname := "R" + rname				// the egress link has an R(name) queue name
+							rev_rname := "R" + rname										// the egress link has an R(name) queue name
 							fmod.Match.Tpsport = p2
 							fmod.Match.Tpdport = p1
 
