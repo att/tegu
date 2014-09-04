@@ -253,8 +253,6 @@ func (p *Path) Inc_utilisation( commence, conclude, delta int64, qid *string, us
 	return
 }
 
-/*
-*/
 func (p *Path) Inc_mlag( commence int64, conclude int64, delta int64, usr *Fence, mlags map[string]*Mlag ) {
 	for i := 0; i < p.lidx; i++ {
 		m := p.links[i].Get_mlag() 
