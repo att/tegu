@@ -52,6 +52,7 @@
 				27 Aug 2014 : Fq-mgr changes to allow for metadata checking on flowmods.
 				30 Aug 2014 : Pick up bug fix made to ostack library.
 				03 Sep 2014 : Corrected bug in resmgr/fqmgr introduced with 27 Aug changes (transport type ignored).
+				05 Sep 2014 : Tweak to link add late binding port to pick up the lbp when port < 0 rather than 0.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -81,9 +82,9 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/19034"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.0/19054"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
-		api_port	*string			// command line option vars must be pointers
+		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
 		needs_help 	*bool
 		fl_host		*string
@@ -136,7 +137,7 @@ func main() {
 	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
 	osif_ch = make( chan *ipc.Chmsg )
 
-	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
+	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err ); 
 		os.Exit( 1 )
