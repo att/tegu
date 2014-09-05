@@ -16,6 +16,7 @@
 				21 Jul 2014 - Added support list ul caps.
 				27 Aug 2014 - Added Fq_req support.
 				03 Sep 2014 - Added transport type field to fq_req struct.
+				05 Sep 2014 - Allow version, used in ping, to be set by main.
 */
 
 package managers
@@ -91,7 +92,6 @@ const (
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.0/19034"
 
 								// defaults
 	DEF_ALT_TABLE	int = 90	// alternate table in OVS for metadata marking
@@ -104,6 +104,8 @@ const (
 )
 
 var (
+	version 	string = "version unknown"
+
 	shell_cmd	string = "/bin/ksh"						// preferred shell, cfg can override in default section
 	empty_str	string = ""								// go prevents &"", so these make generating a pointer to default strings easier
 	default_sdn	string = "localhost:8080"				// default controller (skoogi)
@@ -202,7 +204,7 @@ type Fq_req struct {
 	CAUTION:  this is not implemented as an init() function as we must pass information from the 
 			main to here.  
 */
-func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
+func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
 
 	err = nil
 
@@ -215,6 +217,10 @@ func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, 
 	fq_ch = fqch
 	am_ch = amch
 	
+
+	if ver != nil {
+		version = *ver;
+	}
 
 	tegu_sheep = bleater.Mk_bleater( 1, os.Stderr )		// the main (parent) bleater used by libraries and as master 'volume' control
 	tegu_sheep.Set_prefix( "tegu" )
