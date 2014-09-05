@@ -37,6 +37,7 @@
 					the utilisation of the link. 
 				28 Jul 2014 - Added mlag support
 				18 Aug 2014 - Has_capacity now passes back error message.
+				05 Sep 2014 - Pick up late binding port info if port is <0 rather than 0.
 */
 
 package gizmos
@@ -413,7 +414,7 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 		return
 	}
 		
-	if l.port1 == 0 {
+	if l.port1 <= 0 && l.lbport != nil {
 		swdata = fmt.Sprintf( "%s/%s", *l.sw1, *l.lbport )			// if port is 0 then we'll return the latebinding port value
 	} else {
 		swdata = fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
