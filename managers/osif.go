@@ -174,11 +174,11 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
 
 osif_sheep.Baa( 1, "validating admin token" )
-	err := admin.Token_validation( token, user ) 		// ensure token is good and was issued for user
+	exp, err := admin.Token_validation( token, user ) 		// ensure token is good and was issued for user
 	if err == nil {
-osif_sheep.Baa( 1, "admin token validated successfully: %s", *token )
+		osif_sheep.Baa( 1, "admin token validated successfully: %s expires: ", *token, exp )
 	} else {
-osif_sheep.Baa( 1, "admin token invalid: %s", err )
+		osif_sheep.Baa( 1, "admin token invalid: %s", err )
 }
 
 	return err
