@@ -95,7 +95,6 @@ const (
 const (
 	ONE_GIG		int64 = 1024 * 1024 * 1024
 
-	version 	string = "v3.1/18224"			// version bumped to 3.1 for steering (merged 7/18/2014)
 )
 
 
@@ -163,14 +162,18 @@ var (
 	/*
 		http manager needs globals because the http callback doesn't allow private data to be passed
 	*/
-	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
+	priv_auth *string;						// type of authorisation needed for privledged commands (pause, resume, etc.)
+
+	version 	string = "v3.1/?"			// version for bleats, should be supplied by tegu.go on init call
 )
 
 
 //--------------------------------------------------------------------------------------------------------------------------
 
 /*
-	Paramters that may need to be passed to fq-mgr for either matching or setting in the action
+	Paramters that may need to be passed to fq-mgr that can be used to match, or change values. If
+	a value can only be used to match, then it is defined in the base Fq_req structure so as not
+	to imply that it can be changed in an action and cause confusion.
 */
 type Fq_parms struct {
 	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
@@ -217,7 +220,7 @@ type Fq_req struct {
 	CAUTION:  this is not implemented as an init() function as we must pass information from the 
 			main to here.  
 */
-func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
+func Initialise( cfg_fname *string, ver string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
 
 	err = nil
 
@@ -235,6 +238,8 @@ func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, 
 	tegu_sheep.Set_prefix( "tegu" )
 
 	pid = os.Getpid()							// used to keep reservation names unique across invocations
+
+	version = ver
 
 	tklr = ipc.Mk_tickler( 30 )				// shouldn't need more than 30 different tickle spots
 	tklr.Add_spot( 2, rmgr_ch, REQ_NOOP, nil, 1 )	// a quick burst tickle to prevent a long block if the first goroutine to schedule a tickle schedules a long wait

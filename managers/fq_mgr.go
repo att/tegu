@@ -23,7 +23,7 @@
 				12 May 2014 (sd) - Reverts dscp values to 'original' at the egress switch
 				19 May 2014 (sd) - Changes to allow floating ip to be supplied as a part of the flow mod.
 				07 Jul 2014 - Added support for reservation refresh.
-
+				08 Sep 2014 (sd) : Fixed bugs with tcp oriented proto steering.
 */
 
 package managers
@@ -202,7 +202,7 @@ func send_fmod_agent( act_type string, ip1 string, ip2 string, extip string, tp_
 	
 			qjson := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d aT=%d tp_ports=%d/%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp, wdscp, tp_sport, tp_dport, sw )
+			fq_sheep.Baa( 1, "flow-mod: pri=400 tout=%d src=%s dest=%s extip=%s host=%s q=%d mT=%d aT=%d tp_ports=%d/%d sw=%s", timeout, *m1, *m2, extip, host, qnum, mdscp<<2, wdscp<<2, tp_sport, tp_dport, sw )
 
 			qjson += fmt.Sprintf( `"-h %s -t %d -p 400 --match -T %d -s %s -d %s `, host, timeout, mdscp, *m1, *m2 ) 		// MUST always match a dscp value to prevent loops on resubmit
 			if extip != "" {
@@ -339,9 +339,13 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		match_opts += " -d " + *dmac
 	}
 
-	if data.Protocol != nil  && *data.Protocol != "" { 					// protocol to be used (tcp:port or udp:port port can be 0)
-		match_opts += fmt.Sprintf( " -p %s", *data.Protocol )
-	}
+	if data.Match.Tpsport > 0 {
+        match_opts += fmt.Sprintf( " -p %s:%d", *data.Protocol, data.Match.Tpsport )
+    }
+
+    if data.Match.Tpdport > 0 {
+        match_opts += fmt.Sprintf( " -P %s:%d", *data.Protocol, data.Match.Tpdport )
+    }
 
 	action_opts := ""
 

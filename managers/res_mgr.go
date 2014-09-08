@@ -28,6 +28,7 @@
 						rather than depending on the http manager to do that -- possible timing issues if we wait.
 						Added support for reservation refresh.
 				29 Jul 2014 : Change set user link cap such that 0 is a valid value, and -1 will delete. 
+				08 Sep 2014 (sd) : Fixed bugs with tcp oriented proto steering.
 */
 
 package managers
@@ -336,9 +337,9 @@ func push_bw_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 }
 
 /*
-	Generate the flow mod that is placed into table 10 for steering. 
+	Generate the flow mod that is placed into table 90-something for steering. 
 */
-func table10_fmods( rname *string ) {
+func table9x_fmods( rname *string ) {
 		fq_match := &Fq_parms{
 			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 			Meta:	&empty_str,
@@ -354,7 +355,7 @@ func table10_fmods( rname *string ) {
 			Expiry:	0,
 			Match: 	fq_match,
 			Action: fq_action,
-			Table:	10,
+			Table:	90,
 		}
 
 		msg := ipc.Mk_chmsg()
@@ -374,7 +375,7 @@ func table10_fmods( rname *string ) {
 
 	TODO: add transport layer port support
 */
-func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string, proto *string ) {
+func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string, proto *string, forward bool ) {
 	var (
 		mb	*gizmos.Mbox							// current middle box being worked with (must span various blocks)
 	)
@@ -393,7 +394,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 	}
 
 	for i :=  nmb -1; i >= 0;  i-- {					// backward direction ep2->ep1
-		resub := "10 0"									// we resubmit to table 10 to set our meta data and then resub to 0 to catch openstack rules
+		resub := "90 0"									// we resubmit to table 10 to set our meta data and then resub to 0 to catch openstack rules
 
 		if i == nmb - 1 {								// for last mb we need a rule that causes steering to be skipped based on mb mac
 			mb = mblist[i]
@@ -401,10 +402,12 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 				Meta:	&mstr,
 				Ip1:  	ep1,
+				Tpdport: -1,
+				Tpsport: -1,
 			}
 
 			fq_action := &Fq_parms{
-				Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
+				Resub: &resub,							// resubmit to table 90 to set meta info, then to 0 to get tunnel matches
 			}
 
 			fq_data := &Fq_req {							// generate data with just what needs to be there
@@ -413,9 +416,21 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Expiry:	expiry,
 				Match:	fq_match,
 				Action:	fq_action,
-				Protocol: proto,
 			}
-			if ep1 != nil {								// if source is a specific address, then we need only one 300 rule
+
+			if proto != nil {								// set the protocol match port dest in forward direction, src in reverse
+				toks := strings.Split( *proto, ":" );
+				fq_data.Protocol = &toks[0]
+				if forward {
+rm_sheep.Baa( 1, ">>>> forward: %s", toks[1] );
+					fq_data.Match.Tpdport = clike.Atoi( toks[1] )
+				} else {
+rm_sheep.Baa( 1, ">>>> backward: %s", toks[1] );
+					fq_data.Match.Tpsport = clike.Atoi( toks[1] )
+				}
+			}
+
+			if ep1 != nil {									// if source is a specific address, then we need only one 300 rule
 				fq_data.Match.Ip1 = nil												// there is no source to match at this point
 				fq_data.Match.Smac = nil
 				fq_data.Match.Ip2 = ep2
@@ -450,6 +465,18 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 		}
 		fq_data.Match.Ip1 = ep1
 		fq_data.Match.Ip2 = ep2
+
+		if proto != nil {								// set the protocol match port dest in forward direction, src in reverse
+			toks := strings.Split( *proto, ":" );
+			fq_data.Protocol = &toks[0]
+			if forward {
+rm_sheep.Baa( 1, "2>>>> forward: %s", toks[1] );
+				fq_data.Match.Tpdport = clike.Atoi( toks[1] )
+			} else {
+rm_sheep.Baa( 1, "2>>>> backward: %s", toks[1] );
+				fq_data.Match.Tpsport = clike.Atoi( toks[1] )
+			}
+		}
 	
 		if i == 0 {									// push the ingress rule (possibly to all switches)
 			fq_data.Pri = 100
@@ -496,20 +523,20 @@ func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 	ep1 = name2ip( ep1 )										// we work only with IP addresses; sets to nil if "" (L*)
 	ep2 = name2ip( ep2 )
 
-	table10_fmods( &rname )
+	table9x_fmods( &rname )
 
 	nmb := p.Get_mbox_count()
 	mblist := make( []*gizmos.Mbox, nmb ) 
 	for i := range mblist {
 		mblist[i] = p.Get_mbox( i )
 	}
-	steer_fmods( ep1, ep2, mblist, conclude - now, &rname, p.Get_proto() )			// set forward fmods
+	steer_fmods( ep1, ep2, mblist, conclude - now, &rname, p.Get_proto(), true )			// set forward fmods
 
 	nmb--
 	for i := range mblist {											// build middlebox list in reverse
 		mblist[nmb-i] = p.Get_mbox( i )
 	}
-	steer_fmods( ep2, ep1, mblist, conclude - now, &rname, p.Get_proto() )			// set backward fmods
+	steer_fmods( ep2, ep1, mblist, conclude - now, &rname, p.Get_proto(), false )			// set backward fmods
 
 	p.Set_pushed()
 }
