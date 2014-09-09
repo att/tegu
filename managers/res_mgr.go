@@ -422,10 +422,8 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				toks := strings.Split( *proto, ":" );
 				fq_data.Protocol = &toks[0]
 				if forward {
-rm_sheep.Baa( 1, ">>>> forward: %s", toks[1] );
 					fq_data.Match.Tpdport = clike.Atoi( toks[1] )
 				} else {
-rm_sheep.Baa( 1, ">>>> backward: %s", toks[1] );
 					fq_data.Match.Tpsport = clike.Atoi( toks[1] )
 				}
 			}
@@ -470,10 +468,8 @@ rm_sheep.Baa( 1, ">>>> backward: %s", toks[1] );
 			toks := strings.Split( *proto, ":" );
 			fq_data.Protocol = &toks[0]
 			if forward {
-rm_sheep.Baa( 1, "2>>>> forward: %s", toks[1] );
 				fq_data.Match.Tpdport = clike.Atoi( toks[1] )
 			} else {
-rm_sheep.Baa( 1, "2>>>> backward: %s", toks[1] );
 				fq_data.Match.Tpsport = clike.Atoi( toks[1] )
 			}
 		}

@@ -24,6 +24,7 @@
 				19 May 2014 (sd) - Changes to allow floating ip to be supplied as a part of the flow mod.
 				07 Jul 2014 - Added support for reservation refresh.
 				08 Sep 2014 (sd) : Fixed bugs with tcp oriented proto steering.
+				09 Sep 2014 (sd) : corrected buglette that was preventing udp:0 or tcp:0 from working.
 */
 
 package managers
@@ -339,11 +340,11 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		match_opts += " -d " + *dmac
 	}
 
-	if data.Match.Tpsport > 0 {
+	if data.Match.Tpsport >= 0 {						// we allow 0 as that means match all of this protocol
         match_opts += fmt.Sprintf( " -p %s:%d", *data.Protocol, data.Match.Tpsport )
     }
 
-    if data.Match.Tpdport > 0 {
+    if data.Match.Tpdport >= 0 {
         match_opts += fmt.Sprintf( " -P %s:%d", *data.Protocol, data.Match.Tpdport )
     }
 
