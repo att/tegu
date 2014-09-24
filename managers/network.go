@@ -233,12 +233,12 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 	i2v = make( map[string]*string )
 	
 	for k, v := range n.vm2ip {
-		if len( k ) < 36 || strings.Index( k, "/" ) > 0  || i2v[*v] == nil {		// IDs seem to be 36, but we'll save something regardless and miss if user went wild with long name and we hit it second
+		if len( k ) != 36 || strings.Index( k, "." ) > 0  || i2v[*v] == nil {		// uuids are 36, so if it's not it's in, or if it has a dot as IPv4 addrs do, or if we have nothing yet
 			dup_str := k							// 'dup' the string so we don't reference the string associated with the other map
 			i2v[*v] = &dup_str
-			net_sheep.Baa( 3, "build_ip2vm %s --> %s %d", k, *v, *i2v[*v], len( k ) )
+			net_sheep.Baa( 3, "build_ip2vm [%s] --> %s", *v, *i2v[*v] )
 		} else {
-			net_sheep.Baa( 3, "build_ip2vm skipped:  cur value: %s --> %s %d", k, *v, *i2v[*v], len( k ) )
+			net_sheep.Baa( 3, "build_ip2vm skipped index on: %s;  seems not to be IP addr len=%d", k, len( k ) )
 		}
 	}
 
