@@ -201,11 +201,13 @@ func table9x_fmods( rname *string, table int, meta string, cookie int ) {
 	
 	for each 'link' in the forward direction, and then we reverse the path and send requests to fq_mgr
 	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but
-	asycnh; we do not wait for responses to each message generated here.
+	asycnh; we do not wait for responses to each message generated here. If set_vlan is true then
+	we will send the src mac address on the flow-mod at ingress so that the vlan is properly set
+	(suports br-rl in a GRE environment).
 
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool ) ( npushed int ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -221,7 +223,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 		if p != nil  &&  ! p.Is_pushed() {
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 				if ! set_alt {
-					table9x_fmods( &rname, alt_table, "0x02/0x02", 0xe5d )		// ensure there is an alternate table fmod
+					table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
+					table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
 					set_alt = true
 				}
 
@@ -290,7 +293,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 							// ---- push flow-mods in the h1->h2 direction -----------
 							if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
 																								// ep will be nil if both VMs are on the same switch
-								cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgrs queue
+								cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgr queue
 								cfmod.Dir_in = true
 								cfmod.Espq = espq1
 								msg = ipc.Mk_chmsg()
@@ -302,6 +305,9 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 							cfmod := fmod.Clone( )
 							cfmod.Espq = plist[i].Get_ilink_spq( &rname, timestamp )				// send fmod to ingress switch on first link out from h1
 							cfmod.Dir_in = false
+							if set_vlan {
+								cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
+							}
 							msg = ipc.Mk_chmsg()
 							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )					// queue work to send to skoogi (errors come back asynch, successes do not generate response)
 
@@ -327,17 +333,20 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int ) ( npu
 							rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s dir=%s extip=%s exp=%d",
 								i, rev_rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Exttyp, *fmod.Extip, expiry )
 
-							if espq0 != nil {											// data flowing into h1 from h2 over the h1-switch connection
+							if espq0 != nil {													// data flowing into h1 from h2 over the h1-switch connection
 								fmod.Dir_in = true
 								fmod.Espq = espq0
-								cfmod = fmod.Clone( )									// copy to send
+								cfmod = fmod.Clone( )											// a copy to send
 								msg = ipc.Mk_chmsg()
 								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
 							}
 
 							fmod.Espq = plist[i].Get_elink_spq( &rev_rname, timestamp )				// send res to egress switch on first link towards h1
 							fmod.Dir_in = false
-							cfmod = fmod.Clone( )											// need a copy to send
+							cfmod = fmod.Clone( )													// need a copy to send
+							if set_vlan {
+								cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
+							}
 							msg = ipc.Mk_chmsg()
 							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )		// queue work to send to skoogi
 
@@ -695,14 +704,12 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 		rm_sheep.Baa( 2, "resgmgr: yanked reservation: %s", p.To_str() )
 		cp := p.Clone( *name + ".yank" )				// clone but DO NOT set conclude time until after network delete!
 
-rm_sheep.Baa( 1, "cloned reservation: %s",  *cp.Get_id() )
 		inv.cache[*name + ".yank"] = cp					// insert the cloned pledge into the inventory
 
 		inv.cache[*name] = nil							// yank original from the list
 		delete( inv.cache, *name )
 		p.Set_path_list( nil )							// no path list for this pledge 	
 
-rm_sheep.Baa( 1, "requesting delete" )
 		ch := make( chan *ipc.Chmsg )	
 		defer close( ch )									// close it on return
 		req := ipc.Mk_chmsg( )
@@ -729,6 +736,7 @@ rm_sheep.Baa( 1, "requesting delete" )
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 	var (
+		set_vlan	bool = true			// set the vlan tag on forward ingress flow mods
 		inv	*Inventory
 		msg	*ipc.Chmsg
 		ckptd	string
@@ -757,16 +765,23 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		alt_table = clike.Atoi( *p )
 	}
 
-	cdp := cfg_data["resmgr"]["chkpt_dir"]
-	if cdp == nil {
-		ckptd = "/var/lib/tegu/resmgr"							// default directory and prefix
-	} else {
-		ckptd = *cdp + "/resmgr"							// add prefix to directory in config
-	}
+	if cfg_data["resmgr"] != nil {
+		cdp := cfg_data["resmgr"]["chkpt_dir"]
+		if cdp == nil {
+			ckptd = "/var/lib/tegu/resmgr"							// default directory and prefix
+		} else {
+			ckptd = *cdp + "/resmgr"							// add prefix to directory in config
+		}
 
-	p = cfg_data["resmgr"]["verbose"]
-	if p != nil {
-		rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+		p = cfg_data["resmgr"]["verbose"]
+		if p != nil {
+			rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+		}
+
+		p = cfg_data["resmgr"]["set_vlan"]
+		if p != nil {
+			set_vlan = *p == "true"
+		}
 	}
 
 	rm_sheep.Baa( 1, "ovs table number %d used for metadata marking", alt_table )
@@ -841,7 +856,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				last_qcheck = now
 
 			case REQ_PUSH:								// driven every few seconds to push new reservations
-				inv.push_reservations( my_chan, alt_table )
+				inv.push_reservations( my_chan, alt_table, set_vlan )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )

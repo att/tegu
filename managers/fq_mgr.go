@@ -27,7 +27,9 @@
 				25 Aug 2014 - Major rewrite to send_fmod_agent; now uses the fq_req struct to make it more
 					generic and flexible.
 				27 Aug 2014 - Small fixes during testing. 
-				03 Sep 2014 : Correcte bug introduced with fq_req changes (ignored protocol and port)
+				03 Sep 2014 - Correcte bug introduced with fq_req changes (ignored protocol and port)
+				23 Sep 2014 - Added suport for multiple tables in order to keep local traffic off of the rate limit bridge.
+				24 Sep 2014 - Added vlan_id support.
 */
 
 package managers
@@ -270,6 +272,14 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		action_opts += " -s " + *data.Action.Smac
 	}
 
+	if data.Action.Vlan_id != nil {									// can be either a mac address (resolved by agent) or a real vlan
+		if strings.Index( *data.Action.Vlan_id, "." ) > 0 {			// has dot -- assume it's an IP address with  leading project/
+			action_opts += " -v " + *ip2mac[*data.Action.Vlan_id]	// assume its a [project/]IP rather than a mac
+		} else {
+			action_opts += " -v " + *data.Action.Vlan_id			// else it's a mac or value and can be sent as is
+		}
+	}
+
 	if data.Nxt_mac != nil {								// ??? is this really needed; steering should just set the dest in action
 		action_opts += " -d " + *data.Nxt_mac				// change the dest for steering if next hop supplied
 	}
@@ -419,7 +429,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			send_all = true
 		}
 	}
-	if p := cfg_data["default"]["alttable"]; p != nil {
+	if p := cfg_data["default"]["alttable"]; p != nil {			// this is the base; we use alt_table to alt_table + (n-1) when we need more than 1 table
 		alt_table = clike.Atoi( *p )
 	} 
 	
@@ -513,15 +523,20 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 							cdata.Swid = &swid
 						}
 
-						resub_list := fmt.Sprintf( "%d 0", alt_table )			// resub to alternate table to pick up meta mark, then to table 0 to hit openstack junk
+						resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
+						if cdata.Single_switch {
+							resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
+						} else {
+							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for traffic going through the rate limiting bridge
+						}
 						cdata.Resub = &resub_list
 				
-						meta := "0x00/0x02"						// match-value/mask; match only when meta 0x2 is 0
+						meta := "0x00/0x07"						// match-value/mask; match only when meta neither of our two bits, nor the agent bit (0x04) are set
 						cdata.Match.Meta = &meta
 
 						if fdata.Dir_in  {						// inbound to this switch we need to revert dscp from our settings to the 'origianal' settings
 							if cdata.Single_switch {
-								cdata.Match.Dscp =  -1													// no dscp adjustment when it is a single switch
+								cdata.Match.Dscp =  -1								// no dscp adjustment when it is a single switch
 								send_gfmod_agent( cdata,  ip2mac, host_list )
 							} else {
 								cdata.Match.Dscp = dscp								// our value used to keep priority as it wanders through the net

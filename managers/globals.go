@@ -164,6 +164,7 @@ type Fq_parms struct {
 	Dmac	*string				// dest mac
 	Dscp	int					// dscp mask to match if non-zero
 	Meta	*string				// meta 
+	Vlan_id	*string				// probably a mac address for late binding, but could be a number
 }
 
 /*

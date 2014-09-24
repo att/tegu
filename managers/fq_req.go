@@ -6,7 +6,7 @@
 	Date:		22 August 2014
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		24 Sep 2014 : Added support for vlan id setting.
 */
 
 package managers

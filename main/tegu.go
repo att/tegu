@@ -53,6 +53,7 @@
 				30 Aug 2014 : Pick up bug fix made to ostack library.
 				03 Sep 2014 : Corrected bug in resmgr/fqmgr introduced with 27 Aug changes (transport type ignored).
 				05 Sep 2014 : Tweak to link add late binding port to pick up the lbp when port < 0 rather than 0.
+				23 Sep 2014 : Support for rate limiting bridge
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -82,7 +83,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/19054"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/19244"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
