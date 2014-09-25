@@ -36,6 +36,7 @@
 				28 Aug 2014 : Added message tags to crit/err/warn messages.
 				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
 				03 Sep 2014 : Correcte bug introduced with fq_req changes (ignored protocol and port)
+				24 Sep 2014 : Added support for ITONS traffic class demands. 
 */
 
 package managers
@@ -249,7 +250,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 						fmod.Pri =	400									// override the defaults
 						fmod.Cookie =	0xdead
 						fmod.Single_switch = false						// path involves multiple switches by default
-						fmod.Preserve_dscp = p.Get_dscp()				// reservation supplied dscp value that we're to match and preserve
+						fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
 
 						if p.Is_paused( ) {
 							fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out

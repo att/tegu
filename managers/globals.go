@@ -144,6 +144,7 @@ var (
 	*/
 	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
 	accept_requests bool = false		// until main says we can, we don't accept requests
+	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value	
 )
 
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------
@@ -184,7 +185,8 @@ type Fq_req struct {
 	Exttyp	*string				// external IP type (either -D or -S)
 	Tptype	*string				// transport type (i.e. protocol: tcp, udp, etc)
 	Resub	*string				// list of tables (space sep numbers) to resubmit to
-	Preserve_dscp int			// dscp value that should be matched and preserved
+	Dscp	int					// dscp value that should be used for the traffic
+	Dscp_koe bool				// true if the value is to be kept on the packet as it leaves the environment
 
 	Nxt_mac	*string				// mac of next hop (steering)
 	Lbmac	*string				// late binding mac

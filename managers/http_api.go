@@ -51,6 +51,7 @@
 				17 Jul 2014 : Corrected typo in localhost validation check.
 				18 Jul 2014 : Added better error messaging when unable to open a listening port.
 				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
+				24 Sep 2014 : Added support for ITONS traffic class demands. 
 */
 
 package managers
@@ -562,13 +563,26 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						res = nil 
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 						if err == nil {
-							dscp := 0
-							if tmap["dscp"] != nil {
-								dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
+							dscp := tclass2dscp["voice"]							// default to using voice traffic class
+							dscp_koe := false										// we do not keep it as the packet exits the environment
+
+							if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
+								//dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
+								if strings.HasPrefix( *tmap["dscp"], "global_" ) {
+									dscp_koe = true											// global_* causes the value to be retained when packets exit the environment
+									dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
+								} else {
+									dscp = tclass2dscp[*tmap["dscp"]]
+								}
+								if dscp <= 0 {
+									err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
+								} 
 							}
 		
-							res_name = mk_resname( )											// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-							res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
+							if err == nil {
+								res_name = mk_resname( )											// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+								res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
+							}
 						}
 
 
@@ -906,6 +920,11 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	dup_str := "localhost"
 	priv_auth = &dup_str
 	
+	tclass2dscp = make( map[string]int, 5 )			// TODO: these need to come from the config file
+	tclass2dscp["voice"] = 46
+	tclass2dscp["control"] = 26
+	tclass2dscp["data"] = 18
+
 	if cfg_data["httpmgr"] != nil {
 		if p := cfg_data["httpmgr"]["verbose"]; p != nil {
 			http_sheep.Set_level(  uint( clike.Atoi( *p ) ) )

@@ -29,7 +29,7 @@
 				27 Aug 2014 - Small fixes during testing. 
 				03 Sep 2014 - Correcte bug introduced with fq_req changes (ignored protocol and port)
 				23 Sep 2014 - Added suport for multiple tables in order to keep local traffic off of the rate limit bridge.
-				24 Sep 2014 - Added vlan_id support.
+				24 Sep 2014 - Added vlan_id support. Added support ITONS dscp demands.
 */
 
 package managers
@@ -405,7 +405,6 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		switch_hosts *string				// from config file and overrides openstack list if given (mostly testing)
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
 		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
-		dscp		int = 42	 			// generic diffserv value used to mark packets as priority
 		alt_table	int = DEF_ALT_TABLE		// meta data marking table
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
@@ -439,9 +438,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			ssq_cmd = dp
 		}
 	
+/*
 		if p := cfg_data["fqmgr"]["default_dscp"]; p != nil {		// this is a single value and should not be confused with the dscp list in the default section of the config
 			dscp = clike.Atoi( *p )
 		}
+*/
 
 		if p := cfg_data["fqmgr"]["queue_check"]; p != nil {		// queue check frequency from the control file
 			qcheck_freq = clike.Atoi64( *p )
@@ -511,11 +512,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 					}
 				} else {
-					rdscp := 0
-					if fdata.Preserve_dscp > 0 {					
-						rdscp = fdata.Preserve_dscp				// reservation supplied value that is to be preserved
-					}
-																// q-lite generates three flowmods  in each direction
+																// q-lite now generates one flowmod  in each direction because of the ITONS requirements
 					if send_all || fdata.Espq.Queuenum > 1 {	// if sending all fmods, or this has a non-intermediate queue
 						cdata := fdata.Clone()					// copy so we can alter w/o affecting sender's copy
 						if cdata.Espq.Port == -128 {			// we'll assume in this case that the switch given is the host name and we need to set the switch to br-int
@@ -536,43 +533,22 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 						if fdata.Dir_in  {						// inbound to this switch we need to revert dscp from our settings to the 'origianal' settings
 							if cdata.Single_switch {
-								cdata.Match.Dscp =  -1								// no dscp adjustment when it is a single switch
+								cdata.Match.Dscp =  -1				// there is no match if both on same switch
 								send_gfmod_agent( cdata,  ip2mac, host_list )
 							} else {
-								cdata.Match.Dscp = dscp								// our value used to keep priority as it wanders through the net
-								cdata.Action.Dscp = rdscp							// translate our value to the one in the reservation (0 by default)
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								cdata.Match.Dscp = cdata.Dscp						// match the dscp that was added on ingress
+								if ! cdata.Dscp_koe {								// dropping the value on exit
+									cdata.Action.Dscp = 0							// set action to turn it off, otherwise we let it ride (no overt action)
+								}
 
-																	// TODO:  these translations need to be loaded from config, and a loop used to generate all fmods
-								cdata := cdata.Clone()				// clone the clone so we pick up our changes from above, and modify for next fmod
-								cdata.Match.Dscp = 40
-								cdata.Action.Dscp = 32
-								send_gfmod_agent( cdata,  ip2mac, host_list )
-	
-								cdata = cdata.Clone()
-								cdata.Match.Dscp = 41
-								cdata.Action.Dscp = 46
 								send_gfmod_agent( cdata,  ip2mac, host_list )
 							}
-						} else {													// outbound from this switch we need to translate dscp values to our values
+						} else {													// outbound from this switch set the dscp value specified on the reservation
+							cdata.Match.Dscp =  -1									// on outbound there is no dscp match, ensure this is off
 							if cdata.Single_switch {
-								cdata.Match.Dscp =  -1								// no dscp processing for a single switch
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list )		// in single switch mode there is no dscp value needed
 							} else {
-								cdata.Match.Dscp = rdscp							// match the dscp provided on the reservation (0 by default)
-								cdata.Action.Dscp = dscp							// translate to our special value which gets priority on intermediate switches
-	
-								send_gfmod_agent( cdata,  ip2mac, host_list )
-	
-																	// TODO:  these translations need to be loaded from config, and a loop used to generate all fmods
-								cdata = cdata.Clone()				// copy for next request, fill in and send
-								cdata.Match.Dscp = 32
-								cdata.Action.Dscp = 40
-								send_gfmod_agent( cdata,  ip2mac, host_list )
-	
-								cdata = cdata.Clone()				// copy for next request, fill in and send
-								cdata.Match.Dscp = 46
-								cdata.Action.Dscp = 41
+								cdata.Action.Dscp = cdata.Dscp						// otherwise set the value and send
 								send_gfmod_agent( cdata,  ip2mac, host_list )
 							}
 						}

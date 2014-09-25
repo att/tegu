@@ -42,11 +42,12 @@ func Mk_fqreq( id *string )  ( np *Fq_req ) {
 	np = &Fq_req {							// fq-mgr request data
 		Id:		id,
 		Cookie:	cookie,
-		Expiry:	10,					// default to a very short lived f-mod (don't defaut to 0)
+		Expiry:	10,					// default to a very short lived f-mod (DON'T defaut to 0)
 		Match: 	fq_match,
 		Action: fq_action,
 		Table:	0,
 		Output: &output,			// default to no output
+		Dscp_koe: false,
 	}
 
 	return
