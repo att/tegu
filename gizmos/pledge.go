@@ -15,6 +15,7 @@
 				20 Jun 2014 - Corrected bug that allowed future start time with an earlier expry time
 							to be accepted. 
 				07 Jul 2014 - Added clone function.
+				24 Sep 2014 - Support for keep/delete toggle for dscp values
 */
 
 package gizmos
@@ -44,6 +45,7 @@ type Pledge struct {
 	bandw_in	int64		// bandwidth to reserve inbound to host1
 	bandw_out	int64		// bandwidth to reserve outbound from host1
 	dscp		int			// dscp value that should be propigated
+	dscp_koe	bool		// true if the dscp value should be kept when a packet exits the environment
 	id			*string		// name that the client can use to manage (modify/delete)
 	qid			*string		// name that we'll assign to the queue which allows us to look up the pledge's queues
 	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
@@ -66,6 +68,7 @@ type Json_pledge struct {
 	Bandwin		int64
 	Bandwout	int64
 	Dscp		int
+	Dscp_koe	bool
 	Id			*string
 	Qid			*string
 	Usrkey		*string
@@ -79,7 +82,7 @@ type Json_pledge struct {
 	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward 
 	(to the current time) if it is less than the current time.
 */
-func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int ) ( p *Pledge, err error ) {
+func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int, dscp_koe bool ) ( p *Pledge, err error ) {
 	now := time.Now().Unix()
 
 	err = nil
@@ -116,6 +119,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 		bandw_out:	bandw_out,
 		id: id,
 		dscp: dscp,
+		dscp_koe: dscp_koe,
 	}
 
 	if *usrkey != "" {
@@ -199,6 +203,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	p.expiry = jp.Expiry
 	p.id = jp.Id
 	p.dscp = jp.Dscp
+	p.dscp_koe = jp.Dscp_koe
 	p.usrkey = jp.Usrkey
 	p.qid = jp.Qid
 	p.bandw_out = jp.Bandwout
@@ -292,8 +297,8 @@ func (p *Pledge) To_str( ) ( s string ) {
 		}
 	}
 
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v", state, diff, caption, 
-			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d koe=%v", state, diff, caption, 
+			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe )
 	return
 }
 
@@ -323,8 +328,8 @@ func (p *Pledge) To_json( ) ( json string ) {
 		}
 	}
 	
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q }`, 
-			state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v }`, 
+			state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid, p.dscp, p.dscp_koe )
 
 	return
 }
@@ -347,8 +352,8 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 		return
 	}
 	
-	chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q }`, 
-			*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey )
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v }`, 
+			*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe )
 
 	return
 }
@@ -575,14 +580,15 @@ func (p *Pledge) Get_values( ) ( *string, *string, int, int, int64, int64, int64
 }
 
 /*
-	Return the dscp that was submitted with the resrrvation
+	Return the dscp that was submitted with the resrrvation, and the state of the keep on 
+	exit flag.
 */
-func (p *Pledge) Get_dscp( ) ( int ) {
+func (p *Pledge) Get_dscp( ) ( int, bool ) {
 	if p == nil {
-		return 0
+		return 0, false
 	}
 
-	return p.dscp;
+	return p.dscp, p.dscp_koe
 }
 
 /*
