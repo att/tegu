@@ -173,10 +173,10 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 */
 func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
 
-osif_sheep.Baa( 1, "validating admin token" )
+	osif_sheep.Baa( 2, "validating admin token" )
 	exp, err := admin.Token_validation( token, user ) 		// ensure token is good and was issued for user
 	if err == nil {
-		osif_sheep.Baa( 1, "admin token validated successfully: %s expires: ", *token, exp )
+		osif_sheep.Baa( 2, "admin token validated successfully: %s expires: ", *token, exp )
 	} else {
 		osif_sheep.Baa( 1, "admin token invalid: %s", err )
 }
@@ -192,7 +192,7 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 	m = nil
 	for k, ostk := range os_refs {
 		if k != "_ref_" {	
-			osif_sheep.Baa( 1, "mapping VMs from: %s", ostk.To_str( ) )
+			osif_sheep.Baa( 2, "mapping VMs from: %s", ostk.To_str( ) )
 			m, err = ostk.Mk_vm2ip( m )
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s   [TGUOSI000]", err )
@@ -233,7 +233,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 					ts += sep + *list
 					sep = " "
 				} else {
-					osif_sheep.Baa( 1, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
+					osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
 				}
 			}
 		}
@@ -453,11 +453,11 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_FIP2IP, fip2ip, nil )		
 				} else {
-					osif_sheep.Baa( 1, "nil map not sent to network: fip2ip" )
+					osif_sheep.Baa( 2, "nil map not sent to network: fip2ip" )
 					err_count++
 				}
 
-				osif_sheep.Baa( 1, "gen_maps: VM maps were updated from openstack %d issues detected", err_count )
+				osif_sheep.Baa( 2, "gen_maps: VM maps were updated from openstack %d issues detected", err_count )
 	}
 }
 
@@ -510,8 +510,8 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		if p != nil {
 			refresh_delay = clike.Atoi( *p ); 			
 			if refresh_delay < 15 {
-				osif_sheep.Baa( 1, "resresh was too small (%ds), setting to 30s", refresh_delay )
-				refresh_delay = 30
+				osif_sheep.Baa( 1, "resresh was too small (%ds), setting to 15", refresh_delay )
+				refresh_delay = 15
 			}
 		}
 	
@@ -627,7 +627,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 						os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )						// periodic update of project cred list
 					}
 
-					osif_sheep.Baa( 1, "credentials were updated from openstack" )
+					osif_sheep.Baa( 2, "credentials were updated from openstack" )
 				}
 
 	/* ---- before lite ----
@@ -637,12 +637,12 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					count := 0;
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VM2IP, m, nil )					// send new map to network as it is managed there
-					osif_sheep.Baa( 1, "VM2IP mapping updated from openstack" )
+					osif_sheep.Baa( 2, "VM2IP mapping updated from openstack" )
 					for k, v := range m {
-						osif_sheep.Baa( 2, "VM mapped: %s ==> %s", k, *v )
+						osif_sheep.Baa( 3, "VM mapped: %s ==> %s", k, *v )
 						count++;
 					}
-					osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack", count )
+					osif_sheep.Baa( 2, "mapped %d VM names/IDs from openstack (verbose 3 for debug list)", count )
 				}
 	*/
 
