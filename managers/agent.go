@@ -331,7 +331,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		port	string = "29055"						// port we'll listen on for connections
 		adata	*agent_data
 		host_list string = ""
-		dscp_list string = "40 41 42"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
+		dscp_list string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
 		refresh int64 = 60
 	)
 
@@ -357,6 +357,9 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	if cfg_data["default"] != nil {						// we pick some things from the default section too
 		if p := cfg_data["default"]["pri_dscp"]; p != nil {			// list of dscp (diffserv) values that match for priority promotion
 			dscp_list = *p
+			am_sheep.Baa( 1, "dscp priority list from config file: %s", dscp_list )
+		} else {
+			am_sheep.Baa( 1, "dscp priority list not in config file, using defauts: %s", dscp_list )
 		}
 	}
 	
