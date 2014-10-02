@@ -50,6 +50,9 @@
 				14 Aug 2014 - Corrected comment.
 				15 Aug 2014 - Changed pointer reference on calls to ostk for clarity (was os).
 				19 Aug 2014 - Fix for bug #202 -- need to return nil if project ID not known.
+				30 Sep 2014 - For what ever reason, the ccp environment wasn't returning a 
+					full complement of mac addresses on  a single call, so we now revert to 
+					making a call for each project.
 */
 
 package managers
@@ -286,42 +289,67 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 			osif_sheep.Baa( 2, "creating VM maps from: %s", ostk.To_str( ) )
 			vmid2ip, ip2vmid, vm2ip, vmid2host, err = ostk.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s   [TGUOSI003]", ostk.To_str( ), err )
+				osif_sheep.Baa( 2, "WRN: unable to map VM info: %s; %s   [TGUOSI003]", ostk.To_str( ), err )
 				rerr = err
 			}
 	
 			ip2fip, fip2ip, err = ostk.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map VM info: %s; %s   [TGUOSI004]", ostk.To_str( ), err )
+				osif_sheep.Baa( 2, "WRN: unable to map VM info: %s; %s   [TGUOSI004]", ostk.To_str( ), err )
 				rerr = err
+			}
+
+			ip2mac, _, err = ostk.Mk_mac_maps( ip2mac, nil, inc_tenant )	
+			if err != nil {
+				osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", ostk.To_str( ), err )
+				rerr = err
+			}
+
+			gwmap, _, err = ostk.Mk_gwmaps( gwmap, nil, inc_tenant, false )		
+			if err != nil {
+				osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", ostk.To_str( ), err )
+			} else {
+				osif_sheep.Baa( 2, "gw map has %d entries", len( gwmap ) )
 			}
 		}
 	}
 
-	// ---- use the reference pointer for these as we get everything from one call
+	// ---- use the reference pointer for these as we get everything from one call (2014.09.30 -- not in ccp's environment! argh!)
+/*
+ccp environment doesn't return all on the single call, so moved up into previous loop
+probably because we're not admin on every project and it's impossible to tell where admin privs exist
 	ip2mac, _, err = os_refs["_ref_"].Mk_mac_maps( nil, nil, inc_tenant )	
 	if err != nil {
-		osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
+		osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
 		rerr = err
 	}
 
 	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( gwmap, nil, inc_tenant, false )		// second true is use project which we need right now
 	if err != nil {
-		osif_sheep.Baa( 1, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", os_refs["_ref_"].To_str( ), err )
+		osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", os_refs["_ref_"].To_str( ), err )
+	} else {
+		osif_sheep.Baa( 2, "gw map has %d entries", len( gwmap ) )
 	}
+*/
 
 	return
 }
 
 /*
 	Generate a map containing the translation from IP address to MAC address. 
+	Must run them all because in ccp we don't get everything with one call.
 */
 func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
-	ostk := os_refs["_ref_"]
-	if ostk != nil {
-		m, _, err = ostk.Mk_mac_maps( nil, nil, inc_tenant )	
-		if err != nil {
-			osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI007]", os_refs["_ref_"].To_str( ), err )
+	
+	m = nil
+
+	for k, ostk := range os_refs {
+		if k != "_ref_" {
+			m, _, err = ostk.Mk_mac_maps( m, nil, inc_tenant )	
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI007]", os_refs["_ref_"].To_str( ), err )
+				return
+			}
 		}
 	}
 
@@ -371,20 +399,26 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s   [TGUOSI008]", *v )
 				delete( creds, *v )
-				//creds[*v] = nil
-			}
+			} 
 		} else {
 			creds[*v] = old_list[*v]					// reuse the data
 			osif_sheep.Baa( 2, "reusing credentials for: %s", *v )
 		}
 
-		r = creds[*v]
+		if r == nil &&  creds[*v] != nil {							// need to test if this has admin -- ref must have admin
+
+ 			_, _, err = creds[*v].Mk_mac_maps( nil, nil, false )
+			if  err == nil  {
+				r = creds[*v]
+			}
+		}
 	}
 
 	creds["_ref_"] = r				// set the reference entry
 
 	return
 }
+
 
 /*
 	generate maps and send them to network manager.  This runs as a go routine so that 
@@ -401,6 +435,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, ip2fip, fip2ip, _ := map_all( *os_refs, inc_tenant )
 				// ignore errors as a bad entry for one ostack credential shouldn't spoil the rest of the info gathering; we send only non-nil maps
 				if vm2ip != nil {
+					osif_sheep.Baa( 2, "vm2ip map has %d entries", len( vm2ip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
 				} else {
@@ -408,6 +443,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 	
 				if vmid2ip != nil {
+					osif_sheep.Baa( 2, "vmid2ip map has %d entries", len( vmid2ip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2IP, vmid2ip, nil )					
 				} else {
@@ -415,6 +451,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 	
 				if ip2vmid != nil {
+					osif_sheep.Baa( 2, "ip2vmid map has %d entries", len( ip2vmid ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2VMID, ip2vmid, nil )				
 				} else {
@@ -422,6 +459,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 	
 				if vmid2host != nil {
+					osif_sheep.Baa( 2, "vmid2host map has %d entries", len( vmid2host ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2PHOST, vmid2host, nil )		
 				} else {
@@ -429,6 +467,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 	
 				if ip2mac != nil {
+					osif_sheep.Baa( 2, "ip2mac map has %d entries", len( ip2mac ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
 				} else {
@@ -436,6 +475,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 	
 				if gwmap != nil {
+					osif_sheep.Baa( 2, "gwmap map has %d entries", len( gwmap ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_GWMAP, gwmap, nil )		
 				} else {
@@ -443,6 +483,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 
 				if ip2fip != nil {
+					osif_sheep.Baa( 2, "ip2fip map has %d entries", len( ip2fip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2FIP, ip2fip, nil )		
 				} else {
@@ -450,6 +491,7 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 				}
 
 				if fip2ip != nil {
+					osif_sheep.Baa( 2, "fip2ip map has %d entries", len( fip2ip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_FIP2IP, fip2ip, nil )		
 				} else {
@@ -527,6 +569,11 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		if p != nil && *p == "true"	{
 			req_token = true
 			inc_tenant = true					// implied if token is required
+		}
+
+		p = cfg_data["osif"]["verbose"]
+		if p != nil {
+			osif_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
 	}
 
