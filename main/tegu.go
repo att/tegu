@@ -54,6 +54,8 @@
 				03 Sep 2014 : Corrected bug in resmgr/fqmgr introduced with 27 Aug changes (transport type ignored).
 				05 Sep 2014 : Tweak to link add late binding port to pick up the lbp when port < 0 rather than 0.
 				23 Sep 2014 : Support for rate limiting bridge
+				29 Sep 2014 : Nil pointer exception (bug #216) corrected (gizmo change)
+				30 Sep 2014 : Deal with odd hostnames that were being returned by ccp's version of openstack.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -83,7 +85,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/19254"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/1a024"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
