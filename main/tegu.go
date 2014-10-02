@@ -45,6 +45,7 @@
 				21 Jul 2014 : Fixed bug -- checkpoint not including user link caps
 				29 Jul 2014 : Added mlag support.
 				22 Aug 2014 : Added protocol support to steering.
+				08 Sep 2014 : Corrected bugs with tcp oriented proto steering (dest baesd).
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -74,7 +75,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1/18264"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.1/19094"		// CAUTION: there is also a version in the manager package that should be kept up to date
 		cfg_file	*string  = nil
 		api_port	*string			// command line option vars must be pointers
 		verbose 	*bool
@@ -125,19 +126,17 @@ func main() {
 	}
 
 	nw_ch = make( chan *ipc.Chmsg )					// create the channels that the threads will listen to
-	//qm_ch = make( chan *ipc.Chmsg, 128 )					
 	fq_ch = make( chan *ipc.Chmsg, 128 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
 	am_ch = make( chan *ipc.Chmsg, 128 )			// agent manager channel
 	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
 	osif_ch = make( chan *ipc.Chmsg )
 
-	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
+	err := managers.Initialise( cfg_file, version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err ); 
 		os.Exit( 1 )
 	}
 
-	//go managers.Quantus_mgr( qm_ch )
 	go managers.Res_manager( rmgr_ch, super_cookie ); 						// manage the reservation inventory
 	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
 	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph
