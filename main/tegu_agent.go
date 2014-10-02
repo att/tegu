@@ -12,6 +12,7 @@
 					which generaets data back to tegu.
 				06 May 2014 : Added support to drive setup_ovs_intermed script.
 				13 Jun 2014 : Corrected typo in warning message.
+				29 Sep 2014 : Better error messages from (some) scripts.
 */
 
 package main
@@ -32,17 +33,18 @@ import (
 	"time"
 
 	"forge.research.att.com/gopkgs/bleater"
-	//"forge.research.att.com/gopkgs/clike"
 	"forge.research.att.com/gopkgs/extcmd"
-	"forge.research.att.com/gopkgs/token"
-	//"forge.research.att.com/gopkgs/ipc"
 	"forge.research.att.com/gopkgs/connman"
 	"forge.research.att.com/gopkgs/jsontools"
+
+	//"forge.research.att.com/gopkgs/clike"
+	//"forge.research.att.com/gopkgs/token"
+	//"forge.research.att.com/gopkgs/ipc"
 )
 
 // globals
 var (
-	version		string = "v1.0/15214"
+	version		string = "v1.1/1a014"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
@@ -71,7 +73,8 @@ type json_request struct {
 type agent_msg struct {
 	Ctype	string			// command type -- should be response, ack, nack etc.
 	Rtype	string			// type of response (e.g. map_mac2phost, or specific id for ack/nack)
-	Rdata	[]string		// response data
+	Rdata	[]string		// response stdout data
+	Edata	[]string		// response error data
 	State	int				// if an ack/nack some state information 
 	Vinfo	string			// agent version info for debugging
 }
@@ -120,11 +123,16 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 	msg.Ctype = "response"
 	msg.Rtype = "map_mac2phost"
 	msg.Vinfo = version
-	msg.State, msg.Rdata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
-	sheep.Baa( 1, "map_mac2phost completed: state=%d respone data had %d elements", msg.State, len( msg.Rdata ) )
+	msg.State = 0
+	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
+	sheep.Baa( 1, "map_mac2phost completed: respone data had %d elements", len( msg.Rdata ) )
 
 	if err != nil {
+		msg.State = 1
 		sheep.Baa( 0, "ERR: unable to execute: %s: %s", cmd_str, err )
+		for i := range msg.Edata {
+			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
+		}
 		jout = nil
 	}
 
@@ -142,22 +150,23 @@ func do_intermedq( req json_action ) {
 	for i := range req.Hosts {
 		cmd_str := fmt.Sprintf( `setup_ovs_intermed -h %s -d "%s"`, req.Hosts[i], req.Dscps )
 
-    	sheep.Baa( 1, "executing: %s", cmd_str )
+    	sheep.Baa( 2, "executing: %s", cmd_str )
 
-		state, rdata, err := extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a set of strings
-		if state != 0 {
+		_, edata, err := extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a set of strings
+		if err != nil {
 			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s", err )
-			for i := range rdata {
-				sheep.Baa( 0, "  %s", rdata[i] )
+			for i := range edata {
+				sheep.Baa( 0, "stderr:  %s", edata[i] )
 			}
 		} else {
-        	sheep.Baa( 1, "queues adjusted succesfully" )
+        	sheep.Baa( 2, "queues adjusted succesfully" )
 		}
 	}
 }
 
 /*
-	Execute a create_ovs_queues for each host in the list
+	Execute a create_ovs_queues for each host in the list.
+	TODO: needs to be converted to use extcmd rather than os/exec directly so that stderr can be captured.
 */
 func do_setqueues( req json_action ) {
     var (
@@ -200,39 +209,24 @@ func do_setqueues( req json_action ) {
 
 /*
 	Extracts the information from the action passed in and causes the fmod command
-	to be executed.  
+	to be executed.   We must build the command by hand because the Command() function
+	doesn't properly handle quotes. 
 */
 func do_fmod( req json_action ) ( err error ){
-    var (
-        cmd_str string          // final command string (with data file name)
-    )
-
-	sheep.Baa( 1, "flow mod commands" )
 
 	for i := range req.Fdata {
-    	sheep.Baa( 1, "executing: %s send_ovs_fmod %s", shell_cmd, req.Fdata[i] )
-    	cmd := exec.Command( shell_cmd, "send_ovs_fmod" )		// build base command (function doesn't break out the string)
+		cstr := fmt.Sprintf( "%s send_ovs_fmod %s", shell_cmd, req.Fdata[i] )
+    	sheep.Baa( 1, "executing: %s", cstr )
 
-		_, parms := token.Tokenise_qpopulated( req.Fdata[i], " " )	// tokenise the data respecting quotes, and removing null tokens
-		//parms := strings.Split( req.Fdata[i], " " ) 			// then add them to the command and replace the arg list with everything
-		args := make( []string, len( parms ) + 2 )
-		args[0] = cmd.Args[0] 
-		args[1] = cmd.Args[1]
-		i := 0
-		j := 2
-		for i = range parms {
-			if parms[i] != "" {
-				args[j] = parms[i]
-				j++
+		_, edata, err := extcmd.Cmd2strings( cstr )
+		if err != nil {
+			sheep.Baa( 0, "ERR: send fmod failed: %s", err )
+			for i := range edata {
+				sheep.Baa( 0, "stderr:  %s", edata[i] )
 			}
+		} else {
+        	sheep.Baa( 2, "fmod succesfully sent" )
 		}
-		cmd.Args = args[0:j]		// might be smaller if command string had sequential blanks
-    	err = cmd.Run()
-    	if err != nil  {
-        	sheep.Baa( 0, "ERR: unable to execute fmod command: %s: %s", cmd_str, err )
-    	} else {
-        	sheep.Baa( 1, "fmod command executed successfully" )
-    	}
 	}
 
 	return
@@ -312,12 +306,16 @@ func main() {
 
 
 	needs_help := flag.Bool( "?", false, "show usage" )
-
 	id := flag.Int( "i", 0, "id" )
 	log_dir := flag.String( "l", "stderr", "log_dir" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
 	verbose := flag.Bool( "v", false, "verbose" )
 	flag.Parse()									// actually parse the commandline
+
+	if *needs_help {
+		usage( version )
+		os.Exit( 0 )
+	}
 
 	if *id <= 0 {
 		fmt.Fprintf( os.Stderr, "ERR: must enter -i id (number) on command line\n" )
