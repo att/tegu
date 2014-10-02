@@ -567,7 +567,6 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							dscp_koe := false										// we do not keep it as the packet exits the environment
 
 							if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
-								//dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
 								if strings.HasPrefix( *tmap["dscp"], "global_" ) {
 									dscp_koe = true											// global_* causes the value to be retained when packets exit the environment
 									dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
