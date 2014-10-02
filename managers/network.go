@@ -39,6 +39,7 @@
 				29 Jul 2014 - Added mlag support.
 				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given. 
 				11 Aug 2014 - Corrected bleat message.
+				01 Oct 2014 - Corrected bleat message during network build.
 */
 
 package managers
@@ -530,8 +531,8 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
 		lnk.Set_port( 2, links[i].Src_port )		// port on src to dest
 		dsw.Add_link( lnk )
-		net_sheep.Baa( 3, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[links[i].Src_switch].To_json() )
-		net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[links[i].Dst_switch].To_json() )
+		net_sheep.Baa( 3, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
+		net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
 	}
 
 	if len( old_net.gwmap ) > 0 {			// if we build after gateway map has size, then gateways are in host table and checkpoints can be processed
@@ -1402,7 +1403,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
 							}
 						} else {
-							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
+							net_sheep.Baa( 1, "gw map was nil; not changed" )
 						}
 
 					case REQ_IP2FIP:									// Tegu-lite
