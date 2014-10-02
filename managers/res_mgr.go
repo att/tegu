@@ -342,12 +342,16 @@ func push_bw_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 func table9x_fmods( rname *string ) {
 		fq_match := &Fq_parms{
 			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
+			Tpdport: -1,
+			Tpsport: -1,
 			Meta:	&empty_str,
 		}
 
 		mstr := "0x02/0x02"							// sets the meta value
 		fq_action := &Fq_parms{
 			Meta:	&mstr,
+			Tpdport: -1,
+			Tpsport: -1,
 		}
 
 		fq_data := &Fq_req {							// fq-mgr request data
@@ -377,6 +381,9 @@ func table9x_fmods( rname *string ) {
 */
 func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string, proto *string, forward bool ) {
 	var (
+		fq_data *Fq_req
+		fq_match *Fq_parms
+		fq_action *Fq_parms
 		mb	*gizmos.Mbox							// current middle box being worked with (must span various blocks)
 	)
 
@@ -398,7 +405,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 		if i == nmb - 1 {								// for last mb we need a rule that causes steering to be skipped based on mb mac
 			mb = mblist[i]
-			fq_match := &Fq_parms{						// new structs for each since they sit in fq manages quwue
+			fq_match = &Fq_parms{						// new structs for each since they sit in fq manages quwue
 				Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 				Meta:	&mstr,
 				Ip1:  	ep1,
@@ -406,11 +413,11 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Tpsport: -1,
 			}
 
-			fq_action := &Fq_parms{
+			fq_action = &Fq_parms{
 				Resub: &resub,							// resubmit to table 90 to set meta info, then to 0 to get tunnel matches
 			}
 
-			fq_data := &Fq_req {							// generate data with just what needs to be there
+			fq_data = &Fq_req {							// generate data with just what needs to be there
 				Pri:	300,
 				Id:		rname,
 				Expiry:	expiry,
@@ -439,22 +446,22 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				fq_data.Match.Smac = mb.Get_mac()						// src for 300 is the last mbox
 			}
 
-			rm_sheep.Baa( 2, "write final fmod: %s", fq_data.To_json() )
+			rm_sheep.Baa( 1, "write final fmod: %s", fq_data.To_json() )
 
 			msg := ipc.Mk_chmsg()
 			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// final flow-mod from the last middlebox out
 		}
 
-		fq_match := &Fq_parms{
+		fq_match = &Fq_parms{
 			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 			Meta:	&mstr,
 		}
 
-		fq_action := &Fq_parms{
+		fq_action = &Fq_parms{
 			Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
 		}
 
-		fq_data := &Fq_req {						// fq-mgr request data
+		fq_data = &Fq_req {						// fq-mgr request data
 			Id:		rname,
 			Expiry:	expiry,
 			Match: 	fq_match,
