@@ -13,6 +13,7 @@
 				06 May 2014 : Added support to drive setup_ovs_intermed script.
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
+				05 Oct 2014 : Now writes stderr from all commands even if good return.
 */
 
 package main
@@ -27,7 +28,7 @@ import (
 	"math/rand"
 	//"net/http"
 	"os"
-	"os/exec"
+	//"os/exec"
 	"strings"
 	//"sync"
 	"time"
@@ -44,7 +45,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.1/1a014"
+	version		string = "v1.1/1a054"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
@@ -129,7 +130,7 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 
 	if err != nil {
 		msg.State = 1
-		sheep.Baa( 0, "ERR: unable to execute: %s: %s", cmd_str, err )
+		sheep.Baa( 0, "ERR: unable to execute: %s: %s	[TGUAGN000]", cmd_str, err )
 		for i := range msg.Edata {
 			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
 		}
@@ -145,7 +146,7 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 */
 func do_intermedq( req json_action ) {
 
-	sheep.Baa( 1, "running intermediate switch queue/fmod setup" )
+	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts" )
 
 	for i := range req.Hosts {
 		cmd_str := fmt.Sprintf( `setup_ovs_intermed -h %s -d "%s"`, req.Hosts[i], req.Dscps )
@@ -154,33 +155,30 @@ func do_intermedq( req json_action ) {
 
 		_, edata, err := extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a set of strings
 		if err != nil {
-			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s", err )
-			for i := range edata {
-				sheep.Baa( 0, "stderr:  %s", edata[i] )
-			}
+			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s	[TGUAGN001]", err )
 		} else {
         	sheep.Baa( 2, "queues adjusted succesfully" )
+		}
+		for i := range edata {
+			sheep.Baa( 0, "set-intermed stderr:  %s", edata[i] )
 		}
 	}
 }
 
 /*
 	Execute a create_ovs_queues for each host in the list.
-	TODO: needs to be converted to use extcmd rather than os/exec directly so that stderr can be captured.
 */
 func do_setqueues( req json_action ) {
     var (
         err error
     )
 
-	sheep.Baa( 1, "running set queue adjustment" )
-
     fname := fmt.Sprintf( "/tmp/tegu_setq_%d_%x_%02d.data", os.Getpid(), time.Now().Unix(), rand.Intn( 10 ) )
     sheep.Baa( 2, "adjusting queues: creating %s will contain %d items", fname, len( req.Qdata ) );
 
     f, err := os.Create( fname )
     if err != nil {
-        sheep.Baa( 0, "ERR: unable to create data file: %s: %s", fname, err )
+        sheep.Baa( 0, "ERR: unable to create data file: %s: %s	[TGUAGN002]", fname, err )
         return
     }
 
@@ -191,19 +189,23 @@ func do_setqueues( req json_action ) {
 
     err = f.Close( )
     if err != nil {
-        sheep.Baa( 0, "ERR: unable to create data file (close): %s: %s", fname, err )
+        sheep.Baa( 0, "ERR: unable to create data file (close): %s: %s	[TGUAGN003]", fname, err )
         return
     }
 
 	for i := range req.Hosts {
-    	sheep.Baa( 1, "executing: %s create_ovs_queues -h %s %s", shell_cmd, req.Hosts[i], fname )
-    	cmd := exec.Command( shell_cmd, "create_ovs_queues", "-h", req.Hosts[i],  fname )
-    	err = cmd.Run()
+		cmd_str := fmt.Sprintf( `%s create_ovs_queues -h %s %s`, shell_cmd, req.Hosts[i], fname )
+    	sheep.Baa( 1, "executing: %s", cmd_str )
+
+		_, edata, err := extcmd.Cmd2strings( cmd_str ) 										// execute command and package output as a set of strings
     	if err != nil  {
-        	sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s", req.Hosts[i], fname, err )
+        	sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", req.Hosts[i], fname, err )
     	} else {
         	sheep.Baa( 1, "queues adjusted succesfully on: %s", req.Hosts[i] )
     	}
+		for i := range edata {																// always put out stderr
+			sheep.Baa( 0, "create queues stderr:  %s", edata[i] )
+		}
 	}
 }
 
@@ -220,12 +222,12 @@ func do_fmod( req json_action ) ( err error ){
 
 		_, edata, err := extcmd.Cmd2strings( cstr )
 		if err != nil {
-			sheep.Baa( 0, "ERR: send fmod failed: %s", err )
-			for i := range edata {
-				sheep.Baa( 0, "stderr:  %s", edata[i] )
-			}
+			sheep.Baa( 0, "ERR: send fmod failed: %s	[TGUAGN005]", err )
 		} else {
         	sheep.Baa( 2, "fmod succesfully sent" )
+		}
+		for i := range edata {
+			sheep.Baa( 1, "fmod stderr:  %s", edata[i] )
 		}
 	}
 
@@ -251,7 +253,7 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 
     err := json.Unmarshal( jblob, &req )           // unpack the json 
 	if err != nil {
-		sheep.Baa( 0, "ERR: unable to unpack request: %s", err )
+		sheep.Baa( 0, "ERR: unable to unpack request: %s	[TGUAGN006]", err )
 		return
 	}
 
@@ -295,7 +297,7 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 
 func usage( version string ) {
 	fmt.Fprintf( os.Stdout, "tegu_agent %s\n", version )
-	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-l log-dir] [-p tegu-port] [-v]\n" )
+	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-l log-dir] [-p tegu-port] [-v | -V level]\n" )
 }
 
 func main() {
@@ -303,13 +305,12 @@ func main() {
 		//jc			*jsontools.Jsoncache		// where we stash input until a complete blob is read
 	)
 
-
-
 	needs_help := flag.Bool( "?", false, "show usage" )
-	id := flag.Int( "i", 0, "id" )
-	log_dir := flag.String( "l", "stderr", "log_dir" )
+	id := 		flag.Int( "i", 0, "id" )
+	log_dir :=	flag.String( "l", "stderr", "log_dir" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
-	verbose := flag.Bool( "v", false, "verbose" )
+	verbose :=	flag.Bool( "v", false, "verbose" )
+	vlevel :=	flag.Int( "V", 1, "verbose-level" )
 	flag.Parse()									// actually parse the commandline
 
 	if *needs_help {
@@ -332,7 +333,12 @@ func main() {
 
 	if( *verbose ) {
 		sheep.Set_level( 1 )
+	} else {
+		if( *vlevel > 0 ) {
+			sheep.Set_level( uint( *vlevel ) )
+		}
 	}
+
 	if *log_dir  != "stderr" {							// allow it to stay on stderr
 		lfn := sheep.Mk_logfile_nm( log_dir, 86400 )
 		sheep.Baa( 1, "switching to log file: %s", *lfn )
