@@ -581,7 +581,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					if  msg.Response_data.( *string ) != nil {
 						host_list = msg.Response_data.( *string )
 						send_hlist_agent( host_list )							// send to agent_manager
-						fq_sheep.Baa( 1, "host list received from osif: %s", *host_list )
+						fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
 					} else {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
 					}
@@ -597,7 +597,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
 					if  msg.Response_data != nil {
 						ip2mac = msg.Response_data.( map[string]*string )
-						fq_sheep.Baa( 1, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
+						fq_sheep.Baa( 2, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
 					} else {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected ip2mac translation map  [TGUFQM010]" )
 					}

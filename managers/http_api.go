@@ -52,6 +52,7 @@
 				18 Jul 2014 : Added better error messaging when unable to open a listening port.
 				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
+				09 Oct 2014 : Allow verbose even if network not initialised correctly.
 */
 
 package managers
@@ -353,7 +354,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		req_count++
 		state = "ERROR"				// default for each loop; final set based on error count following loop
 		jreason = ""
-		if accept_requests  ||  tokens[0] == "ping"  {						// always allow ping if we are up
+		if accept_requests  ||  tokens[0] == "ping"  || tokens[0] == "verbose" {			// always allow ping/verbose if we are up
 			reason = fmt.Sprintf( "you are not authorised to submit a %s command", tokens[0] )
 
 			http_sheep.Baa( 3, "processing request: %s", tokens[0] )

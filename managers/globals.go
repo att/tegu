@@ -86,6 +86,7 @@ const (
 	REQ_PLEDGE_LIST				// causes res mgr to generate a list of pledges based on a host name
 	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
 	REQ_LISTULCAP				// user link capacity list
+	REQ_ALLUP					// signal that all initialisation has been completed
 	
 )
 

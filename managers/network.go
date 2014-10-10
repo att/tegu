@@ -40,6 +40,7 @@
 				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given. 
 				11 Aug 2014 - Corrected bleat message.
 				01 Oct 2014 - Corrected bleat message during network build.
+				09 Oct 2014 - Turned 'down' two more bleat messages to level 2.
 */
 
 package managers
@@ -219,7 +220,7 @@ func (n *Network) update_mac2phost( list []string ) {
 		n.mac2phost[toks[1]] = &dup_str
 	}
 
-	net_sheep.Baa( 1, "mac2phost map updated; has %d elements (list had %d elements)", len( n.mac2phost ), len( list ) )
+	net_sheep.Baa( 2, "mac2phost map updated; has %d elements (list had %d elements)", len( n.mac2phost ), len( list ) )
 }
 
 /*
@@ -1469,7 +1470,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							act_net.ip2fip = ip2fip
 							act_net.limits = limits
 
-							net_sheep.Baa( 1, "network graph rebuild completed" )		// timing during debugging
+							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
 						} else {
 							net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
 						}

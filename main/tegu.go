@@ -56,6 +56,7 @@
 				23 Sep 2014 : Support for rate limiting bridge
 				29 Sep 2014 : Nil pointer exception (bug #216) corrected (gizmo change)
 				30 Sep 2014 : Deal with odd hostnames that were being returned by ccp's version of openstack.
+				09 Oct 2014 : Bug fix (228) -- don't checkpoint until all initialised.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -85,7 +86,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/1a024"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/1a094"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -153,20 +154,21 @@ func main() {
 	go managers.Agent_mgr( am_ch )
 	go managers.Fq_mgr( fq_ch, fl_host ); 
 
+	my_chan := make( chan *ipc.Chmsg )								// channel and request block to ping net, and then to send all sys up
+	req := ipc.Mk_chmsg( )
+
 	// if there is a checkpoint file, then we need to block until we have a full network topology which includes:
 	// openstack data, json data, and physical data from the agent(s).  Once that's in place, then we can 
 	// load the checkpoint file.  Once the checkpoint is loaded then we can open the api for real work. 
 	// 
 	if *chkpt_file != "" {
-		my_chan := make( chan *ipc.Chmsg )
-		req := ipc.Mk_chmsg( )
 	
 		for {
 			req.Response_data = 0
 			req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
-			req = <- my_chan												// block until we have a response back
+			req = <- my_chan													// block until we have a response back
 
-			if req.Response_data.(int) == 2 {								// wait until we have everything in the network
+			if req.Response_data.(int) == 2 {									// wait until we have everything in the network
 				break
 			}
 
@@ -184,7 +186,8 @@ func main() {
 		}
 	}
 
-	managers.Set_accept_state( true )			// it's now safe to allow http interface to accept requests
+	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know
+	managers.Set_accept_state( true )								// http doesn't have a control loop like others, so needs this
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)
 	wgroup.Wait( )

@@ -37,6 +37,7 @@
 				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
 				03 Sep 2014 : Correcte bug introduced with fq_req changes (ignored protocol and port)
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
+				09 Oct 2014 : Added all_sys_up, and prevent checkpointing until all_sys_up is true.
 */
 
 package managers
@@ -744,6 +745,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		last_qcheck	int64				// time that the last queue check was made to set window
 		queue_gen_type = REQ_GEN_EPQMAP
 		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
+		all_sys_up	bool = false;		// set when we receive the all_up message; some functions (chkpt) must wait for this
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -793,7 +795,6 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	last_qcheck = time.Now().Unix()
 	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )		// push reservations to skoogi just before they go live
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
-	tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
@@ -808,9 +809,15 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				msg.State = inv.Add_res( p )
 				msg.Response_data = nil
 
+			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
+				all_sys_up = true
+				tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
+
 			case REQ_CHKPT:
-				rm_sheep.Baa( 3, "invoking checkpoint" )
-				inv.write_chkpt( )
+				if all_sys_up {
+					rm_sheep.Baa( 3, "invoking checkpoint" )
+					inv.write_chkpt( )
+				}
 
 			case REQ_DEL:											// user initiated delete -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
