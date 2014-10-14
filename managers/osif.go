@@ -14,7 +14,7 @@
 
 				The trick with openstack is that there may be more than one project
 				(tenant) that we need to find VMs in.  We will depend on the config
-				file data (global) which should contain a list of each openstack section 
+				file data (global) which should contain a list of each openstack section
 				defined in the config, and for each section we expect it to contain:
 
 					url 	the url for the authorisation e.g. "http://135.197.225.209:5000/"
@@ -36,23 +36,24 @@
 				19 May 2014 - Changes to support floating ip translation map generation.
 				05 Jun 2014 - Added support for pulling all tenants rather than just those
 					listed with credientials and building project to ID map.
-				07 Jun 2014 - Added function to validate hosts if supplied with token and 
-					to translate project (tenant) name into an ID. 
+				07 Jun 2014 - Added function to validate hosts if supplied with token and
+					to translate project (tenant) name into an ID.
 				09 Jun 2014 - Converted the openstack cred list to a map.
-				10 Jun 2014 - Changes to ignore the "_ref_" entry in the cred map. 
-				21 Jun 2014 - Clarification in comment. 
+				10 Jun 2014 - Changes to ignore the "_ref_" entry in the cred map.
+				21 Jun 2014 - Clarification in comment.
 				29 Jun 2014 - Changes to support user link limits.
 				06 Jul 2014 - Changes to support refresh reservations.
 				15 Jul 2014 - Added support for dash (-) as a token which skips authorisation
 					but marks the resulting ID as unauthorised with a leading dash.
-				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
+				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when
 					vm names have a dash (gak).
 				14 Aug 2014 - Corrected comment.
 				15 Aug 2014 - Changed pointer reference on calls to ostk for clarity (was os).
 				19 Aug 2014 - Fix for bug #202 -- need to return nil if project ID not known.
-				30 Sep 2014 - For what ever reason, the ccp environment wasn't returning a 
-					full complement of mac addresses on  a single call, so we now revert to 
+				30 Sep 2014 - For what ever reason, the ccp environment wasn't returning a
+					full complement of mac addresses on  a single call, so we now revert to
 					making a call for each project.
+				02 Oct 2014 - TGUOSI007 message eliminated as it duplcated 005.
 */
 
 package managers
@@ -84,19 +85,19 @@ import (
 /*
 	Given a raw string of the form [[<token>]/{project-name|ID}]/<data> verify
 	that token is valid for project, and translate project to an ID.  The resulting output
-	is a string tenant_id/<data> (token is stripped) if the token was valid for the project. 
-	If the token was not valid, then the resulting string is nil and error will be set. 
+	is a string tenant_id/<data> (token is stripped) if the token was valid for the project.
+	If the token was not valid, then the resulting string is nil and error will be set.
 
-	If token is omitted from the raw string, and is not required, the project name is 
-	translated to a tenant ID in the resulting string (if supplied). If the token is reqired, 
+	If token is omitted from the raw string, and is not required, the project name is
+	translated to a tenant ID in the resulting string (if supplied). If the token is reqired,
 	the input is considered invalid if it is missing and nil is returned with an appropriate
 	eror message in error.
 
-	If tok_req is true, then the raw string passed in _must_ contain a valid token and 
+	If tok_req is true, then the raw string passed in _must_ contain a valid token and
 	is considered invalid if it does not.
 
 	Yes, we could loop through os_list assuming we're looking for a project name, but
-	it's cleaner to maintain a hash. 
+	it's cleaner to maintain a hash.
 */
 func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id map[string]*string, tok_req bool ) ( *string, error ) {
 	var (
@@ -170,8 +171,8 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 
 
 /*
-	Verifies that the token passed in is a valid token for the default user given in the 
-	config file. 
+	Verifies that the token passed in is a valid token for the default user given in the
+	config file.
 	Returns "ok" if it is good, and an error otherwise. 	
 */
 func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
@@ -207,8 +208,8 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 }
 
 /*
-	Returns a list of openstack compute and network hosts. Hosts where OVS is likely 
-	running. 
+	Returns a list of openstack compute and network hosts. Hosts where OVS is likely
+	running.
 */
 func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	var (
@@ -336,7 +337,7 @@ probably because we're not admin on every project and it's impossible to tell wh
 }
 
 /*
-	Generate a map containing the translation from IP address to MAC address. 
+	Generate a map containing the translation from IP address to MAC address.
 	Must run them all because in ccp we don't get everything with one call.
 */
 func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
@@ -347,7 +348,7 @@ func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[st
 		if k != "_ref_" {
 			m, _, err = ostk.Mk_mac_maps( m, nil, inc_tenant )	
 			if err != nil {
-				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI007]", os_refs["_ref_"].To_str( ), err )
+				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
 				return
 			}
 		}
@@ -378,7 +379,7 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string 
 	has a copy and is working from it a change to the map isn't disruptive.
 
 	This function also sets a reference ("_ref_") entry in the map which can be used to pull
-	an entry out when any of them will do. 
+	an entry out when any of them will do.
 */
 func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id2pname map[string]*string ) ( creds map[string]*ostack.Ostack, err error ) {
 	var (
@@ -399,7 +400,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s   [TGUOSI008]", *v )
 				delete( creds, *v )
-			} 
+			}
 		} else {
 			creds[*v] = old_list[*v]					// reuse the data
 			osif_sheep.Baa( 2, "reusing credentials for: %s", *v )
@@ -421,9 +422,9 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 
 
 /*
-	generate maps and send them to network manager.  This runs as a go routine so that 
+	generate maps and send them to network manager.  This runs as a go routine so that
 	it doesn't block the main event processing.  It blocks waiting for an updated list
-	of openstack credentials, so it will run each time the credentials are updated. 
+	of openstack credentials, so it will run each time the credentials are updated.
 */
 func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 
@@ -537,10 +538,10 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	// ---- pick up configuration file things of interest --------------------------
 
 	if cfg_data["osif"] != nil {								// cannot imagine that this section is missing, but don't fail if it is
-		p := cfg_data["osif"]["include_tenant"] 
+		p := cfg_data["osif"]["include_tenant"]
 		if p != nil {
 			if *p == "true" {
-				inc_tenant = true							// see require token option below 
+				inc_tenant = true							// see require token option below
 			}
 		}
 		def_passwd = cfg_data["osif"]["passwd"]				// defaults applied if non-section given in list, or info omitted from the section
@@ -548,7 +549,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		def_url = cfg_data["osif"]["url"]
 		def_project = cfg_data["osif"]["project"]
 	
-		p = cfg_data["osif"]["refresh"] 
+		p = cfg_data["osif"]["refresh"]
 		if p != nil {
 			refresh_delay = clike.Atoi( *p ); 			
 			if refresh_delay < 15 {
@@ -725,15 +726,15 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_PNAME2ID:							// user, project, tenant (what ever) name to ID
 				if msg.Response_ch != nil {
-					msg.Response_data = pname2id[*(msg.Req_data.( *string ))] 
+					msg.Response_data = pname2id[*(msg.Req_data.( *string ))]
 					if msg.Response_data.( *string ) == nil  {						// maybe it was an ID that came in
 						if id2pname[*(msg.Req_data.( *string ))] != nil {			// if in id map, then return the stirng (the id) they passed (#202)
 							msg.Response_data = msg.Req_data.( *string )
 						} else {
-							msg.Response_data = nil									// couldn't translate 
+							msg.Response_data = nil									// couldn't translate
 						}
-					} 
-				} 
+					}
+				}
 				
 
 			default:
