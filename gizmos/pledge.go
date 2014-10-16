@@ -450,7 +450,7 @@ func (p *Pledge) Is_active_soon( window int64 ) ( bool ) {
 	pledge.
 */
 func (p *Pledge) Is_valid_cookie( c *string ) ( bool ) {
-fmt.Fprintf( os.Stderr, "__>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
+	//fmt.Fprintf( os.Stderr, "pledge:>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
 	return *c == *p.usrkey 
 }
 
