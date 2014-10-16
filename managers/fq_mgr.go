@@ -27,9 +27,10 @@
 				25 Aug 2014 - Major rewrite to send_fmod_agent; now uses the fq_req struct to make it more
 					generic and flexible.
 				27 Aug 2014 - Small fixes during testing. 
-				03 Sep 2014 - Correcte bug introduced with fq_req changes (ignored protocol and port)
+				03 Sep 2014 - Correct bug introduced with fq_req changes (ignored protocol and port)
 				23 Sep 2014 - Added suport for multiple tables in order to keep local traffic off of the rate limit bridge.
 				24 Sep 2014 - Added vlan_id support. Added support ITONS dscp demands.
+				14 Oct 2014 - Added check to prevent ip2mac table from being overlaid if new table is empty.
 */
 
 package managers
@@ -596,8 +597,17 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
 					if  msg.Response_data != nil {
-						ip2mac = msg.Response_data.( map[string]*string )
-						fq_sheep.Baa( 2, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
+						newmap := msg.Response_data.( map[string]*string )
+						if len( newmap ) > 0  {
+							ip2mac = newmap										// safe to replace
+							fq_sheep.Baa( 2, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
+						}else {
+							if ip2mac != nil {
+								fq_sheep.Baa( 2, "ip2mac translation received from osif: 0 elements -- kept old table with %d elements", len( ip2mac ) )
+							} else {
+								fq_sheep.Baa( 2, "ip2mac translation received from osif: 0 elements -- no existing table to keep" )
+							}
+						}
 					} else {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected ip2mac translation map  [TGUFQM010]" )
 					}

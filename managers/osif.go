@@ -54,6 +54,8 @@
 					full complement of mac addresses on  a single call, so we now revert to
 					making a call for each project.
 				02 Oct 2014 - TGUOSI007 message eliminated as it duplcated 005.
+				14 Oct 2014 - Corrected error count reset in gen_maps. Added additional check
+					to ensure that empty maps are ignored.
 */
 
 package managers
@@ -380,10 +382,13 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string 
 
 	This function also sets a reference ("_ref_") entry in the map which can be used to pull
 	an entry out when any of them will do.
+
+	NOTE: All errors will be logged, but only the first error will be returned to the caller.
 */
-func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id2pname map[string]*string ) ( creds map[string]*ostack.Ostack, err error ) {
+func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id2pname map[string]*string ) ( creds map[string]*ostack.Ostack, gerr error ) {
 	var (
 		r	*ostack.Ostack
+		err	error
 	)
 
 	creds = make( map[string]*ostack.Ostack )			// new map to fill in
@@ -400,6 +405,9 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s   [TGUOSI008]", *v )
 				delete( creds, *v )
+			}
+			if gerr == nil {			// ensure error captured for return if last in list is good
+				gerr = err
 			}
 		} else {
 			creds[*v] = old_list[*v]					// reuse the data
@@ -432,71 +440,80 @@ func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
 	osif_sheep.Baa( 1, "gen_maps sub-go is running" )
 
 	for {
+			err_count = 0
+
 			os_refs :=<- data_ch
 				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, ip2fip, fip2ip, _ := map_all( *os_refs, inc_tenant )
 				// ignore errors as a bad entry for one ostack credential shouldn't spoil the rest of the info gathering; we send only non-nil maps
-				if vm2ip != nil {
+				if vm2ip != nil && len( vm2ip ) > 0 {
 					osif_sheep.Baa( 2, "vm2ip map has %d entries", len( vm2ip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: vm2ip (nil=%v)", vm2ip == nil )
 					err_count++
 				}
 	
-				if vmid2ip != nil {
+				if vmid2ip != nil && len( vmid2ip ) > 0 {
 					osif_sheep.Baa( 2, "vmid2ip map has %d entries", len( vmid2ip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2IP, vmid2ip, nil )					
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: vmid2ip (nil=%v)", vmid2ip == nil )
 					err_count++
 				}
 	
-				if ip2vmid != nil {
+				if ip2vmid != nil && len( ip2vmid ) > 0 {
 					osif_sheep.Baa( 2, "ip2vmid map has %d entries", len( ip2vmid ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2VMID, ip2vmid, nil )				
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: ip2vmid (nil=%v)", ip2vmid == nil )
 					err_count++
 				}
 	
-				if vmid2host != nil {
+				if vmid2host != nil && len( vmid2host ) > 0 {
 					osif_sheep.Baa( 2, "vmid2host map has %d entries", len( vmid2host ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_VMID2PHOST, vmid2host, nil )		
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: vmid2host (nil=%v)", vmid2host == nil )
 					err_count++
 				}
 	
-				if ip2mac != nil {
+				if ip2mac != nil && len( ip2mac ) > 0 {
 					osif_sheep.Baa( 2, "ip2mac map has %d entries", len( ip2mac ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: ip2mac (nil=%v)", ip2mac == nil )
 					err_count++
 				}
 	
-				if gwmap != nil {
+				if gwmap != nil && len( gwmap ) > 0 {
 					osif_sheep.Baa( 2, "gwmap map has %d entries", len( gwmap ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_GWMAP, gwmap, nil )		
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: gwmap (nil=%v)", gwmap == nil )
 					err_count++
 				}
 
-				if ip2fip != nil {
+				if ip2fip != nil && len( ip2fip ) > 0 {
 					osif_sheep.Baa( 2, "ip2fip map has %d entries", len( ip2fip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_IP2FIP, ip2fip, nil )		
 				} else {
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: ip2fip (nil=%v)", ip2fip == nil )
 					err_count++
 				}
 
-				if fip2ip != nil {
+				if fip2ip != nil && len( fip2ip ) > 0 {
 					osif_sheep.Baa( 2, "fip2ip map has %d entries", len( fip2ip ) )
 					msg := ipc.Mk_chmsg( )
 					msg.Send_req( nw_ch, nil, REQ_FIP2IP, fip2ip, nil )		
 				} else {
-					osif_sheep.Baa( 2, "nil map not sent to network: fip2ip" )
+					osif_sheep.Baa( 2, "nil or empty map not sent to network: fip2ip (nil=%v)", fip2ip == nil )
 					err_count++
 				}
 
