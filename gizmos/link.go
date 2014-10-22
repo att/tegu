@@ -38,6 +38,7 @@
 				28 Jul 2014 - Added mlag support
 				18 Aug 2014 - Has_capacity now passes back error message.
 				05 Sep 2014 - Pick up late binding port info if port is <0 rather than 0.
+				19 Oct 2014 - Comment change
 */
 
 package gizmos
@@ -77,8 +78,8 @@ type Link struct {
 	If bond is supplied, it is assumed to be a one element slice containing another
 	link from which the allotment obligation is fetched and will be referenced by the 
 	link rather than creating a new obligation. Binding two links to an obligation
-	allows for easy accounting of total usage allocated (both directions) for the
-	bidirectional path that the two links represent. 
+	allows for easy accounting of total usage allocated (both directions) if the link
+	isn't full dupliex.
 */
 func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, mlag *string, bond ...*Link ) ( l *Link ) {
 	var id string

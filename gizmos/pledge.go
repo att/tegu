@@ -28,7 +28,7 @@ import (
 	//"io/ioutil"
 	//"html"
 	//"net/http"
-	"os"
+	//"os"
 	"strings"
 	"time"
 
@@ -450,7 +450,7 @@ func (p *Pledge) Is_active_soon( window int64 ) ( bool ) {
 	pledge.
 */
 func (p *Pledge) Is_valid_cookie( c *string ) ( bool ) {
-fmt.Fprintf( os.Stderr, "__>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
+	//fmt.Fprintf( os.Stderr, "pledge:>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
 	return *c == *p.usrkey 
 }
 
@@ -600,4 +600,11 @@ func (p *Pledge) Get_path_list( ) ( []*Path ) {
 		return nil
 	}
 	return p.path_list
+}
+
+/*
+	Return the commence and expriy times.
+*/
+func (p *Pledge) Get_window( ) ( int64, int64 ) {
+	return p.commence, p.expiry
 }

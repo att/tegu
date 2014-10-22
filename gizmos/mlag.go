@@ -118,13 +118,10 @@ func (m *Mlag) Rm_link( lob *Obligation ) {
 func (m *Mlag) Inc_utilisation( commence int64, conclude int64, delta int64, usr *Fence, skip *Obligation ) {
 	for i := 0; i < m.lidx; i++ {
 		if m.llist[i] != nil && m.llist[i] != skip {
-
 			msg := m.llist[i].Inc_utilisation( commence, conclude, delta, usr )	
-if msg == nil {
-mg := "no message"
-msg = &mg
-}
-obj_sheep.Baa( 1, "utilisation increased for mlag member: %s", *msg )
+			if msg != nil {
+				obj_sheep.Baa( 1, "utilisation increased for mlag %s: %s", m.name,  *msg )
+			}
 		}
 	}
 }

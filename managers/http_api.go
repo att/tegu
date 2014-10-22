@@ -580,7 +580,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							}
 		
 							if err == nil {
-								res_name = mk_resname( )											// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+								res_name = mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
 								res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
 							}
 						}
