@@ -28,7 +28,7 @@ import (
 	//"io/ioutil"
 	//"html"
 	//"net/http"
-	"os"
+	//"os"
 	"strings"
 	"time"
 
@@ -600,4 +600,11 @@ func (p *Pledge) Get_path_list( ) ( []*Path ) {
 		return nil
 	}
 	return p.path_list
+}
+
+/*
+	Return the commence and expriy times.
+*/
+func (p *Pledge) Get_window( ) ( int64, int64 ) {
+	return p.commence, p.expiry
 }

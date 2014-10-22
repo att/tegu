@@ -267,10 +267,11 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 							fmod.Extip = &empty_str
 						}
 
-						ext_dst_str := "-D"								// if an external address is involved we must set the direction (dest or src)
-						ext_src_str := "-S"
+						//ext_dst_str := "-D"								// if an external address is involved we must set the direction (dest or src)
+						//ext_src_str := "-S"
 
-						espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
+						//espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
+						espq1, _ := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
 														//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
 						tptype_list := "none"							// default to no specific protocol 
@@ -279,17 +280,18 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 						}
 						tptype_toks := strings.Split( tptype_list, " " )
 		
-						for tidx := range( tptype_toks ) {
+						for tidx := range( tptype_toks ) {				// must have a flow mod for each transport protocol type
 							fmod.Tptype = &tptype_toks[tidx]
 
 							fmod.Match.Tpsport= p1											// forward direction transport ports are h1==src h2==dest
 							fmod.Match.Tpdport= p2
 							fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
 							fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
-							fmod.Exttyp = &ext_dst_str										// ext dest (if there) is in the dest direction first
+							//fmod.Exttyp = &ext_dst_str										// ext dest (if there) is in the dest direction first
+							fmod.Exttyp = plist[i].Get_extflag()
 
-							rm_sheep.Baa( 1, "res_mgr/push_reg: sending forward i/e flow-mods for path %d: %s type=%s h1=%s --> h2=%s ip1/2= %s/%s exp=%d",
-								i, rname, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, expiry )
+							rm_sheep.Baa( 1, "res_mgr/push_reg: sending i/e flow-mods for path %d: %s flag=%s tptyp=%s h1=%s --> h2=%s ip1= %s ip2=%s ext=%s exp=%d",
+								i, rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Extip, expiry )
 
 		
 							// ---- push flow-mods in the h1->h2 direction -----------
@@ -322,6 +324,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
 							}
 
+/*
+now that there are two explicit paths (forward and backward) we only set forward direction flow-mods for each path
 							// ---- push flow-mods in the h2->h1 direction -----------
 							rev_rname := "R" + rname										// the egress link has an R(name) queue name
 							fmod.Match.Tpsport = p2
@@ -360,6 +364,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 								msg = ipc.Mk_chmsg()
 								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in backwards direction
 							}
+*/
 
 						}
 					}
