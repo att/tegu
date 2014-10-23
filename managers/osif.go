@@ -202,6 +202,7 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 			m, err = ostk.Mk_vm2ip( m )
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: mapvm2ip: openstack query failed: %s   [TGUOSI000]", err )
+				ostk.Expire()			// force re-auth next go round
 			}
 		}
 	}
@@ -233,6 +234,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 			list, err = ostk.List_hosts( ostack.COMPUTE | ostack.NETWORK )	
 			if err != nil {
 				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
+				ostk.Expire()					// force re-auth next go round
 				return							// drop out on first error with no list
 			} else {
 				if *list != "" {
@@ -294,23 +296,27 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 			if err != nil {
 				osif_sheep.Baa( 2, "WRN: unable to map VM info: %s; %s   [TGUOSI003]", ostk.To_str( ), err )
 				rerr = err
+				ostk.Expire()					// force re-auth next go round
 			}
 	
 			ip2fip, fip2ip, err = ostk.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
 			if err != nil {
 				osif_sheep.Baa( 2, "WRN: unable to map VM info: %s; %s   [TGUOSI004]", ostk.To_str( ), err )
 				rerr = err
+				ostk.Expire()					// force re-auth next go round
 			}
 
 			ip2mac, _, err = ostk.Mk_mac_maps( ip2mac, nil, inc_tenant )	
 			if err != nil {
 				osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", ostk.To_str( ), err )
 				rerr = err
+				ostk.Expire()					// force re-auth next go round
 			}
 
 			gwmap, _, err = ostk.Mk_gwmaps( gwmap, nil, inc_tenant, false )		
 			if err != nil {
 				osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", ostk.To_str( ), err )
+				ostk.Expire()					// force re-auth next go round
 			} else {
 				osif_sheep.Baa( 2, "gw map has %d entries", len( gwmap ) )
 			}
@@ -325,11 +331,14 @@ probably because we're not admin on every project and it's impossible to tell wh
 	if err != nil {
 		osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
 		rerr = err
+		ostk.Expire()					// force re-auth next go round
 	}
 
 	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( gwmap, nil, inc_tenant, false )		// second true is use project which we need right now
 	if err != nil {
 		osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", os_refs["_ref_"].To_str( ), err )
+		ostk.Expire()					// force re-auth next go round
+	}
 	} else {
 		osif_sheep.Baa( 2, "gw map has %d entries", len( gwmap ) )
 	}
@@ -351,6 +360,7 @@ func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[st
 			m, _, err = ostk.Mk_mac_maps( m, nil, inc_tenant )	
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
+				ostk.Expire()					// force re-auth next go round
 				return
 			}
 		}
