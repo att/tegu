@@ -61,6 +61,7 @@
 							as host only where OVS is running and not all network hosts. 
 				19 Oct 2014 : Added bidirectional bandwith support (bug 228). (version bump to 3.0.1 because of 
 							extra testing needed.)
+				23 Oct 2014 : Added better diagnostics to the user regarding capacity rejection of reservation (bug 239)
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -90,7 +91,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/1a194"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/1a234"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

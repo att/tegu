@@ -728,7 +728,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	This function assumes that the switches have all been initialised with a reset of the visited flag,
 	setting of inital cost, etc.
 */
-func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path ) {
+func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, cap_trip bool ) {
 	h1nm := h1.Get_mac()
 	h2nm := h2.Get_mac()
 	path = nil
@@ -741,7 +741,7 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 	}
 
 	ssw.Cost = 0														// seed the cost in the source switch
-	tsw := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
+	tsw, cap_trip := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
 		path = gizmos.Mk_path( h1, h2 )
 		path.Set_reverse( true )								// indicate that the path is saved in reverse order 
@@ -846,7 +846,7 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 
 	DEPRECATED: if the second host is "0.0.0.0", then we will return a path list containing every link we know about :)
 */
-func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence int64, conclude int64, inc_cap int64, extip *string, ext_flag *string, find_all bool ) ( pcount int, path_list []*gizmos.Path ) {
+func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence int64, conclude int64, inc_cap int64, extip *string, ext_flag *string, find_all bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
 	var (
 		path	*gizmos.Path
 		ssw 	*gizmos.Switch		// starting switch
@@ -857,6 +857,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		plidx	int = 0
 		swidx	int = 0				// index into host's switch list
 		err		error
+		lcap_trip bool = false		// local capacity trip flag; indicates one or more paths blocked by capacity limits
 	)
 
 	h1 = n.hosts[*h1nm]
@@ -896,9 +897,10 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		if ssw == nil {										// no more source switches which h1 thinks it's attached to
 			pcount = plidx
 			if pcount <= 0 || swidx == 0 {
-				net_sheep.Baa( 1, "find-path: early exit? no switch/port returned for h1 (%s) at index %d", *h1nm, swidx )
+				net_sheep.Baa( 1, "find-path: early exit? no switch/port returned for h1 (%s) at index %d captrip=%v", *h1nm, swidx, lcap_trip )
 			}
 			path_list = path_list[0:pcount]					// slice it down to size
+			cap_trip = lcap_trip							// set with overall state
 			return
 		}
 
@@ -924,6 +926,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 					path_list[plidx] = path
 					plidx++
 				} else {
+					lcap_trip = true
 					if err != nil {
 						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d: %s", plidx, inc_cap, err )
 					} else {
@@ -951,7 +954,10 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 					net_sheep.Baa( 1, "find_paths: find_all failed: %s", err )
 				}
 			} else {
-				path = n.find_shortest_path( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )
+				path, cap_trip = n.find_shortest_path( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )
+				if cap_trip {
+					lcap_trip = true
+				}
 			}
 
 			if path != nil {
@@ -963,6 +969,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	}
 
 	pcount = plidx			// shouldn't get here, but safety first
+	cap_trip = lcap_trip
 	return
 }
 
@@ -977,12 +984,18 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	If find_all is true we will find all paths between each host, not just the shortest.  This should not 
 	be confused with finding all paths when the network is split as that _always_ happens and by default
 	we find just the shortest path in each split network. 
+
+	Cap_trip indicates that one or more paths could not be found because of capacity issues. If this is 
+	set there is still a possibility that the path was not found because it doesn't exist, but a 
+	capacity limit was encountered before 'no path' was discovered.  The state of the flag is only 
+	valid if the pathcount returend is 0.
 */
-func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool ) ( pcount int, path_list []*gizmos.Path ) {
+func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
 	var (
 		num int = 0				// must declare num as := assignment doesnt work when ipath[n] is in the list
 		src_flag string = "-S"	// flags that indicate which direction the external address is 
 		dst_flag string = "-D"
+		lcap_trip bool = false	// overall capacity caused failure indicator
 	)
 
 	path_list = nil
@@ -999,7 +1012,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 
 	ext_flag := &dst_flag
 	for i := range pair_list {
-		num, ipaths[i] = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
+		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
 		if num > 0 {
 			total_paths += num
 			ok_count++
@@ -1008,15 +1021,19 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation 
 			}
 		} else {
-			net_sheep.Baa( 1, "path not found between: %s and %s", *pair_list[i].h1, *pair_list[i].h2 )
+			net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", *pair_list[i].h1, *pair_list[i].h2, cap_trip )
+			if cap_trip {
+				lcap_trip = true
+			}
 		}
 
 		ext_flag = &src_flag
 	}
 
 	if ok_count < len( pair_list ) {								// didn't find a good path for each pair
-		net_sheep.Baa( 1, "did not find a good path for each pair; expected %d, found %d", len( pair_list ), ok_count )
+		net_sheep.Baa( 1, "did not find a good path for each pair; expected %d, found %d cap_trip=%v", len( pair_list ), ok_count, lcap_trip )
 		pcount = 0
+		cap_trip = lcap_trip
 		return 
 	}
 
@@ -1306,8 +1323,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-						pcount_in, path_list_out := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths ); 
-						pcount_out, path_list_in := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths ); 
+						pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths ); 
+						pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths ); 
 
 						if pcount_out > 0  && pcount_in > 0  {
 							path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
@@ -1324,7 +1341,15 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							req.State = nil
 						} else {
 							req.Response_data = nil
-							req.State = fmt.Errorf( "unable to generate a path; no capacity or no path" )
+							if i_cap_trip {
+								req.State = fmt.Errorf( "unable to generate a path: no capacity (h1<-h2)" )		// tedious, but we'll break out direction 
+							} else {
+								if o_cap_trip {
+									req.State = fmt.Errorf( "unable to generate a path: no capacity (h1->h2)" )
+								} else {
+									req.State = fmt.Errorf( "unable to generate a path:  no path" )
+								}
+							}
 						}
 
 					case REQ_RESERVE:
@@ -1341,11 +1366,11 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 						if err == nil {
 							net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-							pcount_out, path_list_out := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths ); 	// outbound path
-							pcount_in, path_list_in := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths ); 		// inbound path
+							pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths ); 	// outbound path
+							pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths ); 		// inbound path
 
 							if pcount_out > 0  &&  pcount_in > 0  {
-								net_sheep.Baa( 1,  "network: %d acceptable path(s) found", pcount_out + pcount_in )
+								net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
 
 								path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
 								pcount := 0
@@ -1375,8 +1400,16 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								req.State = nil
 							} else {
 								req.Response_data = nil
-								req.State = fmt.Errorf( "unable to generate a path; no capacity or no path" )
-								net_sheep.Baa( 0,  "no paths in list: %s", req.State )
+								if i_cap_trip {
+									req.State = fmt.Errorf( "unable to generate a path: no capacity (h1<-h2)" )		// tedious, but we'll break out direction 
+								} else {
+									if o_cap_trip {
+										req.State = fmt.Errorf( "unable to generate a path: no capacity (h1->h2)" )
+									} else {
+										req.State = fmt.Errorf( "unable to generate a path:  no path" )
+									}
+								}
+								net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
 							}
 						} else {
 							net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )

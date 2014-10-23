@@ -18,6 +18,8 @@
 					the shortest one.
 				29 Jun 2014 - Changes to support user link limits.
 				29 Jul 2014 : Mlag support
+				23 Oct 2014 - Find path functions return an indication that no path might have been 
+					caused by a capacity issue rather than no path.
 */
 
 package gizmos
@@ -178,16 +180,16 @@ func (s *Switch) Get_link( i int ) ( l *Link ) {
 	The target may be the name of the host we're looking for, or the ID of the
 	endpoint switch to support finding a path to a "gateway".
 */
-func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap int64, usr *string, usr_max int64 ) (found *Switch) {
+func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap int64, usr *string, usr_max int64 ) ( found *Switch, cap_trip bool ) {
 	var (
 		fsw	*Switch			// next neighbour switch (through link)
 	)
 
 	found = nil
+	cap_trip = false
 
 	//fmt.Printf( "\n\nsearching neighbours of (%s) for %s\n", s.To_str(), *target )
 	for i := 0; i < s.lidx; i++ {
-		//if s != fsw  &&  s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) {
 		if s != fsw  {
   			has_room, err := s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max ) 
 			if has_room {
@@ -212,6 +214,7 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 				}
 			}  else {
 				obj_sheep.Baa( 2, "no capacity on link: %s", err )
+				cap_trip = true
 			}
 		}
 	}
@@ -229,17 +232,27 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 
 	The usr_max vlaue is a percentage (1-100) which indicaes the max percentage
 	of a link that the user may reserve. 
+
+	The cap_trip return value is set to true if one or more links could not be
+	followed because of capacity. If return switch is nil, and cap-trip is true
+	then the most likely cause of failure is capacity, though it _is_ possible that
+	there really is no path between the swtich and the target, but we stunbled onto
+	a link at capacity before discovering that there is no real path.  The only way
+	to know for sure is to run two searches, first with inc_cap of 0, but that seems
+	silly.
 		
 */
-func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr *string, usr_max int64 ) (found *Switch) {
+func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr *string, usr_max int64 ) ( found *Switch, cap_trip bool ) {
 	var (
 		sw		*Switch
 		fifo 	[]*Switch
 		push 	int = 0
 		pop 	int = 0
 		pidx 	int = 0
+		lcap_trip	bool = false		// local detection of capacity exceeded on one or more links
 	)
 
+	cap_trip = false
 	found = nil
 	fifo = make( []*Switch, 4096 )
 
@@ -255,9 +268,12 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr
 			pop = 0; 
 		}
 
-		found = sw.probe_neighbours( target, commence, conclude, inc_cap, usr, usr_max )
+		found, cap_trip = sw.probe_neighbours( target, commence, conclude, inc_cap, usr, usr_max )
 		if found != nil {
 			return
+		}
+		if cap_trip {
+			lcap_trip = true			// must preserve this 
 		}
 		
 		if sw.Flags & tegu.SWFL_VISITED == 0 {				// possible that it was pushed multiple times and already had it's neighbours queued
@@ -273,6 +289,7 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr
 					}
 				} else {
 					obj_sheep.Baa( 2, "no capacity on link: %s", err )
+					lcap_trip = true
 				}
 			}
 		}
@@ -283,6 +300,7 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64, usr
 		}
 	}
 
+	cap_trip = lcap_trip		// indication that we tripped on capacity at least once if lcap was set
 	return
 }
 // -------------------- find all paths ------------------------------------------------
