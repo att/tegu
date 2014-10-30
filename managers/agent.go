@@ -15,6 +15,8 @@
 					Added ability to send the map_mac2phost request to the agent. 
 				13 May 2014 : Added support for exit-dscp value.
 				05 Jun 2014 : Fixed stray reference to net_sheep. 
+				29 Oct 2014 : Corrected potential core dump if agent msg received is less than
+					100 bytes.
 */
 
 package managers
@@ -448,7 +450,11 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						
 					case connman.ST_DATA:
 						if _, not_nil := adata.agents[sreq.Id]; not_nil {
-							am_sheep.Baa( 2, "data: [%s]  %d bytes received:  first 100b: %s", sreq.Id, len( sreq.Buf ), sreq.Buf[0:100] )
+							cval := 100
+							if len( sreq.Buf ) < 100 {						// don't try to go beyond if chop value too large
+								cval = len( sreq.Buf )
+							}
+							am_sheep.Baa( 2, "data: [%s]  %d bytes received:  first 100b: %s", sreq.Id, len( sreq.Buf ), sreq.Buf[0:cval] )
 							adata.agents[sreq.Id].process_input( sreq.Buf )
 						} else {
 							am_sheep.Baa( 1, "data from unknown agent: [%s]  %d bytes ignored:  %s", sreq.Id, len( sreq.Buf ), sreq.Buf )

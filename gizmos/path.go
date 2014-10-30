@@ -42,6 +42,7 @@
 				07 Jul 2014 - Changed to fix queue deletion when a reservation is deleted.
 				29 Jul 2014 - Mlag support
 				19 Oct 2014 - Support setting queues only on outbound direction of path.
+				29 Oct 2014 - Added Get_nlinks() function.
 */
 
 package gizmos
@@ -150,6 +151,13 @@ func (p *Path) Set_scramble( state bool ) {
 */
 func (p *Path) Get_bandwidth( ) ( int64 )  {
 	return p.bw_amt
+}
+
+/*
+	Return the number of links in the path.
+*/
+func (p *Path) Get_nlinks( ) ( int ) {
+	return p.lidx
 }
 
 /*

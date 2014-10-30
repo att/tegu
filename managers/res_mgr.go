@@ -35,9 +35,10 @@
 						meta marking of reservation traffic).
 				28 Aug 2014 : Added message tags to crit/err/warn messages.
 				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
-				03 Sep 2014 : Correcte bug introduced with fq_req changes (ignored protocol and port)
+				03 Sep 2014 : Corrected bug introduced with fq_req changes (ignored protocol and port)
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
 				09 Oct 2014 : Added all_sys_up, and prevent checkpointing until all_sys_up is true.
+				29 Oct 2014 : Corrected bug -- setting vlan id when VMs are on same switch.
 */
 
 package managers
@@ -260,6 +261,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 						}
 						fmod.Id = &rname
 
+						nlinks := plist[i].Get_nlinks() 				// if only one link, then we DONT set vlan later
 						extip := plist[i].Get_extip()					// if an external IP address is necessary on the fmod get it
 						if extip != nil {
 							fmod.Extip = extip
@@ -309,7 +311,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 							cfmod := fmod.Clone( )
 							cfmod.Espq = plist[i].Get_ilink_spq( &rname, timestamp )				// send fmod to ingress switch on first link out from h1
 							cfmod.Dir_in = false
-							if set_vlan {
+							if nlinks > 1 && set_vlan {
 								cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
 							}
 							msg = ipc.Mk_chmsg()
@@ -350,7 +352,7 @@ now that there are two explicit paths (forward and backward) we only set forward
 							fmod.Espq = plist[i].Get_elink_spq( &rev_rname, timestamp )				// send res to egress switch on first link towards h1
 							fmod.Dir_in = false
 							cfmod = fmod.Clone( )													// need a copy to send
-							if set_vlan {
+							if nlinks > 1 && set_vlan {
 								cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
 							}
 							msg = ipc.Mk_chmsg()

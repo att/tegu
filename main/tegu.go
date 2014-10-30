@@ -62,6 +62,7 @@
 				19 Oct 2014 : Added bidirectional bandwith support (bug 228). (version bump to 3.0.1 because of 
 							extra testing needed.)
 				23 Oct 2014 : Added better diagnostics to the user regarding capacity rejection of reservation (bug 239)
+				29 Oct 2014 : Corrected issue where vlan id was being set when both VMs are on the same switch (bug ...)
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -91,7 +92,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/1a234"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/1a294"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
