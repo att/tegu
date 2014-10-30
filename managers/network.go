@@ -42,6 +42,8 @@
 				01 Oct 2014 - Corrected bleat message during network build.
 				09 Oct 2014 - Turned 'down' two more bleat messages to level 2.
 				10 Oct 2014 - Correct bi-directional link bug (228)
+				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly 
+					setting the -S or -D flag for an external IP (#243).
 */
 
 package managers
@@ -316,11 +318,19 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	If the name passed in has a leading bang (!) meaning that it was not 
 	validated, we'll strip it and do the lookup, but will return the resulting 
 	IP address with a leading bang (!) to propigate the invalidness of the address.
+
+	The special case !/ip-addrss is used to designate an external address. It won't
+	exist in our map, and we return it as is.
 */
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
 	lname := *hname								// lookup name - we may have to strip leading !
+
+	if (*hname)[0:2] == "!/" {					// special external name (no tenant string following !)
+		ip = hname
+		return
+	}
 
 	if  (*hname)[0:1] == "!" {					// ignore leading bang which indicate unvalidated IDs
 		lname = (*hname)[1:]
@@ -646,6 +656,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	nalloc := 2												// number to allocate if both validated
 	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out tenant ids
 	t1 := toks[0]
+	f1 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
 	if t1[0:1] == "!" {										// tenant wasn't validated, we use as endpoint, but dont create an end to end path
 		h1_auth = false
 		t1 =  t1[1:]										// drop the not authorised indicator for fip lookup later
@@ -656,6 +667,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 
 	toks = strings.SplitN( *h2ip, "/", 2 )
 	t2 := toks[0]
+	f2 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
 	if  t2[0:1] ==  "!" {									// tenant wasn't validated, we use as endpoint, but dont create an end to end path
 		h2_auth = false
 		t2 =  t2[1:]
@@ -677,8 +689,19 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		return
 	}
 
-	f1 := n.ip2fip[*h1ip]							// dig the floating point IP address for each host (used as dest for flowmods on ingress rules)
-	f2 := n.ip2fip[*h2ip]
+	if !h1_auth && t1 == "" {								// external address as src
+		h1_auth = false										// ensure this
+		f2 = n.ip2fip[*h2ip]								// must assume h2 is the good address, and it must have a fip
+	} else {												// external address as dest
+		if  !h2_auth && t2 == "" {							// external address specified as !//ip-address; we use f2 as captured earlier
+			h2_auth = false									// should be, but take no chances
+			f1 = n.ip2fip[*h1ip]							// must assume f1 is the good address and it musht have a fip
+		} else {											// both are VMs and should have mapped fips; alloc based on previous validitiy check
+			f1 = n.ip2fip[*h1ip]							// dig the floating point IP address for each host (used as dest for flowmods on ingress rules)
+			f2 = n.ip2fip[*h2ip]
+		}
+	}
+
 	if f1 == nil {
 		net_sheep.Baa( 1, "find_endpoints: unable to map host to floating ip: %s", *h1ip )
 		return
@@ -710,7 +733,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list[h2i].usr = &t2
 		pair_list[h2i].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
 	} else {
-		net_sheep.Baa( 1, "h2 was not validated, creating partial path reservation %s <-> %s", *g1, *h1ip )
+		net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
 	}
 
 	return
@@ -843,8 +866,6 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 
 	If find_all is set, and mlog_paths is false, then we will suss out all possible paths between h1 and h2 and not 
 	just the shortest path. 
-
-	DEPRECATED: if the second host is "0.0.0.0", then we will return a path list containing every link we know about :)
 */
 func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence int64, conclude int64, inc_cap int64, extip *string, ext_flag *string, find_all bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
 	var (
@@ -989,13 +1010,17 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	set there is still a possibility that the path was not found because it doesn't exist, but a 
 	capacity limit was encountered before 'no path' was discovered.  The state of the flag is only 
 	valid if the pathcount returend is 0.
+
+	rpath is true if this function is called to build the reverse path.  It is necessary in order to 
+	properly set the external ip address flag (src/dest).
 */
-func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
+func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool, rpath bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
 	var (
 		num int = 0				// must declare num as := assignment doesnt work when ipath[n] is in the list
 		src_flag string = "-S"	// flags that indicate which direction the external address is 
 		dst_flag string = "-D"
 		lcap_trip bool = false	// overall capacity caused failure indicator
+		ext_flag *string		// src/dest flag associated with the external ip address of the path component
 	)
 
 	path_list = nil
@@ -1010,7 +1035,11 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	ok_count := 0 
 	ipaths := make( [][]*gizmos.Path, len( pair_list ) )			// temp holder of each path list resulting from pair_list exploration
 
-	ext_flag := &dst_flag
+	if rpath {
+		ext_flag = &src_flag
+	} else {
+		ext_flag = &dst_flag
+	}
 	for i := range pair_list {
 		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
 		if num > 0 {
@@ -1027,7 +1056,11 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 			}
 		}
 
-		ext_flag = &src_flag
+		if rpath {													// flip the src/dest flag for the second side of the path if two components
+			ext_flag = &dst_flag
+		} else {
+			ext_flag = &src_flag
+		}
 	}
 
 	if ok_count < len( pair_list ) {								// didn't find a good path for each pair
@@ -1180,8 +1213,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence			// user link capacity boundaries
 
-		//pcount	int
-		//path_list	[]*gizmos.Path
 		ip2		*string
 	)
 
@@ -1323,8 +1354,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-						pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths ); 
-						pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths ); 
+						pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths, false ); 
+						pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths, true ); 	// reverse path
 
 						if pcount_out > 0  && pcount_in > 0  {
 							path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
@@ -1366,8 +1397,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 						if err == nil {
 							net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-							pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths ); 	// outbound path
-							pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths ); 		// inbound path
+							pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths, false ); 	// outbound path
+							pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths, true ); 		// inbound path
 
 							if pcount_out > 0  &&  pcount_in > 0  {
 								net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
