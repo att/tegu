@@ -10,6 +10,14 @@
 	Author:		E. Scott Daniels
 
 	Mods:		13 May 2014 -- Added toks2map function.
+				29 Sep 2014 -  The toks2map() funciton now stops parsing when the 
+					first token that does not match a key=value pair in order to 
+					prevent issues with the huge openstack tokens that are base64 
+					encoded and thus may contain tailing equal signs and look like
+					a key=value when they are not.  If the the first token is 
+					key=value, and the openstack auth token is also a key=value
+					pair, then all will be well.  In other words, the caller should
+					not mix things up if values will also contain equal signs.
 */
 
 package gizmos
@@ -96,7 +104,7 @@ func Str2host1_host2( tok string ) ( h1 string, h2 string ) {
 
 /*
 	Parse a set of tokens passed in, assuming they are name=value pairs, and generate a map. 
-	Tokens that are not of the form key=value are ignored.
+	Parsing stops with the first token that isn't name=value and the map is returned as is.
 */
 func Toks2map( toks []string ) ( m map[string]*string ) {
 	m = make( map[string]*string )
@@ -106,6 +114,8 @@ func Toks2map( toks []string ) ( m map[string]*string ) {
 		
 		if len( t ) == 2 {
 			m[t[0]] = &t[1]
+		} else {
+			return
 		}
 	}
 

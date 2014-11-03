@@ -15,6 +15,8 @@
 					Added ability to send the map_mac2phost request to the agent. 
 				13 May 2014 : Added support for exit-dscp value.
 				05 Jun 2014 : Fixed stray reference to net_sheep. 
+				29 Oct 2014 : Corrected potential core dump if agent msg received is less than
+					100 bytes.
 */
 
 package managers
@@ -210,8 +212,8 @@ func ( a *agent ) process_input( buf []byte ) {
     	err := json.Unmarshal( jblob, &req )           // unpack the json 
 
 		if err != nil {
-			am_sheep.Baa( 0, "ERR: unable to unpack agent_message: %s", err )
-			am_sheep.Baa( 2, "ERR: offending json: %s", string( buf ) )
+			am_sheep.Baa( 0, "ERR: unable to unpack agent_message: %s  [TGUAGT000]", err )
+			am_sheep.Baa( 2, "offending json: %s", string( buf ) )
 		} else {
 			am_sheep.Baa( 1, "%s/%s received from agent", req.Ctype, req.Rtype )
 	
@@ -224,18 +226,18 @@ func ( a *agent ) process_input( buf []byte ) {
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
 			
 							default:	
-								am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s", req.Rtype )
+								am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s  [TGUAGT001]", req.Rtype )
 						}
 				} else {
-					am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s", req.Rtype )
+					am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s  [TGUAGT002]", req.Rtype )
 				}
 
 				default:
-					am_sheep.Baa( 1, "WRN:  unrecognised command type type from agent: %s", req.Ctype )
+					am_sheep.Baa( 1, "WRN:  unrecognised command type type from agent: %s  [TGUAGT003]", req.Ctype )
 			}
 		}
 
-		jblob = a.jcache.Get_blob()			// get next blob if the buffer completed one and containe a second
+		jblob = a.jcache.Get_blob()								// get next blob if the buffer completed one and containe a second
 	}
 
 	return
@@ -274,7 +276,7 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 		am_sheep.Baa( 3, "sending mac2phost request: %s", jmsg )
 		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
-		am_sheep.Baa( 1, "WRN: unable to bundle mac2phost request into json: %s", err )
+		am_sheep.Baa( 1, "WRN: unable to bundle mac2phost request into json: %s  [TGUAGT004]", err )
 		am_sheep.Baa( 2, "offending json: %s", jmsg )
 	}
 }
@@ -299,7 +301,7 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 		am_sheep.Baa( 1, "sending intermediate queue setup request: hosts=%s dscp=%s", *hlist, *dscp )
 		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
-		am_sheep.Baa( 0, "WRN: creating json intermedq command failed: %s", err )
+		am_sheep.Baa( 0, "WRN: creating json intermedq command failed: %s  [TGUAGT005]", err )
 	}
 }
 
@@ -331,7 +333,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		port	string = "29055"						// port we'll listen on for connections
 		adata	*agent_data
 		host_list string = ""
-		dscp_list string = "40 41 42"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
+		dscp_list string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
 		refresh int64 = 60
 	)
 
@@ -357,6 +359,9 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	if cfg_data["default"] != nil {						// we pick some things from the default section too
 		if p := cfg_data["default"]["pri_dscp"]; p != nil {			// list of dscp (diffserv) values that match for priority promotion
 			dscp_list = *p
+			am_sheep.Baa( 1, "dscp priority list from config file: %s", dscp_list )
+		} else {
+			am_sheep.Baa( 1, "dscp priority list not in config file, using defauts: %s", dscp_list )
 		}
 	}
 	
@@ -445,7 +450,11 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						
 					case connman.ST_DATA:
 						if _, not_nil := adata.agents[sreq.Id]; not_nil {
-							am_sheep.Baa( 2, "data: [%s]  %d bytes received:  first 100b: %s", sreq.Id, len( sreq.Buf ), sreq.Buf[0:100] )
+							cval := 100
+							if len( sreq.Buf ) < 100 {						// don't try to go beyond if chop value too large
+								cval = len( sreq.Buf )
+							}
+							am_sheep.Baa( 2, "data: [%s]  %d bytes received:  first 100b: %s", sreq.Id, len( sreq.Buf ), sreq.Buf[0:cval] )
 							adata.agents[sreq.Id].process_input( sreq.Buf )
 						} else {
 							am_sheep.Baa( 1, "data from unknown agent: [%s]  %d bytes ignored:  %s", sreq.Id, len( sreq.Buf ), sreq.Buf )

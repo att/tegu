@@ -50,6 +50,9 @@
 					Added support for reservation refresh.
 				17 Jul 2014 : Corrected typo in localhost validation check.
 				18 Jul 2014 : Added better error messaging when unable to open a listening port.
+				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
+				24 Sep 2014 : Added support for ITONS traffic class demands. 
+				09 Oct 2014 : Allow verbose even if network not initialised correctly.
 */
 
 package managers
@@ -332,6 +335,11 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 		ping
 		listconns <hostname|hostip>
 
+
+	Because this is drien from within the go http support library, we expect a few globals 
+	to be in our envronment to make things easier.  
+		accept_requests	bool	set to true if we can accept and process requests. if false any
+								request is failed.
 */
 func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	var (
@@ -384,255 +392,268 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		req_count++
 		state = "ERROR"				// default for each loop; final set based on error count following loop
 		jreason = ""
-		reason = fmt.Sprintf( "you are not authorised to submit a %s command", tokens[0] )
-		http_sheep.Baa( 3, "processing request: %s", tokens[0] )
-		switch tokens[0] {
+		if accept_requests  ||  tokens[0] == "ping"  || tokens[0] == "verbose" {			// always allow ping/verbose if we are up
+			reason = fmt.Sprintf( "you are not authorised to submit a %s command", tokens[0] )
 
-			case "chkpt":
-				if validate_auth( &auth_data, is_token ) {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
-					state = "OK"
-					reason = "checkpoint was requested"
-				} 
+			http_sheep.Baa( 3, "processing request: %s", tokens[0] )
+			switch tokens[0] {
 
-			case "graph":
-				if validate_auth( &auth_data, is_token ) {
-					req = ipc.Mk_chmsg( )
-	
-					req.Send_req( nw_ch, my_ch, REQ_NETGRAPH, nil, nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
-					req = <- my_ch											// hard wait for network thread response
-					if req.Response_data != nil {
-						state = "OK"
-						jreason = string( req.Response_data.(string) )
-						reason = ""
-					} else {
-						reason = "no output from network thread"
-					}
-				} 
-	
-			case "listulcaps":											// list user link capacities known to network manager
-				if validate_auth( &auth_data, is_token ) {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( nw_ch, my_ch, REQ_LISTULCAP, nil, nil )
-					req = <- my_ch
-					if req.State == nil {
-						state = "OK"
-						jreason = string( req.Response_data.(string) )
-						reason = ""
-					} else {
-						reason = fmt.Sprintf( "%s", req.State )
-					}
-				} 
-	
-			case "listhosts":											// list known host information
-				if validate_auth( &auth_data, is_token ) {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( nw_ch, my_ch, REQ_LISTHOSTS, nil, nil )
-					req = <- my_ch
-					if req.State == nil {
-						state = "OK"
-						jreason = string( req.Response_data.(string) )
-						reason = ""
-					} else {
-						reason = fmt.Sprintf( "%s", req.State )
-					}
-				} 
-			
-			case "listres":											// list reservations
-				req = ipc.Mk_chmsg( )
-				req.Send_req( rmgr_ch, my_ch, REQ_LIST, nil, nil )
-				req = <- my_ch
-				if req.State == nil {
-					state = "OK"
-					jreason = string( req.Response_data.(string) )
-					reason = ""
-				} else {
-					reason = fmt.Sprintf( "%s", req.State )
-				}
-				
-
-			case "listconns":								// generate json describing where the named host is attached (switch/port)
-				if ntokens < 2 {
-					nerrors++
-					reason = fmt.Sprintf( "incorrect number of parameters supplied (%d) 1 expected: usage: attached2 hostname", ntokens-1 ); 
-				} else {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( nw_ch, my_ch, REQ_LISTCONNS, &tokens[1], nil )
-					req = <- my_ch
-					if req.State == nil {
-						state = "OK"
-						jreason = string( req.Response_data.(string) )
-						reason = ""
-					} else {
-						reason = fmt.Sprintf( "%s", req.State )
-					}
-				}
-
-			case "pause":
-				if validate_auth( &auth_data, is_token ) {
-					if res_paused {							// already in a paused state, just say so and go on
-						jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
-						state = "WARN"
-					} else {
+				case "chkpt":
+					if validate_auth( &auth_data, is_token ) {
 						req = ipc.Mk_chmsg( )
-						req.Send_req( rmgr_ch, my_ch, REQ_PAUSE, nil, nil )
-						req = <- my_ch
-						if req.State == nil {
-							http_sheep.Baa( 1, "reservations are now paused" )	
-							state = "OK"
-							jreason = string( req.Response_data.( string ) )
-							reason = ""
-							res_paused = true
-						} else {
-							reason = fmt.Sprintf( "s", req.State )
-						}
-					}
-				} 
+						req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
+						state = "OK"
+						reason = "checkpoint was requested"
+					} 
 
-			case "ping":
-				reason = ""
-				jreason = fmt.Sprintf( "\"pong: %s\"", version )
-				state = "OK"
-
-			case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
-				if validate_auth( &auth_data, is_token ) {
-					req = ipc.Mk_chmsg( )
-					req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
-					req = <- my_ch															// get response from the network thread
-					state = "OK"
-					m :=  req.Response_data.( []string )
-					jreason = `{ "queues": [ `
-					sep := ""						// local scope not to trash the global var
-					for i := range m {
-						jreason += fmt.Sprintf( "%s%q", sep, m[i] )
-						sep = "," 
-					}
-					jreason += " ] }"
-					reason = "active queues"
-				}
-				
-			case "refresh":								// refresh reservations for named VM(s)
-				state = "OK"
-				reason = ""
-				if validate_auth( &auth_data, is_token ) {
-					for i := 1; i < ntokens; i++ {
+				case "graph":
+					if validate_auth( &auth_data, is_token ) {
 						req = ipc.Mk_chmsg( )
-						req.Send_req( osif_ch, my_ch, REQ_XLATE_HOST, &tokens[i], nil )		// translate [token/][project/]host-name into ID/hostname
-						req = <- my_ch														// wait for response
+		
+						req.Send_req( nw_ch, my_ch, REQ_NETGRAPH, nil, nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
+						req = <- my_ch											// hard wait for network thread response
 						if req.Response_data != nil {
-							hname := req.Response_data.( *string )
-							req.Send_req( rmgr_ch, my_ch, REQ_PLEDGE_LIST, hname, nil )		// get a list of pledges that are associated with the hostname
-							req = <- my_ch
-							if req.Response_data != nil {
-								plist := req.Response_data.( []*gizmos.Pledge )
-								http_sheep.Baa( 1, "refreshing reservations for %s, %d pledge(s)", *hname, len( plist ) )
-
-								for i := range plist {
-									req.Send_req( rmgr_ch, my_ch, REQ_YANK_RES, plist[i].Get_id(), nil )		// yank the reservation for this pledge
-									req = <- my_ch
-
-									if req.State == nil {	
-										plist[i].Reset_pushed()													// it's not pushed at this point
-										reason, jreason, ecount = finalise_reservation( plist[i], res_paused )	// allocate in network and add to res manager inventory
-										if ecount == 0 {
-											http_sheep.Baa( 1, "reservation refreshed: %s", *plist[i].Get_id() )
-										} else {
-											http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
-											state = "ERROR"
-											nerrors += ecount - 1
-										}
-									} else {
-										http_sheep.Baa( 1, "unable to yank reservation: %s", req.State )
-									}
-								}
-							} else {
-								http_sheep.Baa( 1, "refreshing reservations for %s, no pledges", tokens[i] )
-							}
-						}
-					}
-				}
-
-			case "reserve":
-					tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
-					if len( tmap ) < 1  {
-						if ntokens < 4  {		
-							nerrors++
-							reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1>[,<host2>] cookie dscp; received: %s", ntokens-1, recs[i] ); 
-							break
-						} 
-
-						tmap["bandw"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
-						tmap["window"] = &tokens[2]
-						tmap["hosts"] = &tokens[3]
-						tmap["cookie"] = &empty_str
-						dup_str := "0"
-						tmap["dscp"] = &dup_str
-						if ntokens > 4 {					// optional, cookie must be supplied if dscp is supplied
-							tmap["cookie"] = &tokens[4]
-							if ntokens > 5 {
-								tmap["dscp"] = &tokens[5]
-							}
-						} 
-					}
-
-					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
-						subtokens := strings.Split( *tmap["bandw"], "," )
-						bandw_in = clike.Atoll( subtokens[0] )
-						bandw_out = clike.Atoll( subtokens[1] )
-					} else {
-						bandw_in = clike.Atoll( *tmap["bandw"] )				// no comma, so single value applied to each
-						bandw_out = bandw_in
-					}
-
-
-					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
-					h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
-
-					res = nil 
-					h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
-					if err == nil {
-						dscp := 0
-						if tmap["dscp"] != nil {
-							dscp = clike.Atoi( *tmap["dscp"] )						// specific dscp value that should be propigated at the destination
-						}
-	
-						res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-						res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp )
-					}
-
-
-					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
-						reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
-						if ecount == 0 {
 							state = "OK"
+							jreason = string( req.Response_data.(string) )
+							reason = ""
 						} else {
-							nerrors += ecount - 1 												// number of errors added to the pile by the call
+							reason = "no output from network thread"
 						}
-					} else {
-						reason = fmt.Sprintf( "reservation rejected: %s", err )
-					}
-
-			case "resume":
-				if validate_auth( &auth_data, is_token ) {
-					if ! res_paused {							// not in a paused state, just say so and go on
-						jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
-						state = "WARN"
-					} else {
+					} 
+		
+				case "listulcaps":											// list user link capacities known to network manager
+					if validate_auth( &auth_data, is_token ) {
 						req = ipc.Mk_chmsg( )
-						req.Send_req( rmgr_ch, my_ch, REQ_RESUME, nil, nil )
+						req.Send_req( nw_ch, my_ch, REQ_LISTULCAP, nil, nil )
 						req = <- my_ch
 						if req.State == nil {
-							http_sheep.Baa( 1, "reservations are now resumed" )	
 							state = "OK"
-							jreason = string( req.Response_data.( string ) )
+							jreason = string( req.Response_data.(string) )
 							reason = ""
-							res_paused = false
 						} else {
-							reason = fmt.Sprintf( "s", req.State )
+							reason = fmt.Sprintf( "%s", req.State )
+						}
+					} 
+		
+				case "listhosts":											// list known host information
+					if validate_auth( &auth_data, is_token ) {
+						req = ipc.Mk_chmsg( )
+						req.Send_req( nw_ch, my_ch, REQ_LISTHOSTS, nil, nil )
+						req = <- my_ch
+						if req.State == nil {
+							state = "OK"
+							jreason = string( req.Response_data.(string) )
+							reason = ""
+						} else {
+							reason = fmt.Sprintf( "%s", req.State )
+						}
+					} 
+				
+				case "listres":											// list reservations
+					req = ipc.Mk_chmsg( )
+					req.Send_req( rmgr_ch, my_ch, REQ_LIST, nil, nil )
+					req = <- my_ch
+					if req.State == nil {
+						state = "OK"
+						jreason = string( req.Response_data.(string) )
+						reason = ""
+					} else {
+						reason = fmt.Sprintf( "%s", req.State )
+					}
+					
+
+				case "listconns":								// generate json describing where the named host is attached (switch/port)
+					if ntokens < 2 {
+						nerrors++
+						reason = fmt.Sprintf( "incorrect number of parameters supplied (%d) 1 expected: usage: attached2 hostname", ntokens-1 ); 
+					} else {
+						req = ipc.Mk_chmsg( )
+						req.Send_req( nw_ch, my_ch, REQ_LISTCONNS, &tokens[1], nil )
+						req = <- my_ch
+						if req.State == nil {
+							state = "OK"
+							jreason = string( req.Response_data.(string) )
+							reason = ""
+						} else {
+							reason = fmt.Sprintf( "%s", req.State )
 						}
 					}
-				}
+
+				case "pause":
+					if validate_auth( &auth_data, is_token ) {
+						if res_paused {							// already in a paused state, just say so and go on
+							jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
+							state = "WARN"
+						} else {
+							req = ipc.Mk_chmsg( )
+							req.Send_req( rmgr_ch, my_ch, REQ_PAUSE, nil, nil )
+							req = <- my_ch
+							if req.State == nil {
+								http_sheep.Baa( 1, "reservations are now paused" )	
+								state = "OK"
+								jreason = string( req.Response_data.( string ) )
+								reason = ""
+								res_paused = true
+							} else {
+								reason = fmt.Sprintf( "s", req.State )
+							}
+						}
+					} 
+
+				case "ping":
+					reason = ""
+					jreason = fmt.Sprintf( "\"pong: %s\"", version )
+					state = "OK"
+
+				case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
+					if validate_auth( &auth_data, is_token ) {
+						req = ipc.Mk_chmsg( )
+						req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
+						req = <- my_ch															// get response from the network thread
+						state = "OK"
+						m :=  req.Response_data.( []string )
+						jreason = `{ "queues": [ `
+						sep := ""						// local scope not to trash the global var
+						for i := range m {
+							jreason += fmt.Sprintf( "%s%q", sep, m[i] )
+							sep = "," 
+						}
+						jreason += " ] }"
+						reason = "active queues"
+					}
+					
+				case "refresh":								// refresh reservations for named VM(s)
+					if validate_auth( &auth_data, is_token ) {
+						state = "OK"
+						reason = ""
+						for i := 1; i < ntokens; i++ {
+							req = ipc.Mk_chmsg( )
+							req.Send_req( osif_ch, my_ch, REQ_XLATE_HOST, &tokens[i], nil )		// translate [token/][project/]host-name into ID/hostname
+							req = <- my_ch														// wait for response
+							if req.Response_data != nil {
+								hname := req.Response_data.( *string )
+								req.Send_req( rmgr_ch, my_ch, REQ_PLEDGE_LIST, hname, nil )		// get a list of pledges that are associated with the hostname
+								req = <- my_ch
+								if req.Response_data != nil {
+									plist := req.Response_data.( []*gizmos.Pledge )
+									http_sheep.Baa( 1, "refreshing reservations for %s, %d pledge(s)", *hname, len( plist ) )
+
+									for i := range plist {
+										req.Send_req( rmgr_ch, my_ch, REQ_YANK_RES, plist[i].Get_id(), nil )		// yank the reservation for this pledge
+										req = <- my_ch
+
+										if req.State == nil {	
+											plist[i].Reset_pushed()													// it's not pushed at this point
+											reason, jreason, ecount = finalise_reservation( plist[i], res_paused )	// allocate in network and add to res manager inventory
+											if ecount == 0 {
+												http_sheep.Baa( 1, "reservation refreshed: %s", *plist[i].Get_id() )
+											} else {
+												http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
+												state = "ERROR"
+												nerrors += ecount - 1
+											}
+										} else {
+											http_sheep.Baa( 1, "unable to yank reservation: %s", req.State )
+										}
+									}
+								} else {
+									http_sheep.Baa( 1, "refreshing reservations for %s, no pledges", tokens[i] )
+								}
+							}
+						}
+					}
+
+				case "reserve":
+						tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
+						if len( tmap ) < 1  {
+							if ntokens < 4  {		
+								nerrors++
+								reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1>[,<host2>] cookie dscp; received: %s", ntokens-1, recs[i] ); 
+								break
+							} 
+
+							tmap["bandw"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
+							tmap["window"] = &tokens[2]
+							tmap["hosts"] = &tokens[3]
+							tmap["cookie"] = &empty_str
+							dup_str := "0"
+							tmap["dscp"] = &dup_str
+							if ntokens > 4 {					// optional, cookie must be supplied if dscp is supplied
+								tmap["cookie"] = &tokens[4]
+								if ntokens > 5 {
+									tmap["dscp"] = &tokens[5]
+								}
+							} 
+						}
+
+						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
+							subtokens := strings.Split( *tmap["bandw"], "," )
+							bandw_in = clike.Atoll( subtokens[0] )
+							bandw_out = clike.Atoll( subtokens[1] )
+						} else {
+							bandw_in = clike.Atoll( *tmap["bandw"] )				// no comma, so single value applied to each
+							bandw_out = bandw_in
+						}
+
+
+						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
+						h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+
+						res = nil 
+						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+						if err == nil {
+							dscp := tclass2dscp["voice"]							// default to using voice traffic class
+							dscp_koe := false										// we do not keep it as the packet exits the environment
+
+							if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
+								if strings.HasPrefix( *tmap["dscp"], "global_" ) {
+									dscp_koe = true											// global_* causes the value to be retained when packets exit the environment
+									dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
+								} else {
+									dscp = tclass2dscp[*tmap["dscp"]]
+								}
+								if dscp <= 0 {
+									err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
+								} 
+							}
+		
+							if err == nil {
+								res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+								res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
+							}
+						}
+
+						if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+							reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
+							if ecount == 0 {
+								state = "OK"
+							} else {
+								nerrors += ecount - 1 												// number of errors added to the pile by the call
+							}
+						} else {
+							reason = fmt.Sprintf( "reservation rejected: %s", err )
+						}
+
+				case "resume":
+					if validate_auth( &auth_data, is_token ) {
+						if ! res_paused {							// not in a paused state, just say so and go on
+							jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
+							state = "WARN"
+						} else {
+							req = ipc.Mk_chmsg( )
+							req.Send_req( rmgr_ch, my_ch, REQ_RESUME, nil, nil )
+							req = <- my_ch
+							if req.State == nil {
+								http_sheep.Baa( 1, "reservations are now resumed" )	
+								state = "OK"
+								jreason = string( req.Response_data.( string ) )
+								reason = ""
+								res_paused = false
+							} else {
+								reason = fmt.Sprintf( "s", req.State )
+							}
+						}
+					}
 
 			case "steer":								// parse a steering request and make it happen
 					if ntokens < 5  {		
@@ -705,90 +726,93 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						reason = fmt.Sprintf( "%s", req.State )
 					}
 
-			case "setulcap":									// set a user link cap; expect user-name limit
-				if validate_auth( &auth_data, is_token ) {
-					if ntokens == 3 {
-						req = ipc.Mk_chmsg( )
-						req.Send_req( osif_ch, my_ch, REQ_PNAME2ID, &tokens[1], nil )		// translate the name to virtulisation assigned ID
-						req = <- my_ch
+				case "setulcap":									// set a user link cap; expect user-name limit
+					if validate_auth( &auth_data, is_token ) {
+						if ntokens == 3 {
+							req = ipc.Mk_chmsg( )
+							req.Send_req( osif_ch, my_ch, REQ_PNAME2ID, &tokens[1], nil )		// translate the name to virtulisation assigned ID
+							req = <- my_ch
 
-						pdata := make( []*string, 2 )
-						pdata[0] = req.Response_data.( *string )
-						pdata[1] = &tokens[2]
+							pdata := make( []*string, 2 )
+							if req.Response_data != nil {					// good *string came back
+								pdata[0] = req.Response_data.( *string )
+								pdata[1] = &tokens[2]
 
-						if pdata[0] != nil {
-							reason = fmt.Sprintf( "user link cap set for %s (%s): %s%%", tokens[1], *pdata[0], tokens[2] )
-							req.Send_req( rmgr_ch, nil, REQ_SETULCAP, pdata, nil ) 				// dont wait for a reply
-							state = "OK"
+								reason = fmt.Sprintf( "user link cap set for %s (%s): %s", tokens[1], *pdata[0], tokens[2] )
+								req.Send_req( rmgr_ch, nil, REQ_SETULCAP, pdata, nil ) 				// dont wait for a reply
+								state = "OK"
+							} else {
+								reason = fmt.Sprintf( "unable to translate name: %s", tokens[1] )
+								state = "ERROR"
+								nerrors++
+							}
 						} else {
-							reason = fmt.Sprintf( "unable to translate name: %s", tokens[1] )
 							state = "ERROR"
 							nerrors++
+							reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
 						}
-					} else {
-						state = "ERROR"
-						nerrors++
-						reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
 					}
-				}
 
-			case "verbose":									// verbose n [child-bleater]
-				if validate_auth( &auth_data, is_token ) {
-					if ntokens > 1 {
-						state = "OK"
-						reason = ""
-						nv := clike.Atou( tokens[1] )
-						if nv < 0 {
-							nv = 0
-						}
-						if ntokens > 2 {
-							jreason = fmt.Sprintf( "\"verbose set: %s now %d\"",  tokens[2], nv )
-							switch( tokens[2] ) {
-								case "osif", "ostack", "osif_mgr":
-									osif_sheep.Set_level( nv )
-
-								case "resmgr", "res_mgr":
-									rm_sheep.Set_level( nv )
-
-								case "fq", "fq_mgr", "fqmgr":
-									fq_sheep.Set_level( nv )
-
-								case "http", "http_api":
-									http_sheep.Set_level( nv )
-
-								case "net", "network":
-									net_sheep.Set_level( nv )
-									
-								case "agent":
-									am_sheep.Set_level( nv )
-
-								case "tegu", "master":
-									tegu_sheep.Set_level( nv )
-
-								case "lib", "gizmos":
-									gizmos.Set_bleat_level( nv )
-
-								default:
-									state = "ERROR"
-									http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
-									jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
+				case "verbose":									// verbose n [child-bleater]
+					if validate_auth( &auth_data, is_token ) {
+						if ntokens > 1 {
+							state = "OK"
+							reason = ""
+							nv := clike.Atou( tokens[1] )
+							if nv < 0 {
+								nv = 0
 							}
+							if ntokens > 2 {
+								jreason = fmt.Sprintf( "\"verbose set: %s now %d\"",  tokens[2], nv )
+								switch( tokens[2] ) {
+									case "osif", "ostack", "osif_mgr":
+										osif_sheep.Set_level( nv )
 
-							http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
+									case "resmgr", "res_mgr":
+										rm_sheep.Set_level( nv )
+
+									case "fq", "fq_mgr", "fqmgr":
+										fq_sheep.Set_level( nv )
+
+									case "http", "http_api":
+										http_sheep.Set_level( nv )
+
+									case "net", "network":
+										net_sheep.Set_level( nv )
+										
+									case "agent":
+										am_sheep.Set_level( nv )
+
+									case "tegu", "master":
+										tegu_sheep.Set_level( nv )
+
+									case "lib", "gizmos":
+										gizmos.Set_bleat_level( nv )
+
+									default:
+										state = "ERROR"
+										http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
+										jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
+								}
+
+								http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
+							} else {
+								jreason = fmt.Sprintf( "\"verbose set: master level to %d\"",   nv )
+								http_sheep.Baa( 1, "verbose level set: master %d", nv )
+								tegu_sheep.Set_level( nv )
+							}
 						} else {
-							jreason = fmt.Sprintf( "\"verbose set: master level to %d\"",   nv )
-							http_sheep.Baa( 1, "verbose level set: master %d", nv )
-							tegu_sheep.Set_level( nv )
+							state = "ERROR"
+							reason = fmt.Sprintf( "missing parameters on verbose command" )
 						}
-					} else {
-						state = "ERROR"
-						reason = fmt.Sprintf( "missing parameters on verbose command" )
 					}
-				}
 
-			default:
-				reason = fmt.Sprintf( "unrecognised put and/or post action: reqest %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
-				http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
+				default:
+					reason = fmt.Sprintf( "unrecognised put and/or post action: reqest %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
+					http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
+			}
+		} else {
+			reason = fmt.Sprintf( "tegu is running, but is not accepting requests; try again later" )
 		}
 
 		if state == "ERROR" {
@@ -1004,6 +1028,11 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	dup_str := "localhost"
 	priv_auth = &dup_str
 	
+	tclass2dscp = make( map[string]int, 5 )			// TODO: these need to come from the config file
+	tclass2dscp["voice"] = 46
+	tclass2dscp["control"] = 26
+	tclass2dscp["data"] = 18
+
 	if cfg_data["httpmgr"] != nil {
 		if p := cfg_data["httpmgr"]["verbose"]; p != nil {
 			http_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
@@ -1040,7 +1069,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 					priv_auth = p
 
 				default:
-					http_sheep.Baa( 0, `WRN: invalid local authorisation type (%s), defaulting to "localhost"`, *p )
+					http_sheep.Baa( 0, `WRN: invalid local authorisation type (%s), defaulting to "localhost"  [TGUHTP000]`, *p )
 			}
 		}
 	}
@@ -1058,7 +1087,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 			cert_name := "tegu_cert"
 			err = security.Mk_cert( 1024, &cert_name, dns_list, ssl_cert, ssl_key )
     		if err != nil {
-				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s", *ssl_cert, *ssl_key, err )
+				http_sheep.Baa( 0, "ERR: unable to create a certificate: %s %s: %s  [TGUHTP001]", ssl_cert, ssl_key, err )
 			}
 		}
 
@@ -1070,7 +1099,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	}
 	
 	if err != nil {
-		http_sheep.Baa( 1, "ERR: unable to start http listener: %s", err )
+		http_sheep.Baa( 1, "ERR: unable to start http listener: %s  [TGUHTP002]", err )
 		syscall.Exit( 1 )								// bring the giant down hard if we cannot listen
 	} else {
 		http_sheep.Baa( 0, "http listener is done" )

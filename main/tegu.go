@@ -44,8 +44,29 @@
 							valid token on the reservation request. 
 				21 Jul 2014 : Fixed bug -- checkpoint not including user link caps
 				29 Jul 2014 : Added mlag support.
-				22 Aug 2014 : Added protocol support to steering.
-				08 Sep 2014 : Corrected bugs with tcp oriented proto steering (dest baesd).
+				13 Aug 2014 : Changes to include network hosts in the list of hosts (incorporate library
+							changes)
+				15 Aug 2014 : Bug fix (201) and stack dump fix (nil ptr in osif). 
+				19 Aug 2014 : Bug fix (208) prevent duplicate tegu's from running on same host/port.
+				20 Aug 2014 : Bug fix (210) shift dscp values properly in the match part of a flowmod.
+				22 Aug 2014 : Added protocol support to steering. (steer)
+				27 Aug 2014 : Fq-mgr changes to allow for metadata checking on flowmods.
+				30 Aug 2014 : Pick up bug fix made to ostack library.
+				03 Sep 2014 : Corrected bug in resmgr/fqmgr introduced with 27 Aug changes (transport type ignored).
+				05 Sep 2014 : Tweak to link add late binding port to pick up the lbp when port < 0 rather than 0.
+				08 Sep 2014 : Corrected bugs with tcp oriented proto steering (dest baesd). (steer)
+				23 Sep 2014 : Support for rate limiting bridge
+				29 Sep 2014 : Nil pointer exception (bug #216) corrected (gizmo change)
+				30 Sep 2014 : Deal with odd hostnames that were being returned by ccp's version of openstack.
+				09 Oct 2014 : Bug fix (228) -- don't checkpoint until all initialised.
+				14 Oct 2014 : Rebuild to pick up library changes that get network 'hosts' 
+							as host only where OVS is running and not all network hosts. 
+				19 Oct 2014 : Added bidirectional bandwith support (bug 228). (version bump to 3.0.1 because of 
+							extra testing needed.)
+				23 Oct 2014 : Added better diagnostics to the user regarding capacity rejection of reservation (bug 239)
+				29 Oct 2014 : Corrected issue where vlan id was being set when both VMs are on the same switch (bug 242)
+				30 Oct 2014 : Corrected bug with setting the source/dest flag for external IP addresses in flowmod req (bug 243)
+>>>>>>> lite
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -75,9 +96,9 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1/19094"		// CAUTION: there is also a version in the manager package that should be kept up to date
+		version		string = "v3.2/1b034"
 		cfg_file	*string  = nil
-		api_port	*string			// command line option vars must be pointers
+		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
 		needs_help 	*bool
 		fl_host		*string
@@ -86,7 +107,6 @@ func main() {
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager 
-		//qm_ch	chan *ipc.Chmsg		// quantus manager
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager 
 		osif_ch chan *ipc.Chmsg		// openstack interface
 		fq_ch chan *ipc.Chmsg		// flow queue manager
@@ -125,41 +145,44 @@ func main() {
 		super_cookie = &x
 	}
 
-	nw_ch = make( chan *ipc.Chmsg )					// create the channels that the threads will listen to
-	fq_ch = make( chan *ipc.Chmsg, 128 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
-	am_ch = make( chan *ipc.Chmsg, 128 )			// agent manager channel
-	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
-	osif_ch = make( chan *ipc.Chmsg )
+	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
+	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
+	am_ch = make( chan *ipc.Chmsg, 1024 )			// agent manager channel
+	rmgr_ch = make( chan *ipc.Chmsg, 1024 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
+	osif_ch = make( chan *ipc.Chmsg, 1024 )
 
-	err := managers.Initialise( cfg_file, version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
+	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err ); 
 		os.Exit( 1 )
 	}
 
-	go managers.Res_manager( rmgr_ch, super_cookie ); 						// manage the reservation inventory
-	go managers.Osif_mgr( osif_ch )										// openstack interface; early so we get a list of stuff before we start network
-	go managers.Network_mgr( nw_ch, fl_host )								// manage the network graph
+	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// start early so we bind to port quickly, but don't allow requests until late
+	go managers.Res_manager( rmgr_ch, super_cookie ); 				// manage the reservation inventory
+	go managers.Osif_mgr( osif_ch )									// openstack interface; early so we get a list of stuff before we start network
+	go managers.Network_mgr( nw_ch, fl_host )						// manage the network graph
 	go managers.Agent_mgr( am_ch )
 	go managers.Fq_mgr( fq_ch, fl_host ); 
 
-	//TODO:  chicken and egg -- we need to block until network has a good graph, but we need the network reading from it's channel
-	//       first so that if we are in Tegu-lite mode (openstack providing the graph) it can send the data to network manager 
-	//		 must implement a 'have data' ping in network and loop here until the answer is yes.
+	my_chan := make( chan *ipc.Chmsg )								// channel and request block to ping net, and then to send all sys up
+	req := ipc.Mk_chmsg( )
+
+	// if there is a checkpoint file, then we need to block until we have a full network topology which includes:
+	// openstack data, json data, and physical data from the agent(s).  Once that's in place, then we can 
+	// load the checkpoint file.  Once the checkpoint is loaded then we can open the api for real work. 
+	// 
 	if *chkpt_file != "" {
-		my_chan := make( chan *ipc.Chmsg )
-		req := ipc.Mk_chmsg( )
 	
 		for {
 			req.Response_data = 0
 			req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
-			req = <- my_chan												// block until we have a response back
+			req = <- my_chan													// block until we have a response back
 
-			if req.Response_data.(int) == 2 {								// wait until we have everything in the network
+			if req.Response_data.(int) == 2 {									// wait until we have everything in the network
 				break
 			}
 
-			sheep.Baa( 1, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
+			sheep.Baa( 2, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
 			time.Sleep( 5 * time.Second )
 		}
 
@@ -173,7 +196,8 @@ func main() {
 		}
 	}
 
-	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// finally, turn on the HTTP interface after _everything_ else is running.
+	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know
+	managers.Set_accept_state( true )								// http doesn't have a control loop like others, so needs this
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)
 	wgroup.Wait( )

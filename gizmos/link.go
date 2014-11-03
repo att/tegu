@@ -36,7 +36,9 @@
 				07 Jul 2014 - Inc queue changed to return status and fail if unable to increase
 					the utilisation of the link. 
 				28 Jul 2014 - Added mlag support
-
+				18 Aug 2014 - Has_capacity now passes back error message.
+				05 Sep 2014 - Pick up late binding port info if port is <0 rather than 0.
+				19 Oct 2014 - Comment change
 */
 
 package gizmos
@@ -76,8 +78,8 @@ type Link struct {
 	If bond is supplied, it is assumed to be a one element slice containing another
 	link from which the allotment obligation is fetched and will be referenced by the 
 	link rather than creating a new obligation. Binding two links to an obligation
-	allows for easy accounting of total usage allocated (both directions) for the
-	bidirectional path that the two links represent. 
+	allows for easy accounting of total usage allocated (both directions) if the link
+	isn't full dupliex.
 */
 func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, mlag *string, bond ...*Link ) ( l *Link ) {
 	var id string
@@ -96,6 +98,8 @@ func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, mlag *
 		sw2: sw2,
 		mlag: mlag,
 		Cost:	1,				// for now all links are equal
+		port1:	-2,
+		port2:	-2,
 	}
 
 	if bond == nil || bond[0] == nil {
@@ -129,6 +133,8 @@ func Mk_vlink( sw *string, p1 int, p2 int, capacity int64, bond ...*Link ) ( l *
 		sw1: sw,
 		sw2: sw,
 		Cost:	1,				// for now all links are equal
+		port1:	p1,
+		port2:	p2,
 	}
 
 	if bond == nil || bond[0] == nil {
@@ -298,25 +304,28 @@ func (l *Link) Connects( sw *Switch ) ( bool ) {
 	debugging or verification to know which links are causing the reservation to fail, so 
 	we provide the mechanism to bleat that information here.
 */
-func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( bool ) {
+func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( able bool, err error ) {
+	able = false
 	if usr_max < 101 {
 		if amt > (l.allotment.Get_max_capacity() * int64( usr_max ))/100 {
-			obj_sheep.Baa( 2, "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
-			return false
+			obj_sheep.Baa( 1, "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			err = fmt.Errorf( "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			return 
 		}
 	} else {
 		if amt > usr_max {				// seems silly to check, but we will
-			obj_sheep.Baa( 2, "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
-			return false
+			obj_sheep.Baa( 1, "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			err = fmt.Errorf( "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			return 
 		}
 	}
 
-	able, err := l.allotment.Has_capacity( commence, conclude, amt, usr )
-	if err != nil {
-		obj_sheep.Baa( 2, "no capacity on link %s: %s", *l.id, err )
-	}
+	able, err = l.allotment.Has_capacity( commence, conclude, amt, usr )
+	//if err != nil {
+		//obj_sheep.Baa( 2, "no capacity on link %s: %s", *l.id, err )
+	//}
 
-	return able
+	return 
 }
 
 /*
@@ -406,7 +415,7 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 		return
 	}
 		
-	if l.port1 == 0 {
+	if l.port1 <= 0 && l.lbport != nil {
 		swdata = fmt.Sprintf( "%s/%s", *l.sw1, *l.lbport )			// if port is 0 then we'll return the latebinding port value
 	} else {
 		swdata = fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue

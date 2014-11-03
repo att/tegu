@@ -15,6 +15,7 @@
 				20 Jun 2014 - Corrected bug that allowed future start time with an earlier expry time
 							to be accepted. 
 				07 Jul 2014 - Added clone function.
+				24 Sep 2014 - Support for keep/delete toggle for dscp values
 */
 
 package gizmos
@@ -27,7 +28,7 @@ import (
 	//"io/ioutil"
 	//"html"
 	//"net/http"
-	"os"
+	//"os"
 	"strings"
 	"time"
 
@@ -37,23 +38,25 @@ import (
 type Pledge struct {
 	host1		*string
 	host2		*string
-	tpport1		int				// transport port number or 0 if not defined
-	tpport2		int				// thee match h1/h2 respectively
-	protocol	*string			// tcp/udp:port (for steering)
+	tpport1		int			// transport port number or 0 if not defined
+	tpport2		int			// thee match h1/h2 respectively
+	protocol	*string		// tcp/udp:port (for steering)
 	commence	int64
 	expiry		int64
-	bandw_in	int64			// bandwidth to reserve inbound to host1
-	bandw_out	int64			// bandwidth to reserve outbound from host1
-	dscp		int				// dscp value that should be propigated
-	id			*string			// name that the client can use to manage (modify/delete)
-	qid			*string			// name that we'll assign to the queue which allows us to look up the pledge's queues
-	usrkey		*string			// a 'cookie' supplied by the user to prevent any other user from modifying
-	path_list	[]*Path			// list of paths that represent the bandwith and can be used to send flowmods etc.
-	mbox_list	[]*Mbox			// list of middleboxes if the pledge is a steering pledge
-	mbidx		int				// insertion point into mblist
-	pushed		bool			// set when pledge has been pushed into the openflow environment (skoogi)
-	paused		bool			// set if reservation has been paused
-	ptype		int				// pledge type from gizmos PT_ constants. 
+	bandw_in	int64		// bandwidth to reserve inbound to host1
+	bandw_out	int64		// bandwidth to reserve outbound from host1
+	dscp		int			// dscp value that should be propigated
+	dscp_koe	bool		// true if the dscp value should be kept when a packet exits the environment
+	id			*string		// name that the client can use to manage (modify/delete)
+	qid			*string		// name that we'll assign to the queue which allows us to look up the pledge's queues
+	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
+	path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
+	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
+	paused		bool		// set if reservation has been paused
+
+	mbox_list	[]*Mbox		// list of middleboxes if the pledge is a steering pledge
+	mbidx		int			// insertion point into mblist
+	ptype		int			// pledge type from gizmos PT_ constants. 
 }
 
 /*
@@ -71,6 +74,7 @@ type Json_pledge struct {
 	Bandwin		int64
 	Bandwout	int64
 	Dscp		int
+	Dscp_koe	bool
 	Id			*string
 	Qid			*string
 	Usrkey		*string
@@ -113,7 +117,7 @@ func adjust_window( commence int64, conclude int64 ) ( adj_start int64, err erro
 	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward 
 	(to the current time) if it is less than the current time.
 */
-func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int ) ( p *Pledge, err error ) {
+func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int, dscp_koe bool ) ( p *Pledge, err error ) {
 
 	err = nil
 	p = nil
@@ -146,6 +150,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 		dscp: dscp,
 		ptype:	PT_BANDWIDTH,
 		protocol:	&empty_str,
+		dscp_koe: dscp_koe,
 	}
 
 	if *usrkey != "" {
@@ -280,6 +285,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	p.expiry = jp.Expiry
 	p.id = jp.Id
 	p.dscp = jp.Dscp
+	p.dscp_koe = jp.Dscp_koe
 	p.usrkey = jp.Usrkey
 	p.qid = jp.Qid
 	p.bandw_out = jp.Bandwout
@@ -447,8 +453,8 @@ func (p *Pledge) To_str( ) ( s string ) {
 		}
 	}
 
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d proto=%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v ptype=%d", state, diff, caption, 
-			*p.host1, p.tpport2, *p.host2, *p.protocol, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.ptype )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=%d koe=%v", state, diff, caption, 
+			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.ptype, p.dscp_koe )
 	return
 }
 
@@ -480,8 +486,8 @@ func (p *Pledge) To_json( ) ( json string ) {
 	
 	switch p.ptype {
 		case PT_BANDWIDTH:
-				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "bandwidth" }`, 
-							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "bandwidth", "dscp_koe": %v }`, 
+							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid, p.dscp_koe )
 
 		case PT_STEERING:
 				if p.protocol != nil {
@@ -523,8 +529,8 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 	
 	switch p.ptype {
 		case PT_BANDWIDTH:
-				chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d }`, 
-						*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+				chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
+						*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, p.ptype )
 
 		case PT_STEERING:
 				if p.protocol != nil {
@@ -651,7 +657,7 @@ func (p *Pledge) Is_active_soon( window int64 ) ( bool ) {
 	pledge.
 */
 func (p *Pledge) Is_valid_cookie( c *string ) ( bool ) {
-fmt.Fprintf( os.Stderr, "__>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
+	//fmt.Fprintf( os.Stderr, "pledge:>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
 	return *c == *p.usrkey 
 }
 
@@ -788,14 +794,15 @@ func (p *Pledge) Get_values( ) ( *string, *string, int, int, int64, int64, int64
 }
 
 /*
-	Return the dscp that was submitted with the resrrvation
+	Return the dscp that was submitted with the resrrvation, and the state of the keep on 
+	exit flag.
 */
-func (p *Pledge) Get_dscp( ) ( int ) {
+func (p *Pledge) Get_dscp( ) ( int, bool ) {
 	if p == nil {
-		return 0
+		return 0, false
 	}
 
-	return p.dscp;
+	return p.dscp, p.dscp_koe
 }
 
 /*
@@ -807,4 +814,11 @@ func (p *Pledge) Get_path_list( ) ( []*Path ) {
 		return nil
 	}
 	return p.path_list
+}
+
+/*
+	Return the commence and expriy times.
+*/
+func (p *Pledge) Get_window( ) ( int64, int64 ) {
+	return p.commence, p.expiry
 }
