@@ -39,6 +39,8 @@
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
 				09 Oct 2014 : Added all_sys_up, and prevent checkpointing until all_sys_up is true.
 				29 Oct 2014 : Corrected bug -- setting vlan id when VMs are on same switch.
+				03 Nov 2014 : Removed straggling comments from the bidirectional fix.
+						General cleanup to merge with steering code.
 */
 
 package managers
@@ -210,7 +212,7 @@ func table9x_fmods( rname *string, table int, meta string, cookie int ) {
 
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool ) ( npushed int ) {
+func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool ) ( npushed int ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -269,10 +271,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 							fmod.Extip = &empty_str
 						}
 
-						//ext_dst_str := "-D"								// if an external address is involved we must set the direction (dest or src)
-						//ext_src_str := "-S"
-
-						//espq1, espq0 := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 						espq1, _ := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
 
 														//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
@@ -289,7 +287,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 							fmod.Match.Tpdport= p2
 							fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
 							fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
-							//fmod.Exttyp = &ext_dst_str										// ext dest (if there) is in the dest direction first
 							fmod.Exttyp = plist[i].Get_extflag()
 
 							rm_sheep.Baa( 1, "res_mgr/push_reg: sending i/e flow-mods for path %d: %s flag=%s tptyp=%s h1=%s --> h2=%s ip1= %s ip2=%s ext=%s exp=%d",
@@ -325,49 +322,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 								msg = ipc.Mk_chmsg()
 								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
 							}
-
-/*
-now that there are two explicit paths (forward and backward) we only set forward direction flow-mods for each path
-							// ---- push flow-mods in the h2->h1 direction -----------
-							rev_rname := "R" + rname										// the egress link has an R(name) queue name
-							fmod.Match.Tpsport = p2
-							fmod.Match.Tpdport = p1
-
-							fmod.Exttyp = &ext_src_str										// ext dest (if there) is in the src direction now
-
-							fmod.Match.Ip2, _ = plist[i].Get_h1().Get_addresses()			// for egress and backwards intermediates, the dest is h1, so reverse them
-							fmod.Match.Ip1, _ = plist[i].Get_h2().Get_addresses()
-
-							rm_sheep.Baa( 1, "res_mgr/push_reg: sending backward i/e flow-mods for path %d: %s h1=%s <-- h2=%s ip1-2=%s-%s dir=%s extip=%s exp=%d",
-								i, rev_rname, *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Exttyp, *fmod.Extip, expiry )
-
-							if espq0 != nil {													// data flowing into h1 from h2 over the h1-switch connection
-								fmod.Dir_in = true
-								fmod.Espq = espq0
-								cfmod = fmod.Clone( )											// a copy to send
-								msg = ipc.Mk_chmsg()
-								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-							}
-
-							fmod.Espq = plist[i].Get_elink_spq( &rev_rname, timestamp )				// send res to egress switch on first link towards h1
-							fmod.Dir_in = false
-							cfmod = fmod.Clone( )													// need a copy to send
-							if nlinks > 1 && set_vlan {
-								cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
-							}
-							msg = ipc.Mk_chmsg()
-							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )		// queue work to send to skoogi
-
-							ilist = plist[i].Get_backward_im_spq( timestamp )		// get list of intermediate switch/port/qnum data in backwards direction
-							for ii := range ilist {
-								fmod.Espq = ilist[ii]
-								cfmod = fmod.Clone( )												// must send a copy
-								rm_sheep.Baa( 2, "send backward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
-								msg = ipc.Mk_chmsg()
-								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in backwards direction
-							}
-*/
-
 						}
 					}
 
@@ -382,7 +336,7 @@ now that there are two explicit paths (forward and backward) we only set forward
 	}
 
 	if push_count > 0 || rm_sheep.Would_baa( 2 ) {			// bleat if we pushed something, or if higher level is set in the sheep
-		rm_sheep.Baa( 1, "push_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
+		rm_sheep.Baa( 1, "push_bw_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
 	}
 
 	return pushed_count
@@ -871,7 +825,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				last_qcheck = now
 
 			case REQ_PUSH:								// driven every few seconds to push new reservations
-				inv.push_reservations( my_chan, alt_table, set_vlan )
+				inv.push_bw_reservations( my_chan, alt_table, set_vlan )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
