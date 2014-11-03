@@ -142,11 +142,11 @@ func main() {
 		super_cookie = &x
 	}
 
-	nw_ch = make( chan *ipc.Chmsg )					// create the channels that the threads will listen to
-	fq_ch = make( chan *ipc.Chmsg, 128 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
-	am_ch = make( chan *ipc.Chmsg, 128 )			// agent manager channel
-	rmgr_ch = make( chan *ipc.Chmsg, 256 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
-	osif_ch = make( chan *ipc.Chmsg )
+	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
+	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
+	am_ch = make( chan *ipc.Chmsg, 1024 )			// agent manager channel
+	rmgr_ch = make( chan *ipc.Chmsg, 1024 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
+	osif_ch = make( chan *ipc.Chmsg, 1024 )
 
 	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
