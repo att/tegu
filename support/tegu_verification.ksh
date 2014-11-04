@@ -225,10 +225,10 @@ project1=${project_list:-cloudqos:cloudqos}
 project2=${project1##*:}
 project1=${project1%%:*}
 
-vma=${1:-esd_ss1}			# project 1
+vma=${1:-esd_ss1,esd_ss2}			# project 1
 p1vm_list=( ${vma//,/ } )
 
-vma=${2:-esd_ss2}			# project 2
+vma=${2:-esd_ss1,esd_ss2}			# project 2 (by default these are the same project, so same vms)
 p2vm_list=( ${vma//,/ } )
 
 
@@ -357,6 +357,10 @@ capture $single_file "set user link cap back up to 90%"
 validate_ok $single_file "reset user link cap to 90% for further testing"
 
 
+# ------ VM to  external reservation
+run tegu_req -T $secure $host reserve 5M +30 %t/$project1/${p1vm_list[0]},!//135.207.01.01 cookie >$single_file
+capture $single_file "VM to external IP reservation test"
+validate_ok $single_file "VM to external IP reservation test"
 
 # ------ multi-project "half" reservations
 # NOTE: if this fails, ensure that the VM in both projects have floating IP addresses attached. 
