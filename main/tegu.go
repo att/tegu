@@ -66,7 +66,7 @@
 				23 Oct 2014 : Added better diagnostics to the user regarding capacity rejection of reservation (bug 239)
 				29 Oct 2014 : Corrected issue where vlan id was being set when both VMs are on the same switch (bug 242)
 				30 Oct 2014 : Corrected bug with setting the source/dest flag for external IP addresses in flowmod req (bug 243)
->>>>>>> lite
+				03 Nov 2014 : Merged steering and lite branches into steering branch; version bump to 3.2.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
