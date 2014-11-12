@@ -31,6 +31,7 @@
 				23 Sep 2014 - Added suport for multiple tables in order to keep local traffic off of the rate limit bridge.
 				24 Sep 2014 - Added vlan_id support. Added support ITONS dscp demands.
 				14 Oct 2014 - Added check to prevent ip2mac table from being overlaid if new table is empty.
+				11 Nov 2014 - Added ability to append a suffix string to hostnames returned by openstack.
 */
 
 package managers
@@ -54,6 +55,38 @@ import (
 
 // --- Private --------------------------------------------------------------------------
 
+/*
+	Ostack returns a list of hostnames which might map to the wrong network (management
+	rather than ops), so if a phost suffix is defined in the config file, this function 
+	will augment each host in the list and add the suffix. Returns the new list, or 
+	the same list if phost_suffix is nil.
+*/
+func add_phost_suffix( old_list *string, suffix *string ) ( *string ) {
+	if suffix == nil {
+		return old_list
+	}
+
+	nlist := ""
+	sep := ""
+
+	htoks := strings.Split( *old_list, " " )
+	for i := range htoks {
+		if (htoks[i])[0:1] >= "0" && (htoks[i])[0:1] <= "9" {
+			nlist += sep + htoks[i]										// assume ip address, put on as is
+		} else {
+			if strings.Index( htoks[i], "." ) >= 0 {					// fully qualified name
+				dtoks := strings.SplitN( htoks[i], ".", 2 )				// add suffix after first node in the name
+				nlist += sep + dtoks[0] + *suffix  + "." + dtoks[1]		
+			} else {
+				nlist += sep + htoks[i] + *suffix
+			}
+		}
+
+		sep = " "
+	}
+
+	return &nlist
+}
 
 /*
 	We depend on an external script to actually set the queues so this is pretty simple.
@@ -116,13 +149,32 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	multiple agents attached, the individual messages will be fanned out across the 
 	available agents, otherwise the agent will just process them sequentially which
 	would be the case if we put all hosts into the same message.
+
+	This now augments the switch name with the suffix; needs to be fixed for q-full
+	so that it handles intermediate names properly.
 */
-func adjust_queues_agent( qlist []string, hlist *string ) {
+func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	var (
 		qjson	string			// final full json blob
 		qjson_pfx	string		// static prefix
 		sep = ""
 	)
+
+	if phsuffix != nil {									// need to conert the host names in the list to have suffix
+		nql := make( []string, len( qlist ) )
+
+		for i := range qlist {
+			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
+			if len( toks ) == 2 {
+				nh := add_phost_suffix( &toks[0],  phsuffix )		// add the suffix
+				nql[i] = *nh + "/" +  toks[1]
+			} else {
+				nql[i] = qlist[i]
+			}
+		}
+
+		qlist = nql
+	}
 
 	fq_sheep.Baa( 1, "adjusting queues:  sending %d queue setting items to agents",  len( qlist ) );
 
@@ -171,11 +223,13 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 					of the port based on the mac address of the mbox.
 		Pri		- Fmod priority
 
+	phsuffix is the physical host suffix that must be added to each host endpoint name. 
+
 	TODO: this needs to be expanded to be generic and handle all possible match/action parms
 		not just the ones that are specific to res and/or steering.  It will probably need 
 		an on-all flag in the main request struct rather than deducing it from parms. 
 */
-func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) {
+func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, phsuffix *string ) {
 
 	if data == nil {
 		return
@@ -337,8 +391,13 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		}
 	} else {															// fmod goes only to the named switch
 		json := base_json
+		sw_name := &data.Espq.Switch 
+		if phsuffix != nil {											// we need to add the physical host suffix
+			sw_name = add_phost_suffix( sw_name, phsuffix ) 			// TODO: this needs to handle intermediate switches properly; ok for Q-lite, but not full
+		}
 		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s add 0x%x %s"`, 
-			data.Espq.Switch, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
+			*sw_name, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
+			//data.Espq.Switch, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
 		json += ` ] } ] }`
 		fq_sheep.Baa( 2, "json: %s", json )
 
@@ -407,6 +466,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
 		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
 		alt_table	int = DEF_ALT_TABLE		// meta data marking table
+		phost_suffix *string = nil			// physical host suffix added to each host name in the list from openstack (config)
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
 	)
@@ -466,6 +526,13 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		if p := cfg_data["fqmgr"]["verbose"]; p != nil {
 			fq_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
+
+		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {		// suffix added to physical host strings for agent commands
+			if *p != "" {
+				phost_suffix = p
+				fq_sheep.Baa( 1, "physical host names will be suffixed with: %s", *phost_suffix )
+			}
+		}
 	}
 	// ----- end config file munging ---------------------------------------------------
 
@@ -494,7 +561,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			case REQ_GEN_FMOD:							// generic fmod; just pass it along w/o any special handling
 				if msg.Req_data != nil {
 					fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of our expected goodies
-					send_gfmod_agent( fdata,  ip2mac, host_list )
+					send_gfmod_agent( fdata,  ip2mac, host_list, phost_suffix )
 				}
 
 			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod
@@ -535,22 +602,22 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						if fdata.Dir_in  {						// inbound to this switch we need to revert dscp from our settings to the 'origianal' settings
 							if cdata.Single_switch {
 								cdata.Match.Dscp =  -1				// there is no match if both on same switch
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
 							} else {
 								cdata.Match.Dscp = cdata.Dscp						// match the dscp that was added on ingress
 								if ! cdata.Dscp_koe {								// dropping the value on exit
 									cdata.Action.Dscp = 0							// set action to turn it off, otherwise we let it ride (no overt action)
 								}
 
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
 							}
 						} else {													// outbound from this switch set the dscp value specified on the reservation
 							cdata.Match.Dscp =  -1									// on outbound there is no dscp match, ensure this is off
 							if cdata.Single_switch {
-								send_gfmod_agent( cdata,  ip2mac, host_list )		// in single switch mode there is no dscp value needed
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )		// in single switch mode there is no dscp value needed
 							} else {
 								cdata.Action.Dscp = cdata.Dscp						// otherwise set the value and send
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
 							}
 						}
 					}
@@ -570,9 +637,9 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			case REQ_SETQUEUES:								// request from reservation manager which indicates something changed and queues need to be reset
 				qlist := msg.Req_data.( []interface{} )[0].( []string )
 				if ssq_cmd != nil {
-					adjust_queues( qlist, ssq_cmd, host_list ) 	// if writing to a file and driving a local script
+					adjust_queues( qlist, ssq_cmd, host_list ) 					// if writing to a file and driving a local script
 				} else {
-					adjust_queues_agent( qlist, host_list )		// if sending json to an agent
+					adjust_queues_agent( qlist, host_list, phost_suffix )		// if sending json to an agent
 				}
 
 			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
@@ -581,6 +648,10 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
 					if  msg.Response_data.( *string ) != nil {
 						host_list = msg.Response_data.( *string )
+						if phost_suffix != nil {
+							fq_sheep.Baa( 2, "host list from osif before suffix added: %s", *host_list )
+							host_list = add_phost_suffix( host_list, phost_suffix )		// in some cases ostack sends foo, but we really need to use foo-suffix (sigh)
+						}
 						send_hlist_agent( host_list )							// send to agent_manager
 						fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
 					} else {
