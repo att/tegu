@@ -44,6 +44,7 @@
 				10 Oct 2014 - Correct bi-directional link bug (228)
 				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly 
 					setting the -S or -D flag for an external IP (#243).
+				12 Nov 2014 - Change to strip suffix on phost map.
 */
 
 package managers
@@ -212,7 +213,7 @@ func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
 	This is needed to map gateway hosts to physical hosts since openstack does not return the gateways
 	with the same info as it does VMs
 */
-func (n *Network) update_mac2phost( list []string ) {
+func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 	if n.mac2phost == nil {
 		n.mac2phost = make( map[string]*string )
 	}
@@ -220,6 +221,10 @@ func (n *Network) update_mac2phost( list []string ) {
 	for i := range list {
 		toks := strings.Split( list[i], " " )
 		dup_str := toks[0]
+		if phost_suffix != nil {								// if we added a suffix to the host, we must strip it away
+			stoks := strings.Split( toks[0], *phost_suffix )
+			dup_str = stoks[0]
+		} 
 		n.mac2phost[toks[1]] = &dup_str
 	}
 
@@ -1212,6 +1217,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		link_headroom int = 0				// percentage that each link capacity is reduced by
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence			// user link capacity boundaries
+		phost_suffix *string = nil
 
 		ip2		*string
 	)
@@ -1234,6 +1240,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	tegu_sheep.Add_child( net_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 	limits = make( map[string]*gizmos.Fence )
+	if cfg_data["fqmgr"] != nil {								// we need to know if fqmgr is adding a suffix to physical host names so we can strip
+		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {
+			phost_suffix = p
+			net_sheep.Baa( 1, "will strip suffix from mac2phost map: %s", *phost_suffix )
+		}	
+	}
+
 														// suss out config settings from our section
 	if cfg_data["network"] != nil {
 		if p := cfg_data["network"]["refresh"]; p != nil {
@@ -1639,7 +1652,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					// --------------------- agent things -------------------------------------------------------------
 					case REQ_MAC2PHOST:
 						req.Response_ch = nil			// we don't respond to these
-						act_net.update_mac2phost( req.Req_data.( []string ) )
+						act_net.update_mac2phost( req.Req_data.( []string ), phost_suffix )
 
 					default:
 						net_sheep.Baa( 1,  "unknown request received on channel: %d", req.Msg_type )

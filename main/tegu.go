@@ -67,6 +67,7 @@
 				04 Nov 2014 : Build to pick up ostack library change.
 				10 Nov 2014 : Build to pick up ostack library change (small tokens).
 				11 Nov 2014 : Change to support host name suffix in fqmgr.
+				12 Nov 2014 : Change to strip phys host suffix from phys map.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -96,7 +97,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/1b114/a"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/1b124"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -116,7 +117,7 @@ func main() {
 	)
 
 	sheep = bleater.Mk_bleater( 1, os.Stderr )
-	sheep.Set_prefix( "main/3.0b" )
+	sheep.Set_prefix( "main/3.0" )
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
