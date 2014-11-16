@@ -68,6 +68,7 @@
 				10 Nov 2014 : Build to pick up ostack library change (small tokens).
 				11 Nov 2014 : Change to support host name suffix in fqmgr.
 				12 Nov 2014 : Change to strip phys host suffix from phys map.
+				13 Nov 2014 : Correct out of bounds excpetion in fq-manager.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -97,7 +98,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/1b124"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0/1b134"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

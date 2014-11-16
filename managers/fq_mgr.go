@@ -32,6 +32,7 @@
 				24 Sep 2014 - Added vlan_id support. Added support ITONS dscp demands.
 				14 Oct 2014 - Added check to prevent ip2mac table from being overlaid if new table is empty.
 				11 Nov 2014 - Added ability to append a suffix string to hostnames returned by openstack.
+				13 Nov 2014 - Corrected out of bounds range exception in add_phost_suffix (when given a string with a single blank)
 */
 
 package managers
@@ -62,7 +63,7 @@ import (
 	the same list if phost_suffix is nil.
 */
 func add_phost_suffix( old_list *string, suffix *string ) ( *string ) {
-	if suffix == nil {
+	if suffix == nil  || old_list == nil || *old_list == "" {
 		return old_list
 	}
 
@@ -71,18 +72,20 @@ func add_phost_suffix( old_list *string, suffix *string ) ( *string ) {
 
 	htoks := strings.Split( *old_list, " " )
 	for i := range htoks {
-		if (htoks[i])[0:1] >= "0" && (htoks[i])[0:1] <= "9" {
-			nlist += sep + htoks[i]										// assume ip address, put on as is
-		} else {
-			if strings.Index( htoks[i], "." ) >= 0 {					// fully qualified name
-				dtoks := strings.SplitN( htoks[i], ".", 2 )				// add suffix after first node in the name
-				nlist += sep + dtoks[0] + *suffix  + "." + dtoks[1]		
+		if htoks[i] != "" {
+			if (htoks[i])[0:1] >= "0" && (htoks[i])[0:1] <= "9" {
+				nlist += sep + htoks[i]										// assume ip address, put on as is
 			} else {
-				nlist += sep + htoks[i] + *suffix
+				if strings.Index( htoks[i], "." ) >= 0 {					// fully qualified name
+					dtoks := strings.SplitN( htoks[i], ".", 2 )				// add suffix after first node in the name
+					nlist += sep + dtoks[0] + *suffix  + "." + dtoks[1]		
+				} else {
+					nlist += sep + htoks[i] + *suffix
+				}
 			}
+	
+			sep = " "
 		}
-
-		sep = " "
 	}
 
 	return &nlist
@@ -647,13 +650,19 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
 					if  msg.Response_data.( *string ) != nil {
-						host_list = msg.Response_data.( *string )
-						if phost_suffix != nil {
-							fq_sheep.Baa( 2, "host list from osif before suffix added: %s", *host_list )
-							host_list = add_phost_suffix( host_list, phost_suffix )		// in some cases ostack sends foo, but we really need to use foo-suffix (sigh)
+						hls := strings.TrimLeft( *(msg.Response_data.( *string )), " \t" )		// ditch leading whitespace
+						hl := &hls
+						if *hl != ""  {
+							host_list = hl										// ok to use it
+							if phost_suffix != nil {
+								fq_sheep.Baa( 2, "host list from osif before suffix added: %s", *host_list )
+								host_list = add_phost_suffix( host_list, phost_suffix )		// in some cases ostack sends foo, but we really need to use foo-suffix (sigh)
+							}
+							send_hlist_agent( host_list )							// send to agent_manager
+							fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
+						} else {
+							fq_sheep.Baa( 1, "host list received from osif was discarded: (%s)", *host_list )
 						}
-						send_hlist_agent( host_list )							// send to agent_manager
-						fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
 					} else {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
 					}
