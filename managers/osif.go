@@ -56,6 +56,7 @@
 				02 Oct 2014 - TGUOSI007 message eliminated as it duplcated 005.
 				14 Oct 2014 - Corrected error count reset in gen_maps. Added additional check
 					to ensure that empty maps are ignored.
+				17 Nov 2014 - Changes to allow for lazy updating of maps.
 */
 
 package managers
@@ -84,6 +85,7 @@ import (
 
 // --- Private --------------------------------------------------------------------------
 
+
 /*
 	Given a raw string of the form [[<token>]/{project-name|ID}]/<data> verify
 	that token is valid for project, and translate project to an ID.  The resulting output
@@ -105,6 +107,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 	var (
 		id	string
 		idp	*string = nil
+		pname	*string		// project name extracted from token
 		err	error
 	)
 
@@ -133,29 +136,73 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-		case 3:							// token and name/ID
-			if pname2id != nil {
-				idp = pname2id[tokens[1]]
+		case 3:										// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
+			if tokens[1] == "" {								// token//host, or token//id, given; get tenant info from token
+				if tokens[0] != "!" {							//  if !//stuff we leave things alone and !//stuff is returned later
+					ostk := os_refs["_ref_"]					// use our reference creds to examine the token
+					if ostk == nil {
+						return nil, fmt.Errorf( "internal error: no reference credentials, cannot validate token" )
+					}
+					pname, idp, _ :=  ostk.Token2project( &tokens[0] )
+				
+					if pname == nil {			// not a valid token, bail now
+						return nil, fmt.Errorf( "invalid token" )
+					}
+
+					xstr := fmt.Sprintf( "%s/%s", *idp, tokens[2] )		// valid token, build id/host return string and send back
+					osif_sheep.Baa( 2, "validation: %s: tok//host ==> %s", *raw, xstr )
+					return &xstr, nil
+				}
+			} else {
+				if pname2id != nil {
+					idp = pname2id[tokens[1]]
+				}
 			}
-			if idp == nil {					// assume it's already an id and needs no translation
+
+			if idp == nil {					// assume it's already an id and needs no translation, or is empty and that's ok
 				id = tokens[1]
 			} else {
 				id = *idp
 			}
 
-			if ! tok_req {										// using this for translation, skip the osif call
+			if ! tok_req {										// if token required is false, then using this for translation, so skip the osif call
 				xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )	// build and return the translated string
 				return &xstr, nil
 			}
 
 			if tokens[0] == "!"	{								// special indication to skip validation and return ID with a lead bang indicating not authorised
 				xstr := fmt.Sprintf( "!%s/%s", id, tokens[2] )	// build and return the translated string
+				osif_sheep.Baa( 2, "validation: unvalidated %s ==> %s", *raw, xstr )
 				return &xstr, nil
 			}
 
+			ostk := os_refs["_ref_"]							// use our reference (admin) id to validate the token
+			if ostk == nil {
+				return nil, fmt.Errorf( "no creds for project: %s; cannot validate token", tokens[1] )
+			}
+
+			pname, _, err = ostk.Token2project( &tokens[0] )
+			if pname == nil {
+				if err != nil {
+					return nil, fmt.Errorf( "unable to determine project from token: %s", err )
+				} else {
+					return nil, fmt.Errorf( "unable to determine project from token: no diagnostic" )
+				}
+			}
+			if *pname != tokens[1] {
+				osif_sheep.Baa( 1, "invalid token/tenant: expected %s found %s", tokens[1], *pname )
+				return nil, fmt.Errorf( "invalid token/tenant pair" )
+			}
+
+
+			xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
+			osif_sheep.Baa( 2, "validation: %s: tok//host ==> %s", *raw, xstr )
+			return &xstr, nil
+
+/*
 			for _, ostk := range os_refs {										// find the project name in our list
 				if ostk != nil  &&  ostk.Equals_id( &id ) {
-					ok, err := ostk.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
+					ok, err := ostk.Valid_for_project( &(tokens[0]) )	 		// verify that token is legit for the project
 					if ok {
 						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
 						return &xstr, nil
@@ -166,6 +213,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 					break			// bail out and exit
 				}
 			}
+*/
 	}
 	
 	return nil, fmt.Errorf( "invalid token/tenant pair" )
@@ -264,6 +312,8 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 /*
 	Tegu-lite
 	Build all vm translation maps -- requires two actual calls out to openstack
+
+	DEPRECATED -- will fall off the edge when transition to lazy update is complete.
 */
 func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 			vmid2ip map[string]*string,
@@ -544,11 +594,12 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		msg	*ipc.Chmsg
 		os_list string = ""
 		os_sects	[]string					// sections in the config file
-		os_refs		map[string]*ostack.Ostack			// creds for each project we need to request info from
+		os_refs		map[string]*ostack.Ostack	// creds for each project we need to request info from
+		os_projects map[string]*osif_project	// list of project info (maps)
 		os_admin	*ostack.Ostack				// admin creds
 		inc_tenant	bool = false
 		refresh_delay	int = 15				// config file can override
-		id2pname		map[string]*string			// project id/name translation maps
+		id2pname	map[string]*string			// project id/name translation maps
 		pname2id	map[string]*string
 		req_token	bool = false				// if set to true in config file the token _must_ be present when called to validate
 		def_passwd	*string						// defaults and what we assume are the admin creds
@@ -667,6 +718,21 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				os_refs["_ref_"] = os_refs[*project]					// a quick access reference when any one will do
 			}
 		}
+
+		os_projects = make( map[string]*osif_project )
+		for k, _ := range os_refs {					// build the projects for maps
+			if k == "_ref_" {						// no project built for the reference entry since it dups another entry
+				continue
+			}
+
+			np, err := Mk_osif_project( pname2id[k] )
+			if err == nil {
+				os_projects[k] = np	
+				osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
+			} else {
+				osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
+			}
+		}
 	}
 	// ---------------- end config parsing ----------------------------------------
 
@@ -735,6 +801,11 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI012]" )
 				}
 
+			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info and return in a network update struct
+				if msg.Response_ch != nil {
+					go get_hostinfo( msg, os_projects, pname2id, id2pname )			// do it asynch and return the result on the message channel
+				}
+
 			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, req_token )
@@ -772,9 +843,12 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				}
 		}
 
-		osif_sheep.Baa( 3, "processing request complete: %d", msg.Msg_type )
-		if msg.Response_ch != nil {			// if a reqponse channel was provided
-			msg.Response_ch <- msg			// send our result back to the requestor
+		if msg != nil  { 						// if msg wasn't passed off to a go routine
+			osif_sheep.Baa( 3, "processing request complete: %d", msg.Msg_type )
+
+			if msg.Response_ch != nil {			// if a reqponse channel was provided
+				msg.Response_ch <- msg			// send our result back to the requestor
+			}
 		}
 	}
 }

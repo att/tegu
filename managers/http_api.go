@@ -53,6 +53,7 @@
 				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
 				09 Oct 2014 : Allow verbose even if network not initialised correctly.
+				18 Nov 2014 : Changes to support lazy osif data fetching
 */
 
 package managers

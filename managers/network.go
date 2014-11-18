@@ -123,8 +123,8 @@ func mk_network( mk_links bool ) ( n *Network ) {
 	return
 }
 
+// -------------- map management (mostly tegu-lite) -----------------------------------------------------------
 /*
-	Tegu-lite
 	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
 */
 func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
@@ -175,6 +175,63 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 	return
 }
+
+/*
+	Using a net_vm struct update the various maps. Allows for lazy discovery of 
+	VM information rather than needing to request everything all at the same time.
+*/
+func (net *Network) insert_vm( vm *Net_vm ) {
+	vname, vid, vip4, _, vphost, vmac, vfip := vm.Get_values( )
+	if vname == nil {								// shouldn't happen, but be safe
+		return
+	}
+
+	if net.vm2ip == nil {							// ensure everything exists
+		net.vm2ip = make( map[string]*string )
+	}
+	if net.ip2vm == nil {
+		net.ip2vm = make( map[string]*string )
+	}
+
+	if net.vmid2ip == nil {
+		net.vm2ip = make( map[string]*string )
+	}
+	if net.ip2vmid == nil {
+		net.ip2vmid = make( map[string]*string )
+	}
+
+	if net.vmid2phost == nil {
+		net.vmid2phost = make( map[string]*string )
+	}
+	if net.mac2phost == nil {
+		net.mac2phost = make( map[string]*string )
+	}
+
+	if net.ip2mac == nil {
+		net.ip2mac = make( map[string]*string )
+	}
+
+	if net.fip2ip == nil {
+		net.fip2ip = make( map[string]*string )
+	}
+	if net.ip2fip == nil {
+		net.ip2fip = make( map[string]*string )
+	}
+	
+	net.vm2ip[*vname] = vip4
+	net.ip2vm[*vip4] = vname
+	
+	net.vmid2ip[*vid] = vip4
+	net.ip2vmid[*vip4] = vid
+
+	net.vmid2phost[*vid] = vphost
+
+	net.ip2mac[*vip4] = vmac
+
+	net.fip2ip[*vfip] = vip4
+	net.ip2fip[*vip4] = vfip
+}
+
 
 /*
 	Given a user name find a fence in the table, or copy the defaults and 
@@ -1476,6 +1533,14 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
 						}
 
+					case REQ_ADD:							// insert new information into the various vm maps
+						if req.Req_data != nil {
+							vm := req.Req_data.( *Net_vm )
+							act_net.insert_vm( vm )
+						}
+
+
+						
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 
 						if req.Req_data != nil {
 							act_net.vm2ip = req.Req_data.( map[string]*string )

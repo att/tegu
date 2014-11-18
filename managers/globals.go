@@ -87,6 +87,7 @@ const (
 	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
+	REQ_GET_HOSTINFO			// request a full set of host info from the maps
 	
 )
 
