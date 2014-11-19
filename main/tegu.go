@@ -69,6 +69,8 @@
 				11 Nov 2014 : Change to support host name suffix in fqmgr.
 				12 Nov 2014 : Change to strip phys host suffix from phys map.
 				13 Nov 2014 : Correct out of bounds excpetion in fq-manager.
+				17 Nov 2014 : Converted the openstack interface to a lazy update method rather than attempting to 
+							prefetch all of the various translation maps and then to keep them up to date.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -98,7 +100,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0/1b134"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0.1/1b174"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -173,21 +175,21 @@ func main() {
 	// openstack data, json data, and physical data from the agent(s).  Once that's in place, then we can 
 	// load the checkpoint file.  Once the checkpoint is loaded then we can open the api for real work. 
 	// 
-	if *chkpt_file != "" {
 	
-		for {
-			req.Response_data = 0
-			req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
-			req = <- my_chan													// block until we have a response back
+	for {																	// hard block to wait on network readyness
+		req.Response_data = 0
+		req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
+		req = <- my_chan													// block until we have a response back
 
-			if req.Response_data.(int) == 2 {									// wait until we have everything in the network
-				break
-			}
-
-			sheep.Baa( 2, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
-			time.Sleep( 5 * time.Second )
+		if req.Response_data.(int) == 2 {									// wait until we have everything that the network needs to build a reservation
+			break
 		}
 
+		sheep.Baa( 2, "waiting for network to initialise: need state 2, current state = %d", req.Response_data.(int)  )
+		time.Sleep( 5 * time.Second )
+	}
+
+	if *chkpt_file != "" {
 		sheep.Baa( 1, "network initialised, sending chkpt load request" )
 		req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, chkpt_file, nil )
 		req = <- my_chan												// block until the file is loaded
@@ -196,6 +198,8 @@ func main() {
 			sheep.Baa( 0, "ERR: unable to load checkpoint file: %s: %s\n", *chkpt_file, req.State )
 			os.Exit( 1 )
 		}
+	} else {
+		sheep.Baa( 1, "network initialised, opening up system for all requests" )
 	}
 
 	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know
