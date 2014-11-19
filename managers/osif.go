@@ -57,6 +57,11 @@
 				14 Oct 2014 - Corrected error count reset in gen_maps. Added additional check
 					to ensure that empty maps are ignored.
 				17 Nov 2014 - Changes to allow for lazy updating of maps.
+					Side effects of this change:
+						- project will always be included with VM name (not config file optional
+						  with include_tenant setting which is now ignored.
+						- request for ip2mac table by fqmgr is used only to accept a channel
+						  and the map is pushed back when we think we have changes.
 */
 
 package managers
@@ -401,11 +406,21 @@ probably because we're not admin on every project and it's impossible to tell wh
 /*
 	Generate a map containing the translation from IP address to MAC address.
 	Must run them all because in ccp we don't get everything with one call.
-*/
-func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
-	
-	m = nil
 
+	Converted to get from project maps rather than an openstack call
+*/
+//func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
+func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err error ) {
+	
+
+	err = nil
+	m = make( map[string]*string )
+	for _, p := range os_projs {
+		p.Fill_ip2mac( m )				// add this project's translation map
+	}
+
+/*
+	m = nil
 	for k, ostk := range os_refs {
 		if k != "_ref_" {
 			m, _, err = ostk.Mk_mac_maps( m, nil, inc_tenant )	
@@ -416,6 +431,7 @@ func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[st
 			}
 		}
 	}
+*/
 
 	return
 }
@@ -598,7 +614,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_refs		map[string]*ostack.Ostack	// creds for each project we need to request info from
 		os_projects map[string]*osif_project	// list of project info (maps)
 		os_admin	*ostack.Ostack				// admin creds
-		inc_tenant	bool = false
+		//inc_tenant	bool = false
 		refresh_delay	int = 15				// config file can override
 		id2pname	map[string]*string			// project id/name translation maps
 		pname2id	map[string]*string
@@ -617,18 +633,20 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	// ---- pick up configuration file things of interest --------------------------
 
 	if cfg_data["osif"] != nil {								// cannot imagine that this section is missing, but don't fail if it is
+/*
 		p := cfg_data["osif"]["include_tenant"]
 		if p != nil {
 			if *p == "true" {
 				inc_tenant = true							// see require token option below
 			}
 		}
+*/
 		def_passwd = cfg_data["osif"]["passwd"]				// defaults applied if non-section given in list, or info omitted from the section
 		def_usr = cfg_data["osif"]["usr"]
 		def_url = cfg_data["osif"]["url"]
 		def_project = cfg_data["osif"]["project"]
 	
-		p = cfg_data["osif"]["refresh"]
+		p := cfg_data["osif"]["refresh"]
 		if p != nil {
 			refresh_delay = clike.Atoi( *p ); 			
 			if refresh_delay < 15 {
@@ -648,7 +666,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		p = cfg_data["osif"]["require_token"]
 		if p != nil && *p == "true"	{
 			req_token = true
-			inc_tenant = true					// implied if token is required
+			//inc_tenant = true					// implied if token is required
 		}
 
 		p = cfg_data["osif"]["verbose"]
@@ -657,8 +675,10 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 	}
 
+/*
 	gen_maps_ch := make( chan *map[string]*ostack.Ostack, 10 )					// channel to send gen_maps data to work on
 	go gen_maps( gen_maps_ch,  inc_tenant )
+*/
 
 	if os_list == " " || os_list == "" || os_list == "off" {
 		osif_sheep.Baa( 0, "osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )
@@ -749,9 +769,12 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
 		switch msg.Msg_type {
 			case REQ_GENMAPS:								// driven by tickler
+/*
+					// deprecated with switch to lazy update
 					if len( gen_maps_ch ) < 1  {				// only push if something isn't already queued so we don't get a huge backlog if ostack is slow
 						gen_maps_ch <- &os_refs				// causes another round of maps to be generated and sent to network manager
 					}
+*/
 
 			case REQ_GENCREDS:								// driven by tickler
 				if os_admin != nil {
@@ -786,12 +809,23 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				}
 	*/
 
-			case REQ_IP2MACMAP:													// generate an ip to mac map for the caller and write on the channel
-				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
-					msg.Response_data, msg.State = get_ip2mac( os_refs, inc_tenant )
+			case REQ_IP2MACMAP:												// generate an ip to mac map and send to those who need it (fq_mgr at this point)
+				freq := ipc.Mk_chmsg( )										// need a new request to pass to fq_mgr
+				data, err := get_ip2mac( os_projects )
+				if err == nil {
+					freq.Send_req( fq_ch, nil, REQ_IP2MACMAP, data, nil )	// request data forward
+					msg.State = nil											// response ok back to requestor
 				} else {
-					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011]" )
+					msg.State = err											// error goes back to requesting process
 				}
+
+/*
+				this is now acceptable, so no warning
+				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
+				} else {
+					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
+				}
+*/
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list

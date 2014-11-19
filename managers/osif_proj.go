@@ -232,16 +232,16 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 
 	if creds == nil {
 		err = fmt.Errorf( "creds were nil" )
-		osif_sheep.Baa( 1, ">>>> get_info forcing reload" )
+		osif_sheep.Baa( 2, "lazy update: unable to get nil creds" )
 		return
 	}
 
 	if time.Now().Unix() - p.lastfetch < 90 {					// if fresh, try to avoid reload
 		name, id, ip4, fip4, mac, phost, gwmap = p.suss_info( search )
-	}
+	} 
 
 	if name == nil {											// not found or not fresh, force reload
-		osif_sheep.Baa( 1, "refreshing maps for: %s", *p.name )
+		osif_sheep.Baa( 2, "lazy update: data reload for: %s" *p.name )
 		new_data = true		
 		err = p.refresh_maps( creds, inc_project )
 		if err == nil {
@@ -250,6 +250,23 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 	}
 
 	return
+}
+
+/*
+	Fill in the ip2mac map that is passed in with ours. Must grab the read lock to make this 
+	safe.
+*/
+func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
+	if umap == nil {
+		return
+	}
+
+	p.rwlock.RLock()							// lock for reading
+	defer p.rwlock.RUnlock() 					// ensure unlocked on return
+
+	for k, v := range p.ip2mac {
+		umap[k] = v
+	}
 }
 
 
@@ -301,7 +318,7 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 		return
 	}
 	
-	osif_sheep.Baa( 1, ">>>get host info setup complete for (%s) %s", *pname, *(msg.Req_data.( *string )) )
+	osif_sheep.Baa( 2, "lazy update: get host info setup complete for (%s) %s", *pname, *(msg.Req_data.( *string )) )
 
 	search := *pid + "/" + tokens[1]							// search string must be id/hostname
 	name, id, ip4, fip4, mac, phost, gwmap, _, err := p.Get_info( &search, creds, true )
@@ -312,8 +329,8 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 		return
 	}
 	
-	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, fip4, gwmap )		// finally, build the vm data block for network manager
-	msg.Response_ch <- msg															// and send it on its merry way
+	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, fip4, gwmap )		// build the vm data block for network manager
+	msg.Response_ch <- msg																// and send it on its merry way
 
 	return
 }

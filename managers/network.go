@@ -224,24 +224,6 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	
 
 
-	h := gizmos.Mk_host( *vmac, *vip4, "" )			// create a host to insert into the actual graph
-	if vmac != nil {
-		net.hosts[*vmac] = h						// reference by mac and IP addresses (when there)
-/*
-		if vphost != nil {
-			ssw := net.switches[*vphost]
-			if ssw != nil {
-				if vid != nil {
-net_sheep.Baa( 1, ">>>inserting into switch: %s (%s) (%s)", *vphost, *vmac, *vid  )
-					ssw.Add_host( vmac, vid, -128 )	// allows switch to provide has_host() method
-				} else {
-					ssw.Add_host( vmac, nil, -128 )
-				}
-			} 
-		}
-*/
-	}
-
 	if vname != nil {
 		net.vm2ip[*vname] = vip4
 	}
@@ -256,7 +238,6 @@ net_sheep.Baa( 1, ">>>inserting into switch: %s (%s) (%s)", *vphost, *vmac, *vid
 		net.ip2vm[*vip4] = vname
 		net.ip2mac[*vip4] = vmac
 		net.ip2fip[*vip4] = vfip
-		net.hosts[*vip4] = h						// add reference in graph by ipv4
 	}
 
 	if vfip != nil {

@@ -285,8 +285,13 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 /*
 	Gathers information about the host from openstack, and if known inserts the information into 
 	the network graph. If block is true, then we will block on a repl from network manager. 
+	If update_fqmgr is true, then we will also send osif a request to update the fqmgr with 
+	data that might ahve changed as a result of lazy gathering of info by the get_hostinfo
+	request.  If block is set, then we block until osif acks the request. This ensures
+	that the request has been given to fq-mgr which is single threaded and thus will process
+	the update before attempting to process any flow-mods that result from a later reservation.
 */
-func update_graph( hname *string, block bool ) {
+func update_graph( hname *string, update_fqmgr bool, block bool ) {
 
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 
@@ -306,8 +311,20 @@ func update_graph( hname *string, block bool ) {
 		if req.State != nil {
 			osif_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname
 		}
+
+		return
+	}
+
+	if update_fqmgr {
+		req := ipc.Mk_chmsg( )
+		req.Send_req( osif_ch, my_ch, REQ_IP2MACMAP, hname, nil )				// cause osif to push changes into fq-mgr (caution: we give osif fq-mgr's channel for response)
+		if block {
+			_ = <- my_ch
+		}	
 	}
 }
+
+
 
 // ---- main parsers ------------------------------------------------------------------------------------ 
 /*
@@ -591,10 +608,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						res = nil 
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 
-						update_graph( &h1, false )									// pull all of the VM information from osif then send to netmgr
-						update_graph( &h2, true )									// this call will block until netmgr has updated the graph
-
 						if err == nil {
+							update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
+							update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+
 							dscp := tclass2dscp["voice"]							// default to using voice traffic class
 							dscp_koe := false										// we do not keep it as the packet exits the environment
 
@@ -625,6 +642,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								nerrors += ecount - 1 												// number of errors added to the pile by the call
 							}
 						} else {
+							if err == nil {
+								err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
+							}
 							reason = fmt.Sprintf( "reservation rejected: %s", err )
 						}
 
