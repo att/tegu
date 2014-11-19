@@ -1428,8 +1428,17 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 				switch req.Msg_type {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
-					case REQ_STATE:			// return state of data: 1 == vm xlation (orig), 2 == all ostack data for q-lite
-							state := 0
+					case REQ_STATE:			// return state with respect to whether we have enough data to allow reservation requests 
+							state := 0		// value reflects ability 2 == have all we need; 1 == have partial, but must block, 0 == have nothing
+							mlen := 0
+							if act_net.mac2phost != nil  && len( act_net.mac2phost ) > 0 {	// in lazy update world, we need only the agent supplied data
+								mlen =  len( act_net.mac2phost )
+								state = 2													// once we have it we are golden
+							}
+							net_sheep.Baa( 1, "net-state: m2pho=%v/%d state=%d", act_net.mac2phost == nil, mlen, state )
+
+/*
+	DEPRECTED -- in non-lazy update world, we needed all maps, now we just need what comes back from agent
 							if act_net.vm2ip != nil  && act_net.ip2vm != nil { 		// non q-lite oriented things 
 								state = 1
 							}
@@ -1457,6 +1466,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 							net_sheep.Baa( 1, "net-state: v2ip=%v  ip2v=%v v2pho=%v ip2m=%v m2pho=%v gwm=%v/%v fip2ip=%v  state=%d", act_net.vmid2ip != nil, act_net.ip2vmid != nil, 
 									act_net.vmid2phost	 != nil, act_net.ip2mac != nil, act_net.mac2phost != nil, act_net.gwmap != nil, act_net.hupdate, act_net.fip2ip != nil, state  )
+*/
 							req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
@@ -1617,7 +1627,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_IP2MAC:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2mac = req.Req_data.( map[string]*string )
-							if net_sheep.Get_level() > 2 {
+							if net_sheep.Would_baa( 3 ) {
 								for k, v := range act_net.ip2mac {
 									net_sheep.Baa( 3, "ip2mac: %s --> %s", k, *v )
 								}
@@ -1629,7 +1639,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_GWMAP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.gwmap = req.Req_data.( map[string]*string )
-							if net_sheep.Get_level() > 2 {
+							if net_sheep.Would_baa( 3 ) {
 								for k, v := range act_net.gwmap {
 									net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
 								}
@@ -1648,7 +1658,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_FIP2IP:
 						if req.Req_data != nil {
 							act_net.fip2ip = req.Req_data.( map[string]*string )
-							if net_sheep.Get_level() > 2 {
+							if net_sheep.Would_baa( 3 ) {
 								for k, v := range act_net.fip2ip {
 									net_sheep.Baa( 3, "fip2ip: %s --> %s", k, *v )
 								}
@@ -1750,7 +1760,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							if hname == nil || *hname == "" {
 								net_sheep.Baa( 2, "unable to find name in vm2ip table" )
 
-								if net_sheep.Get_level() > 2 {
+								if net_sheep.Would_baa( 3 ) {
 									for k, v := range act_net.vm2ip {
 										net_sheep.Baa( 3, "vm2ip[%s] = %s", k, *v );
 									}

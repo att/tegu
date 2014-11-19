@@ -241,7 +241,7 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 	} 
 
 	if name == nil {											// not found or not fresh, force reload
-		osif_sheep.Baa( 2, "lazy update: data reload for: %s" *p.name )
+		osif_sheep.Baa( 2, "lazy update: data reload for: %s", *p.name )
 		new_data = true		
 		err = p.refresh_maps( creds, inc_project )
 		if err == nil {
