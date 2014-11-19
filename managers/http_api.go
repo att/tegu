@@ -270,7 +270,7 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 
 		if res_paused {
 			rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
-			res.Pause( false )				// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+			res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
 			res.Set_pushed( )
 		}
 	} else {
@@ -282,6 +282,32 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 }
 
 
+/*
+	Gathers information about the host from openstack, and if known inserts the information into 
+	the network graph. If block is true, then we will block on a repl from network manager. 
+*/
+func update_graph( hname *string, block bool ) {
+
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, hname, nil )				// request data
+	req = <- my_ch
+	if req.Response_data != nil {												// if returned send to network for insertion
+		if ! block {
+			my_ch = nil															// turn off if not blocking
+		}
+
+		req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )			// add information to the graph
+		if block {
+			_ = <- my_ch															// wait for response -- at the moment we ignore
+		}
+	} else {
+		if req.State != nil {
+			osif_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname
+		}
+	}
+}
 
 // ---- main parsers ------------------------------------------------------------------------------------ 
 /*
@@ -565,14 +591,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						res = nil 
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 
-
-http_sheep.Baa( 1, ">>>>--- sending get host info request " )
-			req = ipc.Mk_chmsg( )
-			req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, &h1, nil )
-http_sheep.Baa( 1, ">>>> waiting on get host info request " )
-			req = <- my_ch
-http_sheep.Baa( 1, ">>>>--- back from  get host info request, req.State=%v ", req.State )
-
+						update_graph( &h1, false )									// pull all of the VM information from osif then send to netmgr
+						update_graph( &h2, true )									// this call will block until netmgr has updated the graph
 
 						if err == nil {
 							dscp := tclass2dscp["voice"]							// default to using voice traffic class

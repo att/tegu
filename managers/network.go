@@ -194,7 +194,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	}
 
 	if net.vmid2ip == nil {
-		net.vm2ip = make( map[string]*string )
+		net.vmid2ip = make( map[string]*string )
 	}
 	if net.ip2vmid == nil {
 		net.ip2vmid = make( map[string]*string )
@@ -217,19 +217,59 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	if net.ip2fip == nil {
 		net.ip2fip = make( map[string]*string )
 	}
+
+	if net.gwmap == nil {
+		net.gwmap = make( map[string]*string )
+	}
 	
-	net.vm2ip[*vname] = vip4
-	net.ip2vm[*vip4] = vname
+
+
+	h := gizmos.Mk_host( *vmac, *vip4, "" )			// create a host to insert into the actual graph
+	if vmac != nil {
+		net.hosts[*vmac] = h						// reference by mac and IP addresses (when there)
+/*
+		if vphost != nil {
+			ssw := net.switches[*vphost]
+			if ssw != nil {
+				if vid != nil {
+net_sheep.Baa( 1, ">>>inserting into switch: %s (%s) (%s)", *vphost, *vmac, *vid  )
+					ssw.Add_host( vmac, vid, -128 )	// allows switch to provide has_host() method
+				} else {
+					ssw.Add_host( vmac, nil, -128 )
+				}
+			} 
+		}
+*/
+	}
+
+	if vname != nil {
+		net.vm2ip[*vname] = vip4
+	}
 	
-	net.vmid2ip[*vid] = vip4
-	net.ip2vmid[*vip4] = vid
+	if vid != nil {
+		net.vmid2ip[*vid] = vip4
+		net.vmid2phost[*vid] = vphost
+	}
 
-	net.vmid2phost[*vid] = vphost
+	if vip4 != nil {
+		net.ip2vmid[*vip4] = vid
+		net.ip2vm[*vip4] = vname
+		net.ip2mac[*vip4] = vmac
+		net.ip2fip[*vip4] = vfip
+		net.hosts[*vip4] = h						// add reference in graph by ipv4
+	}
 
-	net.ip2mac[*vip4] = vmac
+	if vfip != nil {
+		net.fip2ip[*vfip] = vip4
+	}
 
-	net.fip2ip[*vfip] = vip4
-	net.ip2fip[*vip4] = vfip
+	vgwmap := vm.Get_gwmap()					// don't assume that all gateways are present in every map
+	if vgwmap != nil {							// as it may be just related to the VM and not every gateway
+		for k, v := range vgwmap {
+			net.gwmap[k] = v
+		}	
+	}
+
 }
 
 
@@ -1255,6 +1295,24 @@ func (n *Network) to_json( ) ( jstr string ) {
 	return
 }
 
+/*
+	Transfer maps from an old network grah to this one
+*/
+func (net *Network) xfer_maps( old_net *Network ) {
+	net.vm2ip = old_net.vm2ip
+	net.ip2vm = old_net.ip2vm
+	net.vmid2ip = old_net.vmid2ip
+	net.ip2vmid = old_net.ip2vmid
+	net.vmid2phost = old_net.vmid2phost	
+	net.ip2mac = old_net.ip2mac
+	net.mac2phost = old_net.mac2phost
+	net.gwmap = old_net.gwmap
+	net.fip2ip = old_net.fip2ip
+	net.ip2fip = old_net.ip2fip
+	net.limits = old_net.limits
+}
+
+
 // --------- public -------------------------------------------------------------------------------------------
 
 /*
@@ -1537,9 +1595,12 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						if req.Req_data != nil {
 							vm := req.Req_data.( *Net_vm )
 							act_net.insert_vm( vm )
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
+							if new_net != nil {
+								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
+								act_net = new_net							// and finally use it
+							}
 						}
-
-
 						
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 
 						if req.Req_data != nil {
@@ -1575,8 +1636,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_IP2MAC:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2mac = req.Req_data.( map[string]*string )
-							for k, v := range act_net.ip2mac {
-								net_sheep.Baa( 3, "ip2mac: %s --> %s", k, *v )
+							if net_sheep.Get_level() > 2 {
+								for k, v := range act_net.ip2mac {
+									net_sheep.Baa( 3, "ip2mac: %s --> %s", k, *v )
+								}
 							}
 						} else {
 							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
@@ -1585,8 +1648,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_GWMAP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.gwmap = req.Req_data.( map[string]*string )
-							for k, v := range act_net.gwmap {
-								net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
+							if net_sheep.Get_level() > 2 {
+								for k, v := range act_net.gwmap {
+									net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
+								}
 							}
 						} else {
 							net_sheep.Baa( 1, "gw map was nil; not changed" )
@@ -1602,8 +1667,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_FIP2IP:
 						if req.Req_data != nil {
 							act_net.fip2ip = req.Req_data.( map[string]*string )
-							for k, v := range act_net.fip2ip {
-								net_sheep.Baa( 3, "fip2ip: %s --> %s", k, *v )
+							if net_sheep.Get_level() > 2 {
+								for k, v := range act_net.fip2ip {
+									net_sheep.Baa( 3, "fip2ip: %s --> %s", k, *v )
+								}
 							}
 						} else {
 							net_sheep.Baa( 1, "fip2ip map was nil; not changed" )
@@ -1626,9 +1693,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.State = nil;
 
 					case REQ_NETUPDATE:								// build a new network graph
-						net_sheep.Baa( 2, "rebuilding network graph" )
+						net_sheep.Baa( 1, "rebuilding network graph" )
 						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
 						if new_net != nil {
+							new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
+							act_net = new_net
+
+/*
 							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back 
 							ip2vm_map := act_net.ip2vm
 							vmid2ip_map := act_net.vmid2ip
@@ -1654,6 +1725,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							act_net.fip2ip = fip2ip
 							act_net.ip2fip = ip2fip
 							act_net.limits = limits
+*/
 
 							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
 						} else {

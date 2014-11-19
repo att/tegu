@@ -23,13 +23,14 @@ type Net_vm  struct {
 	phost	*string			// phys host where vm is running
 	mac		*string			// MAC
 	fip		*string			// floating ip 
+	gwmap	map[string]*string // the gate way information associated with the VM
 }
 
 /*
 	Create a vm insertion structure. Not a good idea to create a nil named structure, but
 	we'll allow it and subs in unnamed.
 */
-func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, fip *string )  ( np *Net_vm ) {
+func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, fip *string, gwmap map[string]*string )  ( np *Net_vm ) {
 	if name == nil {
 		unv := "unnamed"
 		name = &unv
@@ -43,17 +44,28 @@ func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *st
 		phost: phost,
 		mac: mac,
 		fip: fip,
+		gwmap: gwmap,			// we assume the map is ours to keep
 	}
 
 	return
 }
 
+/*
+	Returns all values except the gateway map.
+*/
 func (vm *Net_vm) Get_values( ) ( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, fip *string ) {
 	if vm == nil {
 		return
 	}
 
 	return vm.name, vm.id, vm.ip4, vm.ip6, vm.phost, vm.mac, vm.fip
+}
+
+/*
+	Returns the map.
+*/
+func (vm *Net_vm) Get_gwmap() ( map[string]*string ) {
+	return vm.gwmap
 }
 
 /*

@@ -48,7 +48,6 @@ type osif_project struct {
 	Make a new project map management block.
 */
 func Mk_osif_project( name string ) ( p *osif_project, err error ) {
-osif_sheep.Baa( 1, ">>>> making project: %s", name )
 	p = &osif_project {
 		name:	&name,
 		lastfetch:	0,
@@ -113,7 +112,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( 
 			}
 		}
 
-		ip2fip, fip2ip, err := creds.Mk_fip_maps( nil, nil, inc_tenant )
+		fip2ip, ip2fip, err := creds.Mk_fip_maps( nil, nil, inc_tenant )
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map VM info (fip): %s; %s   [TGUOSI004]", creds.To_str( ), err )
 			rerr = err
@@ -159,14 +158,13 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( 
 /*
 	Supports Get_info by searching for the information but does not do a reload.
 */
-func (p *osif_project) suss_info( search *string ) ( name *string, id *string, ip4 *string, fip4 *string, mac *string, phost *string ) {
+func (p *osif_project) suss_info( search *string ) ( name *string, id *string, ip4 *string, fip4 *string, mac *string, phost *string, gwmap map[string]*string ) {
 
 	name = nil
 	id = nil
 	ip4 = nil
 
 	if search == nil {
-osif_sheep.Baa( 1, ">>>> suss_info: search was nil " )
 		return
 	}
 
@@ -190,10 +188,8 @@ osif_sheep.Baa( 1, ">>>> suss_info: search was nil " )
 	}
 
 	if name == nil || ip4 == nil {
-osif_sheep.Baa( 1, ">>>> suss_info: name or ip was nil: %v %v", name, ip4 )
 		return
 	}
-osif_sheep.Baa( 1, ">>>> suss_info: using %s %s", *name, *ip4 )
 
 	if id == nil {
 		id = p.ip2vmid[*ip4]
@@ -202,6 +198,10 @@ osif_sheep.Baa( 1, ">>>> suss_info: using %s %s", *name, *ip4 )
 	fip4 = p.ip2fip[*ip4] 
 	mac = p.ip2mac[*ip4] 
 	phost = p.vmid2host[*id]
+	gwmap = make( map[string]*string, len( p.gwmap ) )
+	for k, v := range p.gwmap {
+		gwmap [k] = v					// should be safe to reference the same string
+	}
 
 	return 
 }
@@ -214,7 +214,16 @@ osif_sheep.Baa( 1, ">>>> suss_info: using %s %s", *name, *ip4 )
 	a reload of the map and then search again.  The new-data flag indicates that the 
 	information wasn't in the previous map. 
 */
-func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_project bool ) ( name *string, id *string, ip4 *string, fip4 *string, mac *string, phost *string, new_data bool, err error ) {
+func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_project bool ) ( 
+		name *string, 
+		id *string, 
+		ip4 *string, 
+		fip4 *string, 
+		mac *string, 
+		phost *string, 
+		gwmap map[string]*string,
+		new_data bool, 
+		err error ) {
 
 	new_data = false
 	err = nil
@@ -227,17 +236,16 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 		return
 	}
 
-	if time.Now().Unix() - p.lastfetch < 90 {					// don't need to reload unless missing if fresh
-		osif_sheep.Baa( 1, ">>>> get_info trying current maps first" )
-		name, id, ip4, fip4, mac, phost = p.suss_info( search )
+	if time.Now().Unix() - p.lastfetch < 90 {					// if fresh, try to avoid reload
+		name, id, ip4, fip4, mac, phost, gwmap = p.suss_info( search )
 	}
 
-	if name == nil {
+	if name == nil {											// not found or not fresh, force reload
 		osif_sheep.Baa( 1, "refreshing maps for: %s", *p.name )
 		new_data = true		
 		err = p.refresh_maps( creds, inc_project )
 		if err == nil {
-			name, id, ip4, fip4, mac, phost = p.suss_info( search )
+			name, id, ip4, fip4, mac, phost, gwmap = p.suss_info( search )
 		}
 	}
 
@@ -255,53 +263,39 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 */
 func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
 	if msg == nil {
-osif_sheep.Baa( 1, ">>>>> get_hostinfo: msg is nil!" )
 		return															// prevent accidents
 	}
 
-osif_sheep.Baa( 1, ">>>>> get_hostinfo: starting... %s", *(msg.Req_data.( *string )) )
 	msg.Response_data = nil
 
 	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
 	if len( tokens ) != 2 {
-osif_sheep.Baa( 1, ">>>>> inalid proj/host stirng %s", *(msg.Req_data.( *string )) )
 		msg.State = fmt.Errorf( "invalid project/hostname string" )
 		msg.Response_ch <- msg
 		return
 	}
 
-osif_sheep.Baa( 1, ">>>>> get_hostinfo: split %s  %s", tokens[0], tokens[1] )
+	if tokens[0] == "!" { 					// !//ipaddress was given; we've got nothing, so bail now
+		msg.Response_ch <- msg
+		return
+	}
+
 	pid := &tokens[0]
 	pname := id2pname[*pid]
 	if pname == nil {						// it should be an id, but allow for a name/host to be sent in
-for pn, v := range( id2pname )  {
-osif_sheep.Baa( 1, "+++++ id2pname[%s] = %s", pn, *v )
-}
-osif_sheep.Baa( 1, ">>>>> unable to find %s in id2pname using tok[0] as pname", tokens[0] )
 		pname = &tokens[0]
 		pid = pname2id[*pname]
 	} 
 
-for _, xp := range os_projs {
-osif_sheep.Baa( 1, ">>>>> xp=%s", *xp.name )
-}
 	p := os_projs[*pid]
 	if p == nil {
-osif_sheep.Baa( 1, ">>>>>  could not map %s to project", *pid )
-for pn := range os_projs {
-osif_sheep.Baa( 1, "+++++ have project %s", pn )
-}
 		msg.State = fmt.Errorf( "%s could not be mapped to a osif_project", *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
 		return
 	}
 
-osif_sheep.Baa( 1, ">>>>> get_hostinfo: about to suss out creds for %s", *pname )
 	creds := os_refs[*pname]
 	if creds == nil {
-for pn := range os_refs {
-osif_sheep.Baa( 1, "+++++ %s", pn )
-}
 		msg.State = fmt.Errorf( "%s could not be mapped to openstack creds ", *pname )
 		msg.Response_ch <- msg
 		return
@@ -310,7 +304,7 @@ osif_sheep.Baa( 1, "+++++ %s", pn )
 	osif_sheep.Baa( 1, ">>>get host info setup complete for (%s) %s", *pname, *(msg.Req_data.( *string )) )
 
 	search := *pid + "/" + tokens[1]							// search string must be id/hostname
-	name, id, ip4, fip4, mac, phost, _, err := p.Get_info( &search, creds, true )
+	name, id, ip4, fip4, mac, phost, gwmap, _, err := p.Get_info( &search, creds, true )
 
 	if err != nil {
 		msg.State = fmt.Errorf( "unable to retrieve host info: %s", err )
@@ -318,8 +312,7 @@ osif_sheep.Baa( 1, "+++++ %s", pn )
 		return
 	}
 	
-osif_sheep.Baa( 1, ">>>>> get_hostinfo: got information: %s %s %s %s %s %s", name, id, ip4, phost, mac, fip4 )
-	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, fip4 )		// finally, build the vm data block for network manager
+	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, fip4, gwmap )		// finally, build the vm data block for network manager
 	msg.Response_ch <- msg															// and send it on its merry way
 
 	return
