@@ -309,7 +309,7 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 		}
 	} else {
 		if req.State != nil {
-			osif_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname
+			http_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname
 		}
 
 		return

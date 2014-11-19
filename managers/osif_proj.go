@@ -297,12 +297,24 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 		return
 	}
 
+	if tokens[0][0:1] == "!" {				// first character is a bang, but there is a name/id that follows
+		tokens[0] = tokens[0][1:]			// ditch it for this
+	}
+osif_sheep.Baa( 1, ">>>>>> %s", tokens[0] )
+
 	pid := &tokens[0]
 	pname := id2pname[*pid]
 	if pname == nil {						// it should be an id, but allow for a name/host to be sent in
 		pname = &tokens[0]
 		pid = pname2id[*pname]
 	} 
+
+	if pid == nil {
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s",  *(msg.Req_data.( *string )) )  // might be !project/vm, and so this is ok
+		msg.State = fmt.Errorf( "%s could not be mapped to a osif_project", *(msg.Req_data.( *string )) )
+		msg.Response_ch <- msg
+		return
+	}
 
 	p := os_projs[*pid]
 	if p == nil {

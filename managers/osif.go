@@ -112,7 +112,6 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 	var (
 		id	string
 		idp	*string = nil
-		pname	*string		// project name extracted from token
 		err	error
 	)
 
@@ -175,7 +174,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-			if tokens[0] == "!"	{								// special indication to skip validation and return ID with a lead bang indicating not authorised
+			if tokens[0][0:1] == "!"	{						// special indication to skip validation and return ID with a lead bang indicating not authorised
 				xstr := fmt.Sprintf( "!%s/%s", id, tokens[2] )	// build and return the translated string
 				osif_sheep.Baa( 2, "validation: unvalidated %s ==> %s", *raw, xstr )
 				return &xstr, nil
@@ -186,7 +185,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return nil, fmt.Errorf( "no creds for project: %s; cannot validate token", tokens[1] )
 			}
 
-			pname, _, err = ostk.Token2project( &tokens[0] )
+			pname, idp, err := ostk.Token2project( &tokens[0] )
 			if pname == nil {
 				if err != nil {
 					return nil, fmt.Errorf( "unable to determine project from token: %s", err )
@@ -194,8 +193,8 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 					return nil, fmt.Errorf( "unable to determine project from token: no diagnostic" )
 				}
 			}
-			if *pname != tokens[1] {
-				osif_sheep.Baa( 1, "invalid token/tenant: expected %s found %s", tokens[1], *pname )
+			if *pname != tokens[1] && *idp != tokens[1] {			// must try both
+				osif_sheep.Baa( 1, "invalid token/tenant: expected %s opnestack reports: %s/%s", tokens[1], *pname, *idp )
 				return nil, fmt.Errorf( "invalid token/tenant pair" )
 			}
 
