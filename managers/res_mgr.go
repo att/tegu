@@ -41,6 +41,7 @@
 				29 Oct 2014 : Corrected bug -- setting vlan id when VMs are on same switch.
 				03 Nov 2014 : Removed straggling comments from the bidirectional fix.
 						General cleanup to merge with steering code.
+				19 Nov 2014 : correct bug in loading reservation path.
 */
 
 package managers
@@ -445,10 +446,12 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 						req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
 						req = <- my_ch									// should be OK, but the underlying network could have changed
 		
-						if req.State == nil {						// reservation accepted, add to inventory
+						if req.Response_data != nil {
+							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+							p.Set_path_list( path_list )
+							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s; path length= %d", p.Get_id, len( path_list ) )
 							err = i.Add_res( p )
 						} else {
-		
 							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
 						}
 					}

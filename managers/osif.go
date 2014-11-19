@@ -155,7 +155,8 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 
 			for _, ostk := range os_refs {										// find the project name in our list
 				if ostk != nil  &&  ostk.Equals_id( &id ) {
-					ok, err := ostk.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
+					//ok, err := ostk.Valid_for_project( &(tokens[0]), false ) 		// verify that token is legit for the project
+					ok, err := ostk.Valid_for_project( &(tokens[0]), &id ) 		// verify that token is legit for the project
 					if ok {
 						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
 						return &xstr, nil
@@ -561,7 +562,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	osif_sheep.Set_prefix( "osif_mgr" )
 	tegu_sheep.Add_child( osif_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
-	ostack.Set_debugging( 0 );
+	//ostack.Set_debugging( 0 );
 
 	// ---- pick up configuration file things of interest --------------------------
 
