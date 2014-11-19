@@ -330,6 +330,7 @@ func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
 		err error
 	)
 
+osif_sheep.Baa( 1, "DEPRECATED function map_all is being executed!" )
 	vmid2ip = nil				// shouldn't need, but safety never hurts
 	ip2vmid = nil
 	vm2ip = nil
@@ -721,24 +722,22 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 		os_projects = make( map[string]*osif_project )
 		for k, _ := range os_refs {					// build the projects for maps
-			if k == "_ref_" {						// no project built for the reference entry since it dups another entry
-				continue
-			}
-
-			np, err := Mk_osif_project( pname2id[k] )
-			if err == nil {
-				os_projects[k] = np	
-				osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
-			} else {
-				osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
+			if k != "_ref_" {	
+				np, err := Mk_osif_project( k )
+				if err == nil {
+					os_projects[*pname2id[k]] = np	
+					osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
+				} else {
+					osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
+				}
 			}
 		}
 	}
 	// ---------------- end config parsing ----------------------------------------
 
 
-	tklr.Add_spot( 3, my_chan, REQ_GENMAPS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
-	tklr.Add_spot( int64( refresh_delay ), my_chan, REQ_GENMAPS, nil, ipc.FOREVER );  	
+	//tklr.Add_spot( 3, my_chan, REQ_GENMAPS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
+	//tklr.Add_spot( int64( refresh_delay ), my_chan, REQ_GENMAPS, nil, ipc.FOREVER );  	
 	tklr.Add_spot( 3, my_chan, REQ_GENCREDS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
 	tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER );  	
 
@@ -803,7 +802,8 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info and return in a network update struct
 				if msg.Response_ch != nil {
-					go get_hostinfo( msg, os_projects, pname2id, id2pname )			// do it asynch and return the result on the message channel
+					go get_hostinfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+					msg = nil							// prevent early response
 				}
 
 			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string

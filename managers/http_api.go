@@ -564,6 +564,16 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 						res = nil 
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+
+
+http_sheep.Baa( 1, ">>>>--- sending get host info request " )
+			req = ipc.Mk_chmsg( )
+			req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, &h1, nil )
+http_sheep.Baa( 1, ">>>> waiting on get host info request " )
+			req = <- my_ch
+http_sheep.Baa( 1, ">>>>--- back from  get host info request, req.State=%v ", req.State )
+
+
 						if err == nil {
 							dscp := tclass2dscp["voice"]							// default to using voice traffic class
 							dscp_koe := false										// we do not keep it as the packet exits the environment
