@@ -70,7 +70,7 @@ func Mk_osif_project( name string ) ( p *osif_project, err error ) {
 	Build all translation maps for the given project.
 	Does NOT replace a map with a nil map; we assume this is an openstack glitch.
 */
-func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( rerr error ) {
+func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 	
 	if p == nil {
 		return
@@ -91,7 +91,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( 
 		}
 
 		osif_sheep.Baa( 2, "refresh: creating VM maps from: %s", creds.To_str( ) )
-		vmid2ip, ip2vmid, vm2ip, vmid2host, err := creds.Mk_vm_maps( nil, nil, nil, nil, inc_tenant )
+		vmid2ip, ip2vmid, vm2ip, vmid2host, err := creds.Mk_vm_maps( nil, nil, nil, nil, true )
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map VM info (vm): %s; %s   [TGUOSI003]", creds.To_str( ), err )
 			rerr = err
@@ -112,7 +112,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( 
 			}
 		}
 
-		fip2ip, ip2fip, err := creds.Mk_fip_maps( nil, nil, inc_tenant )
+		fip2ip, ip2fip, err := creds.Mk_fip_maps( nil, nil, true )
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map VM info (fip): %s; %s   [TGUOSI004]", creds.To_str( ), err )
 			rerr = err
@@ -125,7 +125,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( 
 			}
 		}
 
-		ip2mac, _, err := creds.Mk_mac_maps( nil, nil, inc_tenant )	
+		ip2mac, _, err := creds.Mk_mac_maps( nil, nil, true )	
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", creds.To_str( ), err )
 			rerr = err
@@ -138,7 +138,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack, inc_tenant bool  ) ( 
 		}
 	
 
-		gwmap, _, err := creds.Mk_gwmaps( nil, nil, inc_tenant, false )		
+		gwmap, _, err := creds.Mk_gwmaps( nil, nil, true, false )		
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", creds.To_str( ), err )
 			creds.Expire()					// force re-auth next go round
@@ -243,7 +243,7 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 	if name == nil {											// not found or not fresh, force reload
 		osif_sheep.Baa( 2, "lazy update: data reload for: %s", *p.name )
 		new_data = true		
-		err = p.refresh_maps( creds, inc_project )
+		err = p.refresh_maps( creds )
 		if err == nil {
 			name, id, ip4, fip4, mac, phost, gwmap = p.suss_info( search )
 		}
@@ -300,7 +300,6 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 	if tokens[0][0:1] == "!" {				// first character is a bang, but there is a name/id that follows
 		tokens[0] = tokens[0][1:]			// ditch it for this
 	}
-osif_sheep.Baa( 1, ">>>>>> %s", tokens[0] )
 
 	pid := &tokens[0]
 	pname := id2pname[*pid]

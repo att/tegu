@@ -62,6 +62,9 @@
 						  with include_tenant setting which is now ignored.
 						- request for ip2mac table by fqmgr is used only to accept a channel
 						  and the map is pushed back when we think we have changes.
+
+	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
+				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
 */
 
 package managers
@@ -198,26 +201,9 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return nil, fmt.Errorf( "invalid token/tenant pair" )
 			}
 
-
 			xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
 			osif_sheep.Baa( 2, "validation: %s: tok//host ==> %s", *raw, xstr )
 			return &xstr, nil
-
-/*
-			for _, ostk := range os_refs {										// find the project name in our list
-				if ostk != nil  &&  ostk.Equals_id( &id ) {
-					ok, err := ostk.Valid_for_project( &(tokens[0]) )	 		// verify that token is legit for the project
-					if ok {
-						xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
-						return &xstr, nil
-					} else {
-						osif_sheep.Baa( 1, "invalid token: %s: %s", *raw, err )
-					}
-
-					break			// bail out and exit
-				}
-			}
-*/
 	}
 	
 	return nil, fmt.Errorf( "invalid token/tenant pair" )
@@ -314,101 +300,11 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 }
 
 /*
-	Tegu-lite
-	Build all vm translation maps -- requires two actual calls out to openstack
-
-	DEPRECATED -- will fall off the edge when transition to lazy update is complete.
-*/
-func map_all( os_refs map[string]*ostack.Ostack, inc_tenant bool  ) (
-			vmid2ip map[string]*string,
-			ip2vmid map[string]*string,
-			vm2ip map[string]*string,
-			vmid2host map[string]*string,
-			ip2mac map[string]*string,
-			gwmap map[string]*string,
-			ip2fip map[string]*string,
-			fip2ip map[string]*string,
-			rerr error ) {
-	
-	var (
-		err error
-	)
-
-osif_sheep.Baa( 1, "DEPRECATED function map_all is being executed!" )
-	vmid2ip = nil				// shouldn't need, but safety never hurts
-	ip2vmid = nil
-	vm2ip = nil
-	vmid2host = nil
-	ip2mac = nil
-	gwmap = nil				// mac2ip for all gateway "boxes"
-	fip2ip = nil
-	ip2fip = nil
-
-	for k, ostk := range os_refs {
-		if k != "_ref_" {
-			osif_sheep.Baa( 2, "creating VM maps from: %s", ostk.To_str( ) )
-			vmid2ip, ip2vmid, vm2ip, vmid2host, err = ostk.Mk_vm_maps( vmid2ip, ip2vmid, vm2ip, vmid2host, inc_tenant )
-			if err != nil {
-				osif_sheep.Baa( 2, "WRN: unable to map VM info: %s; %s   [TGUOSI003]", ostk.To_str( ), err )
-				rerr = err
-				ostk.Expire()					// force re-auth next go round
-			}
-	
-			ip2fip, fip2ip, err = ostk.Mk_fip_maps( ip2fip, fip2ip, inc_tenant )
-			if err != nil {
-				osif_sheep.Baa( 2, "WRN: unable to map VM info: %s; %s   [TGUOSI004]", ostk.To_str( ), err )
-				rerr = err
-				ostk.Expire()					// force re-auth next go round
-			}
-
-			ip2mac, _, err = ostk.Mk_mac_maps( ip2mac, nil, inc_tenant )	
-			if err != nil {
-				osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", ostk.To_str( ), err )
-				rerr = err
-				ostk.Expire()					// force re-auth next go round
-			}
-
-			gwmap, _, err = ostk.Mk_gwmaps( gwmap, nil, inc_tenant, false )		
-			if err != nil {
-				osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", ostk.To_str( ), err )
-				ostk.Expire()					// force re-auth next go round
-			} else {
-				osif_sheep.Baa( 2, "gw map has %d entries", len( gwmap ) )
-			}
-		}
-	}
-
-	// ---- use the reference pointer for these as we get everything from one call (2014.09.30 -- not in ccp's environment! argh!)
-/*
-ccp environment doesn't return all on the single call, so moved up into previous loop
-probably because we're not admin on every project and it's impossible to tell where admin privs exist
-	ip2mac, _, err = os_refs["_ref_"].Mk_mac_maps( nil, nil, inc_tenant )	
-	if err != nil {
-		osif_sheep.Baa( 2, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
-		rerr = err
-		ostk.Expire()					// force re-auth next go round
-	}
-
-	gwmap, _, err = os_refs["_ref_"].Mk_gwmaps( gwmap, nil, inc_tenant, false )		// second true is use project which we need right now
-	if err != nil {
-		osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", os_refs["_ref_"].To_str( ), err )
-		ostk.Expire()					// force re-auth next go round
-	}
-	} else {
-		osif_sheep.Baa( 2, "gw map has %d entries", len( gwmap ) )
-	}
-*/
-
-	return
-}
-
-/*
 	Generate a map containing the translation from IP address to MAC address.
 	Must run them all because in ccp we don't get everything with one call.
 
 	Converted to get from project maps rather than an openstack call
 */
-//func get_ip2mac( os_refs map[string]*ostack.Ostack, inc_tenant bool ) ( m map[string]*string, err error ) {
 func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err error ) {
 	
 
@@ -422,7 +318,7 @@ func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err
 	m = nil
 	for k, ostk := range os_refs {
 		if k != "_ref_" {
-			m, _, err = ostk.Mk_mac_maps( m, nil, inc_tenant )	
+			m, _, err = ostk.Mk_mac_maps( m, nil, true )	
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
 				ostk.Expire()					// force re-auth next go round
@@ -505,98 +401,6 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 }
 
 
-/*
-	generate maps and send them to network manager.  This runs as a go routine so that
-	it doesn't block the main event processing.  It blocks waiting for an updated list
-	of openstack credentials, so it will run each time the credentials are updated.
-*/
-func gen_maps( data_ch chan *map[string]*ostack.Ostack, inc_tenant bool  ) {
-
-	err_count := 0
-	osif_sheep.Baa( 1, "gen_maps sub-go is running" )
-
-	for {
-			err_count = 0
-
-			os_refs :=<- data_ch
-				vmid2ip, ip2vmid, vm2ip, vmid2host, ip2mac, gwmap, ip2fip, fip2ip, _ := map_all( *os_refs, inc_tenant )
-				// ignore errors as a bad entry for one ostack credential shouldn't spoil the rest of the info gathering; we send only non-nil maps
-				if vm2ip != nil && len( vm2ip ) > 0 {
-					osif_sheep.Baa( 2, "vm2ip map has %d entries", len( vm2ip ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_VM2IP, vm2ip, nil )					// send w/o expecting anything back
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: vm2ip (nil=%v)", vm2ip == nil )
-					err_count++
-				}
-	
-				if vmid2ip != nil && len( vmid2ip ) > 0 {
-					osif_sheep.Baa( 2, "vmid2ip map has %d entries", len( vmid2ip ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_VMID2IP, vmid2ip, nil )					
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: vmid2ip (nil=%v)", vmid2ip == nil )
-					err_count++
-				}
-	
-				if ip2vmid != nil && len( ip2vmid ) > 0 {
-					osif_sheep.Baa( 2, "ip2vmid map has %d entries", len( ip2vmid ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_IP2VMID, ip2vmid, nil )				
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: ip2vmid (nil=%v)", ip2vmid == nil )
-					err_count++
-				}
-	
-				if vmid2host != nil && len( vmid2host ) > 0 {
-					osif_sheep.Baa( 2, "vmid2host map has %d entries", len( vmid2host ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_VMID2PHOST, vmid2host, nil )		
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: vmid2host (nil=%v)", vmid2host == nil )
-					err_count++
-				}
-	
-				if ip2mac != nil && len( ip2mac ) > 0 {
-					osif_sheep.Baa( 2, "ip2mac map has %d entries", len( ip2mac ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_IP2MAC, ip2mac, nil )		
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: ip2mac (nil=%v)", ip2mac == nil )
-					err_count++
-				}
-	
-				if gwmap != nil && len( gwmap ) > 0 {
-					osif_sheep.Baa( 2, "gwmap map has %d entries", len( gwmap ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_GWMAP, gwmap, nil )		
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: gwmap (nil=%v)", gwmap == nil )
-					err_count++
-				}
-
-				if ip2fip != nil && len( ip2fip ) > 0 {
-					osif_sheep.Baa( 2, "ip2fip map has %d entries", len( ip2fip ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_IP2FIP, ip2fip, nil )		
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: ip2fip (nil=%v)", ip2fip == nil )
-					err_count++
-				}
-
-				if fip2ip != nil && len( fip2ip ) > 0 {
-					osif_sheep.Baa( 2, "fip2ip map has %d entries", len( fip2ip ) )
-					msg := ipc.Mk_chmsg( )
-					msg.Send_req( nw_ch, nil, REQ_FIP2IP, fip2ip, nil )		
-				} else {
-					osif_sheep.Baa( 2, "nil or empty map not sent to network: fip2ip (nil=%v)", fip2ip == nil )
-					err_count++
-				}
-
-				osif_sheep.Baa( 2, "gen_maps: VM maps were updated from openstack %d issues detected", err_count )
-	}
-}
-
 // --- Public ---------------------------------------------------------------------------
 
 
@@ -613,7 +417,6 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_refs		map[string]*ostack.Ostack	// creds for each project we need to request info from
 		os_projects map[string]*osif_project	// list of project info (maps)
 		os_admin	*ostack.Ostack				// admin creds
-		//inc_tenant	bool = false
 		refresh_delay	int = 15				// config file can override
 		id2pname	map[string]*string			// project id/name translation maps
 		pname2id	map[string]*string
@@ -632,14 +435,6 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	// ---- pick up configuration file things of interest --------------------------
 
 	if cfg_data["osif"] != nil {								// cannot imagine that this section is missing, but don't fail if it is
-/*
-		p := cfg_data["osif"]["include_tenant"]
-		if p != nil {
-			if *p == "true" {
-				inc_tenant = true							// see require token option below
-			}
-		}
-*/
 		def_passwd = cfg_data["osif"]["passwd"]				// defaults applied if non-section given in list, or info omitted from the section
 		def_usr = cfg_data["osif"]["usr"]
 		def_url = cfg_data["osif"]["url"]
@@ -665,7 +460,6 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		p = cfg_data["osif"]["require_token"]
 		if p != nil && *p == "true"	{
 			req_token = true
-			//inc_tenant = true					// implied if token is required
 		}
 
 		p = cfg_data["osif"]["verbose"]
@@ -673,11 +467,6 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			osif_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
 	}
-
-/*
-	gen_maps_ch := make( chan *map[string]*ostack.Ostack, 10 )					// channel to send gen_maps data to work on
-	go gen_maps( gen_maps_ch,  inc_tenant )
-*/
 
 	if os_list == " " || os_list == "" || os_list == "off" {
 		osif_sheep.Baa( 0, "osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )
@@ -768,12 +557,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		osif_sheep.Baa( 3, "processing request: %d", msg.Msg_type )
 		switch msg.Msg_type {
 			case REQ_GENMAPS:								// driven by tickler
-/*
 					// deprecated with switch to lazy update
-					if len( gen_maps_ch ) < 1  {				// only push if something isn't already queued so we don't get a huge backlog if ostack is slow
-						gen_maps_ch <- &os_refs				// causes another round of maps to be generated and sent to network manager
-					}
-*/
 
 			case REQ_GENCREDS:								// driven by tickler
 				if os_admin != nil {
@@ -817,14 +601,6 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				} else {
 					msg.State = err											// error goes back to requesting process
 				}
-
-/*
-				this is now acceptable, so no warning
-				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
-				} else {
-					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
-				}
-*/
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list

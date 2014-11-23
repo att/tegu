@@ -45,6 +45,7 @@
 				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly 
 					setting the -S or -D flag for an external IP (#243).
 				12 Nov 2014 - Change to strip suffix on phost map.
+				17 Nov 2014 - Changes for lazy mapping.
 */
 
 package managers
@@ -1429,45 +1430,15 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
 					case REQ_STATE:			// return state with respect to whether we have enough data to allow reservation requests 
-							state := 0		// value reflects ability 2 == have all we need; 1 == have partial, but must block, 0 == have nothing
-							mlen := 0
-							if act_net.mac2phost != nil  && len( act_net.mac2phost ) > 0 {	// in lazy update world, we need only the agent supplied data
-								mlen =  len( act_net.mac2phost )
-								state = 2													// once we have it we are golden
-							}
-							net_sheep.Baa( 1, "net-state: m2pho=%v/%d state=%d", act_net.mac2phost == nil, mlen, state )
+						state := 0			// value reflects ability 2 == have all we need; 1 == have partial, but must block, 0 == have nothing
+						mlen := 0
+						if act_net.mac2phost != nil  && len( act_net.mac2phost ) > 0 {	// in lazy update world, we need only the agent supplied data
+							mlen =  len( act_net.mac2phost )
+							state = 2													// once we have it we are golden
+						}
+						net_sheep.Baa( 1, "net-state: m2pho=%v/%d state=%d", act_net.mac2phost == nil, mlen, state )
 
-/*
-	DEPRECTED -- in non-lazy update world, we needed all maps, now we just need what comes back from agent
-							if act_net.vm2ip != nil  && act_net.ip2vm != nil { 		// non q-lite oriented things 
-								state = 1
-							}
-							if act_net.vmid2ip != nil  && 							// check for q-lite tables and ensure they have size
-									act_net.ip2vmid != nil  && 
-									act_net.vmid2phost	 != nil  && 
-									act_net.ip2mac != nil  && 
-									act_net.mac2phost != nil  && 
-									act_net.gwmap != nil  && 
-									act_net.fip2ip != nil  && 
-									act_net.ip2fip != nil  {
-								if len( act_net.vmid2ip ) > 0   && 						
-										len( act_net.ip2vmid ) > 0   && 
-										len( act_net.vmid2phost	 ) > 0   && 
-										len( act_net.ip2mac ) > 0   && 
-										len( act_net.mac2phost ) > 0   && 
-										len( act_net.gwmap ) > 0   && 
-										len( act_net.fip2ip ) > 0   && 
-										len( act_net.ip2fip ) > 0   {
-									if act_net.hupdate {							// tables there, but only good if host table updated after gwmap had data
-										state = 2
-									}
-								}
-							}
-
-							net_sheep.Baa( 1, "net-state: v2ip=%v  ip2v=%v v2pho=%v ip2m=%v m2pho=%v gwm=%v/%v fip2ip=%v  state=%d", act_net.vmid2ip != nil, act_net.ip2vmid != nil, 
-									act_net.vmid2phost	 != nil, act_net.ip2mac != nil, act_net.mac2phost != nil, act_net.gwmap != nil, act_net.hupdate, act_net.fip2ip != nil, state  )
-*/
-							req.Response_data = state
+						req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
 						p := req.Req_data.( *gizmos.Pledge )
@@ -1689,34 +1660,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						if new_net != nil {
 							new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 							act_net = new_net
-
-/*
-							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back 
-							ip2vm_map := act_net.ip2vm
-							vmid2ip_map := act_net.vmid2ip
-							ip2vmid_map := act_net.ip2vmid
-							vmid2phost_map := act_net.vmid2phost	
-							ip2mac_map := act_net.ip2mac
-							mac2phost := act_net.mac2phost
-							gwmap := act_net.gwmap
-							fip2ip := act_net.fip2ip
-							ip2fip := act_net.ip2fip
-							limits := act_net.limits
-
-							act_net = new_net
-
-							act_net.vm2ip = vm2ip_map					// and put them back into the new one
-							act_net.ip2vm = ip2vm_map
-							act_net.vmid2ip = vmid2ip_map 
-							act_net.ip2vmid = ip2vmid_map 
-							act_net.vmid2phost	 = vmid2phost_map
-							act_net.ip2mac = ip2mac_map
-							act_net.mac2phost = mac2phost
-							act_net.gwmap = gwmap
-							act_net.fip2ip = fip2ip
-							act_net.ip2fip = ip2fip
-							act_net.limits = limits
-*/
 
 							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
 						} else {

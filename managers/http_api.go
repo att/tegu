@@ -549,6 +549,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 										req = <- my_ch
 
 										if req.State == nil {	
+											h1, h2 = plist[i].Get_hosts( ) 							// get the pldege hosts so we can update the graph
+											update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
+											update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+
 											plist[i].Reset_pushed()													// it's not pushed at this point
 											reason, jreason, ecount = finalise_reservation( plist[i], res_paused )	// allocate in network and add to res manager inventory
 											if ecount == 0 {
