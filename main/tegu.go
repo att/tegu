@@ -71,6 +71,7 @@
 				13 Nov 2014 : Correct out of bounds excpetion in fq-manager.
 				17 Nov 2014 : Converted the openstack interface to a lazy update method rather than attempting to 
 							prefetch all of the various translation maps and then to keep them up to date.
+				19 Nov 2014 : Correct bug in checkpoint path attachment to reservation.
 
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -100,7 +101,11 @@ func usage( version string ) {
 
 func main() {
 	var (
+<<<<<<< HEAD
 		version		string = "v3.0.1/1b184"		// for usage and passed on manager initialisation so ping responds with this too.
+=======
+		version		string = "v3.0/1b194"		// for usage and passed on manager initialisation so ping responds with this too.
+>>>>>>> lite
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

@@ -43,6 +43,7 @@
 						General cleanup to merge with steering code.
 				17 Nov 2014 : Updated to support lazy data collection from openstack -- must update host
 						information and push to network as we load from a checkpoint file.
+				19 Nov 2014 : correct bug in loading reservation path.
 */
 
 package managers
@@ -451,7 +452,6 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 						req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
 						req = <- my_ch										// should be OK, but the underlying network could have changed
 		
-						
 						if req.Response_data != nil {
 							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 							p.Set_path_list( path_list )

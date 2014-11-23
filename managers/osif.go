@@ -185,7 +185,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 
 			ostk := os_refs["_ref_"]							// use our reference (admin) id to validate the token
 			if ostk == nil {
-				return nil, fmt.Errorf( "no creds for project: %s; cannot validate token", tokens[1] )
+				return nil, fmt.Errorf( "no refrence creds;  cannot validate token: %s", tokens[1] )
 			}
 
 			pname, idp, err := ostk.Token2project( &tokens[0] )
@@ -431,6 +431,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	osif_sheep.Set_prefix( "osif_mgr" )
 	tegu_sheep.Add_child( osif_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
+	//ostack.Set_debugging( 0 );
 
 	// ---- pick up configuration file things of interest --------------------------
 
@@ -475,7 +476,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project )
 		if os_admin != nil {
-			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the translation maps
+osif_sheep.Baa( 1, "admin creds generated, mapping all tenants" )
+			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the initial translation maps
+			//pname2id, id2pname, _ = os_admin.Map_all_tenants( )		// get the translation maps
 			for k := range pname2id {
 				osif_sheep.Baa( 1, "tenant known: %s", k )
 			}
@@ -561,7 +564,8 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_GENCREDS:								// driven by tickler
 				if os_admin != nil {
-					new_name2id, new_id2pname, err := os_admin.Map_tenants( )		// fetch new maps, overwrite only if no errors
+					//new_name2id, new_id2pname, err := os_admin.Map_tenants( )		// fetch new maps, overwrite only if no errors
+					new_name2id, new_id2pname, err := os_admin.Map_all_tenants( )		// fetch new maps, overwrite only if no errors
 					if err == nil {
 						pname2id = new_name2id
 						id2pname = new_id2pname
