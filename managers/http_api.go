@@ -54,6 +54,8 @@
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
 				09 Oct 2014 : Allow verbose even if network not initialised correctly.
 				18 Nov 2014 : Changes to support lazy osif data fetching
+				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
+					an ip2mac map to be forced out to fqmgr.
 */
 
 package managers
@@ -309,10 +311,8 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 		}
 	} else {
 		if req.State != nil {
-			http_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname
+			http_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname, but we'll log it anyway
 		}
-
-		return
 	}
 
 	if update_fqmgr {
@@ -321,7 +321,7 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 		if block {
 			_ = <- my_ch
 		}	
-	}
+	} 
 }
 
 
@@ -361,8 +361,6 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		bandw_in	int64
 		bandw_out	int64
 		req_count	int = 0;				// number of requests attempted
-		h1			string
-		h2			string
 		sep			string = ""				// json object separator
 		req			*ipc.Chmsg
 		my_ch		chan *ipc.Chmsg
@@ -549,7 +547,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 										req = <- my_ch
 
 										if req.State == nil {	
-											h1, h2 = plist[i].Get_hosts( ) 							// get the pldege hosts so we can update the graph
+											h1, h2 := plist[i].Get_hosts( ) 							// get the pldege hosts so we can update the graph
 											update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
 											update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
 
@@ -607,7 +605,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 
 						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
-						h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+						h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
 						res = nil 
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
