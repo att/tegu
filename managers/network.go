@@ -46,6 +46,10 @@
 					setting the -S or -D flag for an external IP (#243).
 				12 Nov 2014 - Change to strip suffix on phost map.
 				17 Nov 2014 - Changes for lazy mapping.
+				24 Nov 2014 - Changes to drop the requirement for both VMs to have a floating IP address 
+					if a cross tenant reservation is being made. Also drops the requirement that the VM 
+					have a floating IP if the reservation is being made with a host using an external
+					IP address.
 */
 
 package managers
@@ -722,6 +726,13 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
 	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
 	shortcut and thus not needing to supply the same authorisation token twice on the request. 
+
+	We now allow a VM to make a reservation with an external address without a floating point IP
+	since the VM's floating point IP is only needed on a reservation that would be made from 
+	the "other side".   If the VM doesn't have a floating IP, then it WILL be a problem if the reservation
+	is being made between two tennants, but if for some odd reason a truely external IP address is 
+	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
+	the VM doesn't have a floating IP. 
 */
 func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair ) {
 	var (
@@ -786,13 +797,17 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		}
 	}
 
+	zip := "0.0.0.0"										// dummy which allows vm-name,!//ipaddress without requiring vm to have a floating point ip
 	if f1 == nil {
-		net_sheep.Baa( 1, "find_endpoints: unable to map host to floating ip: %s", *h1ip )
-		return
+		f1 = &zip											// possible VM-name without fip -> !//IPaddr
 	}
 
 	if f2 == nil {
-		net_sheep.Baa( 1, "find_endpoints: unable to map host to floating ip: %s", *h2ip )
+		f2 = &zip											// possible !//IPaddr -> vm-name without fip
+	}
+
+	if f1 == f2 {											// one of the two must have had some kind of external address (floating IP or real IP)
+		net_sheep.Baa( 1, "find_endpoints: neither host had an external or floating IP: %s %s", *h1ip, *h2ip )
 		return
 	}
 
@@ -1654,11 +1669,11 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.Response_data = nil;
 						req.State = nil;
 
-					case REQ_NETUPDATE:								// build a new network graph
-						net_sheep.Baa( 1, "rebuilding network graph" )
+					case REQ_NETUPDATE:											// build a new network graph
+						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
 						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
 						if new_net != nil {
-							new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
+							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
 							act_net = new_net
 
 							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
