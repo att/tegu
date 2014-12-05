@@ -62,6 +62,9 @@
 						  with include_tenant setting which is now ignored.
 						- request for ip2mac table by fqmgr is used only to accept a channel
 						  and the map is pushed back when we think we have changes.
+				04 Dec 2014 - Changed list host call to the list enabled host call in an attempt
+						to use a list of active (up) hosts rather than every host known to 
+						openstack.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -269,7 +272,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 
 	for k, ostk := range os_refs {
 		if k != "_ref_" {
-			list, err = ostk.List_hosts( ostack.COMPUTE | ostack.NETWORK )	
+			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )	
 			if err != nil {
 				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
 				ostk.Expire()					// force re-auth next go round
@@ -476,7 +479,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project )
 		if os_admin != nil {
-osif_sheep.Baa( 1, "admin creds generated, mapping all tenants" )
+			osif_sheep.Baa( 1, "admin creds generated, mapping tenants" )
 			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the initial translation maps
 			//pname2id, id2pname, _ = os_admin.Map_all_tenants( )		// get the translation maps
 			for k := range pname2id {
@@ -536,8 +539,12 @@ osif_sheep.Baa( 1, "admin creds generated, mapping all tenants" )
 			if k != "_ref_" {	
 				np, err := Mk_osif_project( k )
 				if err == nil {
-					os_projects[*pname2id[k]] = np	
-					osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
+					if pname2id[k] == nil {
+						osif_sheep.Baa( 0, "project did not map to an id: %s", k )
+					} else {
+						os_projects[*pname2id[k]] = np	
+						osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
+					}
 				} else {
 					osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
 				}
@@ -600,6 +607,7 @@ osif_sheep.Baa( 1, "admin creds generated, mapping all tenants" )
 				freq := ipc.Mk_chmsg( )										// need a new request to pass to fq_mgr
 				data, err := get_ip2mac( os_projects )
 				if err == nil {
+					osif_sheep.Baa( 2, "sending ip2mac map to fq_mgr" )
 					freq.Send_req( fq_ch, nil, REQ_IP2MACMAP, data, nil )	// request data forward
 					msg.State = nil											// response ok back to requestor
 				} else {
