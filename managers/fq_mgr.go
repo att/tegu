@@ -282,6 +282,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 			smac = ip2mac[*data.Match.Ip1]
 			if smac == nil {
 				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Ip1 )
+				fq_sheep.Baa( 1, "ip2mac has %d entries", len( ip2mac ) )
 				return
 			}
 		}
@@ -663,7 +664,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 							send_hlist_agent( host_list )							// send to agent_manager
 							fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
 						} else {
-							fq_sheep.Baa( 1, "host list received from osif was discarded: (%s)", *host_list )
+							fq_sheep.Baa( 1, "host list received from osif was discarded: ()" )
 						}
 					} else {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
