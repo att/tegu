@@ -174,7 +174,6 @@ func (ad *agent_data) sendbytes2lra( smgr *connman.Cmgr,  msg []byte ) {
 	that are not time sensitive (such as intermediate queue setup/checking).
 	
 */
-
 func (ad *agent_data) send2lra( smgr *connman.Cmgr,  msg string ) {
 	l := len( ad.agents ) 
 	if l <= 0 {
@@ -335,6 +334,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		host_list string = ""
 		dscp_list string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
 		refresh int64 = 60
+		iqrefresh int64 = 900							// intermediate queue refresh
 	)
 
 	adata = &agent_data{}
@@ -355,6 +355,13 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		if p := cfg_data["agent"]["refresh"]; p != nil {
 			refresh = int64( clike.Atoi( *p ) )
 		}
+		if p := cfg_data["agent"]["iqrefresh"]; p != nil {
+			iqrefresh = int64( clike.Atoi( *p ) )
+			if iqrefresh < 90 {
+				am_sheep.Baa( 1, "iqrefresh in configuration file is too small, set to 90 seconds" )
+				iqrefresh = 90
+			}
+		}
 	}
 	if cfg_data["default"] != nil {						// we pick some things from the default section too
 		if p := cfg_data["default"]["pri_dscp"]; p != nil {			// list of dscp (diffserv) values that match for priority promotion
@@ -372,7 +379,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
 	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping 
-	tklr.Add_spot( refresh * 2, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// reocurring tickle to ensure intermediate switches are properly set
+	tklr.Add_spot( iqrefresh, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// reocurring tickle to ensure intermediate switches are properly set
 
 	sess_chan := make( chan *connman.Sess_data, 1024 )					// channel for comm from agents (buffers, disconns, etc)
 	smgr := connman.NewManager( port, sess_chan );
@@ -427,7 +434,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 				}
 
 
-			case sreq := <- sess_chan:		// data from the network
+			case sreq := <- sess_chan:		// data from a connection or TCP listener
 				switch( sreq.State ) {
 					case connman.ST_ACCEPTED:		// newly accepted connection; no action 
 

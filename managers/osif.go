@@ -65,6 +65,7 @@
 				04 Dec 2014 - Changed list host call to the list enabled host call in an attempt
 						to use a list of active (up) hosts rather than every host known to 
 						openstack.
+				05 Dec 2014 - Added work round for AIC admin issue after they flipped to LDAP.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -96,6 +97,37 @@ import (
 
 // --- Private --------------------------------------------------------------------------
 
+/*
+	Accept a token and a list of creds and try to determine the project that the token was
+	generated for.  We'll first attempt to use the reference creds, but as with some 
+	installations of openstack this seems not to work (AIC after LDAP was installed), so
+	if using reference creds fails, we'll (cough) run the list of other creds, yes making
+	an API call for each, until we find one that works or we exhaust the list.  Bottom line
+	is that we'll fail only if we cannot figure it out someway.
+*/
+func token2project(  os_refs map[string]*ostack.Ostack, token *string ) ( pname *string, idp *string, err error ) {
+	ostk := os_refs["_ref_"]					// first attempt: use our reference creds to examine the token
+	if ostk != nil {
+		pname, idp, err =  ostk.Token2project( token )
+		if pname != nil {
+			return
+		}
+	}
+
+	for key, ostk := range os_refs {
+		if key != "_ref_" {
+			pname, idp, err =  ostk.Token2project( token )
+			if pname != nil {
+				osif_sheep.Baa( 2, "unable to validate token with our reference creds, finally successful with: %s", *(ostk.Get_user()) )
+				return
+			}
+		}
+	}
+
+	osif_sheep.Baa( 2, "unable to validate token with any set of creds: %s", err )
+	return
+}
+			
 
 /*
 	Given a raw string of the form [[<token>]/{project-name|ID}]/<data> verify
@@ -147,16 +179,13 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			}
 
 		case 3:										// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
-			if tokens[1] == "" {								// token//host, or token//id, given; get tenant info from token
+
+			if tokens[1] == "" {								// empty project name, must attempt to extract from the token
 				if tokens[0] != "!" {							//  if !//stuff we leave things alone and !//stuff is returned later
-					ostk := os_refs["_ref_"]					// use our reference creds to examine the token
-					if ostk == nil {
-						return nil, fmt.Errorf( "internal error: no reference credentials, cannot validate token" )
-					}
-					pname, idp, _ :=  ostk.Token2project( &tokens[0] )
+					pname, idp, err :=  token2project( os_refs, &tokens[0] )	// generate the project name and it's id from token
 				
 					if pname == nil {			// not a valid token, bail now
-						return nil, fmt.Errorf( "invalid token" )
+						return nil, err //fmt.Errorf( "invalid token" )
 					}
 
 					xstr := fmt.Sprintf( "%s/%s", *idp, tokens[2] )		// valid token, build id/host return string and send back
@@ -186,12 +215,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-			ostk := os_refs["_ref_"]							// use our reference (admin) id to validate the token
-			if ostk == nil {
-				return nil, fmt.Errorf( "no refrence creds;  cannot validate token: %s", tokens[1] )
-			}
-
-			pname, idp, err := ostk.Token2project( &tokens[0] )
+			pname, idp, err :=  token2project( os_refs, &tokens[0] )		// generate project name and id from the token
 			if pname == nil {
 				if err != nil {
 					return nil, fmt.Errorf( "unable to determine project from token: %s", err )
@@ -216,7 +240,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 /*
 	Verifies that the token passed in is a valid token for the default user given in the
 	config file.
-	Returns "ok" if it is good, and an error otherwise. 	
+	Returns "ok" (err is nil) if it is good, and an error otherwise. 	
 */
 func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
 

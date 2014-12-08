@@ -72,7 +72,17 @@
 				17 Nov 2014 : Converted the openstack interface to a lazy update method rather than attempting to 
 							prefetch all of the various translation maps and then to keep them up to date.
 				19 Nov 2014 : Correct bug in checkpoint path attachment to reservation.
+				24 Nov 2014 : Floating IP address requirement for cross tenant reservations, and reservations between VM and an
+							 external host has been modified.
+				04 Dec 2014 : Uses enabled host list from ostack inteface.
+				05 Dec 2014 : Added work round for keystone/privs token investigation issue in AIC once they started using LDAP.
+				07 Dec 2014 : Corrected default tickler time for set intermediate queues.
 
+	Version number "logic":
+				3.0		- QoS-Lite version of Tegu
+				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
+				3.1		- QoS-Lite with steering added
+				3.2		- QoS-Lite with steering and WACC support added
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
 
@@ -101,11 +111,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-<<<<<<< HEAD
-		version		string = "v3.0.1/1b184"		// for usage and passed on manager initialisation so ping responds with this too.
-=======
-		version		string = "v3.0/1b194"		// for usage and passed on manager initialisation so ping responds with this too.
->>>>>>> lite
+		version		string = "v3.0.1/1c084"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -176,11 +182,13 @@ func main() {
 	my_chan := make( chan *ipc.Chmsg )								// channel and request block to ping net, and then to send all sys up
 	req := ipc.Mk_chmsg( )
 
-	// if there is a checkpoint file, then we need to block until we have a full network topology which includes:
-	// openstack data, json data, and physical data from the agent(s).  Once that's in place, then we can 
-	// load the checkpoint file.  Once the checkpoint is loaded then we can open the api for real work. 
-	// 
-	
+	/*
+		Block until the network is initialised. We need to do this so that when the checkpoint file is read reservations
+		can be added without missing network pieces.  Even if there is no checkpoint file, or it's empty, blocking 
+		prevents reservation rejections because the network graph isn't in working order.  At the moment, with lazy
+		udpating, the block is until we have a physical host map back from the agent world.  This can sometimes take
+		a minute or two.
+	*/
 	for {																	// hard block to wait on network readyness
 		req.Response_data = 0
 		req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
