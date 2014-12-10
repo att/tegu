@@ -34,10 +34,10 @@ import (
 	"strings"
 	"time"
 
-	//"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/clike"
-	//"forge.research.att.com/gopkgs/token"
-	//"forge.research.att.com/gopkgs/ipc"
+	//"codecloud.web.att.com/gopkgs/bleater"
+	"codecloud.web.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/token"
+	//"codecloud.web.att.com/gopkgs/ipc"
 )
 
 

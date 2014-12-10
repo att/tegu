@@ -13,7 +13,7 @@ package managers
 
 import (
 	"encoding/json"
-	"forge.research.att.com/tegu/gizmos"
+	"codecloud.web.att.com/tegu/gizmos"
 )
 
 /*

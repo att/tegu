@@ -12,7 +12,7 @@
 package managers
 
 import (
-	"forge.research.att.com/gopkgs/ipc"
+	"codecloud.web.att.com/gopkgs/ipc"
 )
 
 type Net_vm  struct {

@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/gopkgs/ostack"
+	"codecloud.web.att.com/gopkgs/ipc"
+	"codecloud.web.att.com/gopkgs/ostack"
 )
 
 
