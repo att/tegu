@@ -80,9 +80,9 @@ import (
 	"sync"
 	"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/tegu/managers"
+	"codecloud.web.att.com/gopkgs/bleater"
+	"codecloud.web.att.com/gopkgs/ipc"
+	"codecloud.web.att.com/tegu/managers"
 )
 
 var (

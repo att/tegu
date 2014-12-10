@@ -20,10 +20,10 @@ import (
 	//"os"
 	"strings"
 
-	//"forge.research.att.com/gopkgs/bleater"
-	//"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/ipc"
-	//"forge.research.att.com/tegu/gizmos"
+	//"codecloud.web.att.com/gopkgs/bleater"
+	//"codecloud.web.att.com/gopkgs/clike"
+	"codecloud.web.att.com/gopkgs/ipc"
+	//"codecloud.web.att.com/tegu/gizmos"
 )
 
 

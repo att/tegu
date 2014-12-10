@@ -24,7 +24,7 @@ import (
 	//"time"
 	"testing"
 
-	"forge.research.att.com/tegu/gizmos"
+	"codecloud.web.att.com/tegu/gizmos"
 )
 
 const (

@@ -33,14 +33,14 @@ import (
 	//"sync"
 	"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/extcmd"
-	"forge.research.att.com/gopkgs/connman"
-	"forge.research.att.com/gopkgs/jsontools"
+	"codecloud.web.att.com/gopkgs/bleater"
+	"codecloud.web.att.com/gopkgs/extcmd"
+	"codecloud.web.att.com/gopkgs/connman"
+	"codecloud.web.att.com/gopkgs/jsontools"
 
-	//"forge.research.att.com/gopkgs/clike"
-	//"forge.research.att.com/gopkgs/token"
-	//"forge.research.att.com/gopkgs/ipc"
+	//"codecloud.web.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/token"
+	//"codecloud.web.att.com/gopkgs/ipc"
 )
 
 // globals

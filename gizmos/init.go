@@ -17,10 +17,10 @@ package gizmos
 
 import (
 	"os"
-	"forge.research.att.com/gopkgs/bleater"
+	"codecloud.web.att.com/gopkgs/bleater"
 )
 
-//import "forge.research.att.com/tegu"
+//import "codecloud.web.att.com/tegu"
 
 const (
 	PT_BANDWIDTH	int = iota				// pledge types

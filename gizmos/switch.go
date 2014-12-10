@@ -36,8 +36,8 @@ import (
 	"strings"
 	//"time"
 
-	//"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/tegu"
+	//"codecloud.web.att.com/gopkgs/clike"
+	"codecloud.web.att.com/tegu"
 )
 
 // --------------------------------------------------------------------------------------

@@ -33,13 +33,13 @@ import (
 	"strings"
 	//"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/connman"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/gopkgs/jsontools"
-	//"forge.research.att.com/tegu"
-	//"forge.research.att.com/tegu/gizmos"
+	"codecloud.web.att.com/gopkgs/bleater"
+	"codecloud.web.att.com/gopkgs/clike"
+	"codecloud.web.att.com/gopkgs/connman"
+	"codecloud.web.att.com/gopkgs/ipc"
+	"codecloud.web.att.com/gopkgs/jsontools"
+	//"codecloud.web.att.com/tegu"
+	//"codecloud.web.att.com/tegu/gizmos"
 )
 
 // ----- structs used to bundle into json commands
