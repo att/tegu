@@ -1,0 +1,27 @@
+# list of files to export for bundle
+# each line: source-file [bundle-target]
+#../README.deb 
+
+../agent/ovs/ovs_sp2uuid	bin/
+../agent/ovs/purge_ovs_queues	bin/
+../agent/ovs/map_mac2phost	bin/
+../agent/ovs/setup_ovs_intermed	bin/
+../agent/ovs/send_ovs_fmod	bin/
+../agent/ovs/create_ovs_queues	bin/
+../agent/ovs/ql_setup_irl	bin/
+
+../system/tegu_req	bin/
+../system/start_tegu_agent	bin/
+../system/tegu_standby	bin/
+../system/tegu_synch	bin/
+../system/start_tegu_qlite bin/start_tegu
+
+../main/rjprt bin/
+../main/tegu bin/
+../main/tegu_agent bin/
+
+../system/tegu_rc etc/init.d/tegu
+../system/crontab.qlite etc/tegu/crontab
+
+#???/phys_net_static.json etc/tegu/phys_net_sample.json
+
