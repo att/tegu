@@ -22,26 +22,80 @@ function clean_exit
 	exit ${1:0}
 }
 
+function help
+{
+	usage
+	cat <<endKat
+
+
+	This script expects to find a tar file in /tmp/$user/export/bundle (probably created by 
+	export.ksh executed from this source directory), and will bundle the contents into a 
+	deb file.  The deb file is left in the /tmp directory.  Sudo is used during the deb 
+	creation process so you might be prompted for your or the root password as this executes.
+
+	For the first time that a deb file is created for a version you will be notified and
+	propted to edit the change log file.  If you rerun this script (without the -p option)
+	for the same version number, and the change log file exists, the existing one will be used.
+endKat
+}
+
 function usage
 {
 	echo ""
 	echo "version 1.0"
-	echo "usage: $argv0 <pkg-name> <version> [cleanup]"
+	echo "usage: $argv0 [-a arch] [-p] [-u 'name <id@domain>'] <pkg-name> <version> [cleanup]"
 	echo "	cleanup causes a cleanup of the named version and no building"
+	echo "	-a arch -- allows the architecture to be specified amd64 is the default"
+	echo "	-p prompt; don't assume certain things"
+	echo "	-u name and email address put into change (default:$who)"
+}
+
+function build_mail_str
+{
+	typeset w="${WHOIAM:-$user <$user@research.att.com>}"			# default
+
+	if [[ -z $WHOIAM ]]				# let user override, but pull from git if we can
+	then
+		git config --list| grep user|sed 's/=/ /;' |while read what data
+		do
+			case $what in
+				user.email)	ge="$data";;
+				user.name)	gn="$data";;
+			esac
+		done
+	
+		if [[ -n $gn && -n $ge ]]
+		then
+			w="$gn <$ge>"
+		fi
+	fi
+
+	echo "$w"
 }
 # -------------------------------------------------------------------------------------------------
 
 user=${LOGNAME:-$USER}
 argv0=$0
 arch="amd64"
-who="Scott Daniels <daniels@research.att.com>"
 confirm=0
+who=$( build_mail_str )			# sets who
 
-if [[ $1 == -? ]]
-then
-	usage
-	exit 0
-fi
+while [[ $1 == -* ]]
+do
+	case $1 in
+		-a)	arch="$2"; shift;;
+		-p)	confirm=1;;
+		-u)	who="$2"; shift;;
+		-\?) help
+			exit 0
+			;;
+		*)	echo "unrecognised option $1"
+			usage
+			exit 1
+	esac
+
+	shift
+done
 
 pkg_name="$1"
 full_pkg_name="attlr$1"
@@ -73,25 +127,13 @@ set -e									# lazy way out
 trap "clean_house" 1 2 3 15 EXIT 		# purge everything on failure or exit
 
 cd $bundle_dir 
-rtar=$bundle_dir/${full_pkg_name}-${ver}.tar.gz
-otar=$bundle_dir/${full_pkg_name}_${ver}.orig.tar.gz
-release=$bundle_dir/${full_pkg_name}_${ver}
+rtar=$bundle_dir/${full_pkg_name}-${ver}.tar.gz		# rtar? original script pulled it from a remote machine :)
+release=$bundle_dir/${full_pkg_name}_${ver}			# where we'll build the directory to make the release
 
 if [[ -d $release  ]]
 then
-	echo "backup old directory"
-	if [[ -d $release- ]]
-	then
-		rm -fr $release-
-	fi
-	mv $release $release-
+	rm -fr $release- $release
 fi
-
-for x in $release-1_amd64.build $release-1_amd64.changes $release-1_amd64.deb $release-1.diff.gz $release-1.dsc 
-do
-	#echo "removing $x"
-	rm -f $x
-done
 
 if [[ $cleanup == "cleanup" ]]			# only invoked to clean 
 then
@@ -99,30 +141,12 @@ then
 	exit 0
 fi
 
-
 if [[ -e $rtar ]]
 then
 	echo "using $rtar"
-	mv $rtar $otar
 else
-	if [[ -e $otar ]]
-	then
-		if (( confirm ))
-		then
-			echo "cannot find: $rtar"
-			printf "$otar exists: use it? [yN]"
-			read ans
-		else
-			ans=y
-		fi
-		if [[ $ans != "y" ]]
-		then
-			clean_exit
-		fi
-	else
-		printf "cannot find a tar.gz file to use.\n"
-		clean_exit 1
-	fi
+	echo "cannot find: $rtar"
+	clean_exit 1
 fi
 
 echo "making release directoryy $release"
@@ -130,9 +154,7 @@ mkdir -p $release
 cd $release
 rm -fr lib
 echo "unpack tar"
-gzip -dc $otar | tar -xf -
-
-#cp $src_dir/${pkg_name}_debian/Makefile .
+gzip -dc $rtar | tar -xf -
 
 echo "'copy' debian directory into new stuff"
 (
@@ -142,7 +164,6 @@ echo "'copy' debian directory into new stuff"
 		cp $f DEBIAN/
 	done
 )
-
 
 edit=1
 if [[ -f ../changelog.$ver ]]						# if one from a previous run, don't make them edit it again
@@ -171,8 +192,9 @@ attlr${pkg-name} (${ver}-1) UNRELEASED; urgency=low
  -- $who $date
 endKat
 
+	echo ""
 	echo "a new change log was created, you must edit it"
-	echo "press return to edit"
+	printf "press return to edit "
 	read foo
 fi
 
@@ -192,26 +214,18 @@ else
 fi
 if [[ $ans == "y"* ]]
 then
-	#debuild -us -uc
 	cd ..
+	find $release | sudo xargs chown root:root 						# files in package must be owned by root
 	set -x
 	dpkg-deb -b  $release ${full_pkg_name}_${ver}_$arch.deb
 	set +x
+	find $release | sudo xargs chown $user:users
+
+	echo "deb file created: $bundle_dir/${full_pkg_name}_${ver}_$arch.deb"
 else
-	echo "make any changes needed and then run 'debuild -us -uc'"
+	echo "make any changes needed and then run 'dpkg-deb -b  $release ${full_pkg_name}_${ver}_$arch.deb'"
 fi
 
 trap - EXIT
 exit 0
 
-exit
-#0) build tar on daniels8 (export.ksh)
-#
-#1) fetch src tar and rename:
-#	scp daniels@qos101.research.att.com:attlrqlite-${ver}.tar.gz attlrqlite_${ver}.orig.tar.gz
-#	NOTE: the - in the original name needs to be an underbar in the 'orig' name or the bloody package software complains
-#
-#2) untar and adjust/add files in debian directory (we create, not in the source)
-#
-# 3) add the makefile to the directory
-##3) run: debuild -us -uc
