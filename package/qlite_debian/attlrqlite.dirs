@@ -1,0 +1,5 @@
+usr/bin
+etc/tegu
+etc/init.d
+var/log/tegu
+var/lib/tegu

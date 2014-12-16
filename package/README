@@ -1,0 +1,15 @@
+
+This directory contains files and scripts that are used to package QoS-Lite into 
+a .deb (and maybe other) package formats. 
+
+The script export.ksh creates an export directory in /tmp/<username>/export/<version>
+and builds a tar file that is placed into /tmp/<username>/export/bundle that then
+is used to bundle the release.  The package name (e.g. qlite) and version number
+must be supplied as positional parms on the command line.  Files are extracted
+from various parts of this repo directory structure, so ensure that you have the 
+correct branch checked out AND that it is up to date!!
+
+The script bundle.ksh assumes that the export.ksh script has been executed and 
+that the tar file for the bundle exists in /tmp.  It builds the .deb.  This is a 
+two step process to allow other bundle scripts to be used against the same 
+tar file, etc.

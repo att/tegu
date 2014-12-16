@@ -1,0 +1,20 @@
+Source: attlrqlite
+Section: net
+Priority: optional
+Maintainer: Scott Daniels <daniels@research.att.com>
+Package: attlrqlite
+Version: 1.100
+Architecture: amd64
+Depends: ksh
+Installed-Size: 4000
+Description: Provides Tegu and applications needed to implement QoS-Lite
+  Tegu is a daemon which provides 
+  an API that allows external users 
+  (programmes) to request bandwidth 
+  reservations in the cloud environment 
+  that is known to Tegu. For each approved 
+  reservation Tegu causes OVS queues to be 
+  set on physical hosts in the cloud, and 
+  to have flow-mods bangged in that allow 
+  the network traffic related to the 
+  reservation to be prioritised. 

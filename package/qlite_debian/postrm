@@ -1,0 +1,30 @@
+
+# script executed following the removal of this package
+# CAUTION: on an install over a previously installed package, dpkg will remote
+# 			the previous package which means that this script will be executed, so do NOT
+# 			use this script to clean up /var files (checkpoints etc) thinking that 
+#			this is driven only when the package is removed for ever!
+
+echo "cleaning up after removal"
+if which update-rc.d >/dev/null 
+then
+	echo "removing tegu rc.d script from system startup via update-rc.d"
+	update-rc.d -f tegu  remove
+	if [ $? -ne 0 ]
+	then
+		echo "unable to remove tegu rc.d from the system startup"
+	fi
+fi
+
+if [ -d /var/log/tegu ]
+then
+	echo "leaving logs in /var/log/tegu for historical purposes"
+fi
+
+if [ -d /etc/tegu ]
+then
+	echo "leaving tegu configuration in /etc/tegu for historical purposes"
+fi
+
+
+echo "removal complete"
