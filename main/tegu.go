@@ -77,6 +77,7 @@
 				04 Dec 2014 : Uses enabled host list from ostack inteface.
 				05 Dec 2014 : Added work round for keystone/privs token investigation issue in AIC once they started using LDAP.
 				07 Dec 2014 : Corrected default tickler time for set intermediate queues.
+				16 Dec 2014 : Corrected bugs in lazy update translation of VM ID to ip.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -111,7 +112,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0.1/1c084"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0.1/1c164"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

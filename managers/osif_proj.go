@@ -11,7 +11,7 @@
 	Date:		17 November 2014
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		16 Dec 2014 - Corrected slice out of bounds error in get_host_info()
 */
 
 package managers
@@ -138,7 +138,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 		}
 	
 
-		gwmap, _, err := creds.Mk_gwmaps( nil, nil, true, false )		
+		gwmap, _, _, _, err := creds.Mk_gwmaps( nil, nil, nil, nil, true, false )		
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", creds.To_str( ), err )
 			creds.Expire()					// force re-auth next go round
@@ -178,11 +178,21 @@ func (p *osif_project) suss_info( search *string ) ( name *string, id *string, i
 		if p.ip2vmid[*search] != nil {			// name is actually an ip 
 			ip4 = search
 			name = p.ip2vm[*ip4]
-		} else {
-			if p.vmid2ip[*search] != nil {	// vm ID passed in
+		} else {								// assume its an id or project/id
+			if p.vmid2ip[*search] != nil {		// id2ip shouldn't include project, but handle that case
 				id = search
-				ip4 = p.vmid2ip[*ip4]
+				ip4 = p.vmid2ip[*id]
 				name = p.ip2vm[*ip4]
+			} else {
+				tokens := strings.Split( *search, "/" )			// could be id or project/id
+				id = &tokens[0]									// assume it's just the id and not project/id
+				if len( tokens ) > 1  {
+					id = &tokens[1]
+				}
+				if p.vmid2ip[*id] != nil {
+					ip4 = p.vmid2ip[*id]
+					name = p.ip2vm[*ip4]
+				}
 			} 
 		}
 	}
@@ -286,7 +296,7 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 	msg.Response_data = nil
 
 	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
-	if len( tokens ) != 2 {
+	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
 		msg.State = fmt.Errorf( "invalid project/hostname string" )
 		msg.Response_ch <- msg
 		return
