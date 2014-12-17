@@ -7,19 +7,31 @@
 # 				from this source directory.
 #	Author: 	E. Scott Daniels
 #	Date:		May 2014
+#
+#	Mod:		Added md5sum capture.
 # -----------------------------------------------------------------------------------------------
 
 function clean_house
 {
 	trap - EXIT
 	echo "something failed or you aborted"
+	rm -fr /tmp/PID$$.*
 	exit 1
 }
 
 function clean_exit
 {
 	trap - EXIT
+	rm -fr /tmp/PID$$.*
 	exit ${1:0}
+}
+
+function verbose
+{
+	if (( chatty > 0 ))
+	then
+		echo "$@" >&2
+	fi
 }
 
 function help
@@ -43,11 +55,13 @@ function usage
 {
 	echo ""
 	echo "version 1.0"
-	echo "usage: $argv0 [-a arch] [-p] [-u 'name <id@domain>'] <pkg-name> <version> [cleanup]"
+	echo "usage: $argv0 [-a arch] [-p] [-u 'name <id@domain>'] [-v] <pkg-name> <version> [cleanup]"
 	echo "	cleanup causes a cleanup of the named version and no building"
-	echo "	-a arch -- allows the architecture to be specified amd64 is the default"
-	echo "	-p prompt; don't assume certain things"
-	echo "	-u name and email address put into change (default:$who)"
+	echo "	-a arch allows the architecture to be specified amd64 is the default"
+	echo "	-p      prompt; don't assume certain things"
+	echo "	-r n    supplies the revsion number"
+	echo "	-v      verbose mode"
+	echo "	-u str  name and email address to be put into change (default: $who)"
 }
 
 function build_mail_str
@@ -78,6 +92,8 @@ user=${LOGNAME:-$USER}
 argv0=$0
 arch="amd64"
 confirm=0
+rev=1							# deb revision number
+chatty=0
 who=$( build_mail_str )			# sets who
 
 while [[ $1 == -* ]]
@@ -85,7 +101,9 @@ do
 	case $1 in
 		-a)	arch="$2"; shift;;
 		-p)	confirm=1;;
+		-r)	rev=$2; shift;;
 		-u)	who="$2"; shift;;
+		-v) chatty=1;;
 		-\?) help
 			exit 0
 			;;
@@ -149,14 +167,16 @@ else
 	clean_exit 1
 fi
 
-echo "making release directoryy $release"
+verbose "making release directory $release"
 mkdir -p $release
 cd $release
 rm -fr lib
-echo "unpack tar"
+verbose "unpack tar"
 gzip -dc $rtar | tar -xf -
 
-echo "'copy' debian directory into new stuff"
+find . -type f |xargs md5sum >/tmp/PID$$.md5 		# capture md5sum before we add DEBIAN directory
+
+verbose "populate DEBIAN directory"
 (
 	mkdir -p DEBIAN
 	ls $src_dir/${pkg_name}_debian/[a-z]* | while read f
@@ -164,6 +184,7 @@ echo "'copy' debian directory into new stuff"
 		cp $f DEBIAN/
 	done
 )
+cp /tmp/PID$$.md5 DEBIAN/md5sums
 
 edit=1
 if [[ -f ../changelog.$ver ]]						# if one from a previous run, don't make them edit it again
@@ -216,12 +237,13 @@ if [[ $ans == "y"* ]]
 then
 	cd ..
 	find $release | sudo xargs chown root:root 						# files in package must be owned by root
+	deb_name=${full_pkg_name}_${ver}-${rev}_$arch.deb
 	set -x
-	dpkg-deb -b  $release ${full_pkg_name}_${ver}_$arch.deb
+	dpkg-deb -b  $release $deb_name
 	set +x
 	find $release | sudo xargs chown $user:users
 
-	echo "deb file created: $bundle_dir/${full_pkg_name}_${ver}_$arch.deb"
+	echo "deb file created: $bundle_dir/$deb_name"
 else
 	echo "make any changes needed and then run 'dpkg-deb -b  $release ${full_pkg_name}_${ver}_$arch.deb'"
 fi
