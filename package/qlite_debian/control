@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Scott Daniels <daniels@research.att.com>
 Package: attlrqlite
-Version: 1.100
+Version: <VER>
 Architecture: amd64
 Depends: ksh
 Installed-Size: 4000
