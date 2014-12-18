@@ -107,7 +107,8 @@ case "$1" in
 
 
   status)
-	/usr/bin/tegu_req ping
+	/usr/bin/tegu_req ping|grep -q OK		# exit with non-zero if not running
+	exit $?
 	;;
 
   *)
