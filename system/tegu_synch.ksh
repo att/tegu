@@ -140,8 +140,9 @@ then
 
 	m=$( date +%M )						# current minutes
 	n=$(( (m/5) * 5 ))					# round current minutes to previous 5 min boundary
+	host=$( hostname )
 	tfile=/tmp/PID$$.chkpt.tgz			# local tar file
-	rfile=$libd/chkpt_synch.$n.tgz	# remote archive (we should save just 12 so no need for cleanup)
+	rfile=$libd/chkpt_synch.$host.$n.tgz	# remote archive (we should save just 12 so no need for cleanup)
 	tar -cf - chkpt |gzip >$tfile
 	
 	while read host
@@ -154,7 +155,7 @@ then
 		fi
 	done <$etcd/standby_list
 else
-	ls -t $libd/chkpt_synch.*.tgz | head -1 |read synch_file
+	ls -t $libd/chkpt_synch.*.*.tgz | head -1 |read synch_file
 	if [[ -z $synch_file ]]
 	then
 		echo "WRN: cannot find a synch file, no restore of synchronised data" >&2
