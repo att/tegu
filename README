@@ -5,7 +5,14 @@ provides a request interface that yields a complete network graph (as described
 by floodlight), and the ability to map an IP address, VM name or VM ID to a 
 switch port combination. 
 
+There is also an agent compoent which is a standalone process that provides a direct
+interface to the various real and virtual switches.  The underlying agent scripts are 
+contained in the agent directory and the agent binary is in the main directory. 
+
 The tegu src is divided into two packages and the main:
+	agent	--	Directories containing various direct interfaces to things like
+				OVS, Arista switches, floodlight (skoogie), etc.
+
 	managers -- functions that are driven as goroutines and thus implement
 				major components of the application (reservation manager,
 				fq manager, etc.).  
@@ -15,6 +22,10 @@ The tegu src is divided into two packages and the main:
 				pledge, etc.).
 
 	main	--  Entry point functions (tegu and tegu_agent)
+	
+	package --	Scripts and metadata templates used to build a package files (.deb)
+
+	system	--	Scripts used to start/stop/manage tegu in a q-lite environment.
 
 
 Gizmos:
