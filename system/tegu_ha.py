@@ -44,7 +44,7 @@ TEGU_PORT=os.getenv('TEGU_PORT', 29444)		             # tegu's api listen port
 TEGU_USER=os.getenv('TEGU_USER', 'tegu')                 # by default we run only under tegu user
 TEGU_PROTO='http'
 
-SSH_CMD='ssh -o StrictHostKeyChecking=no %s@%s'
+SSH_CMD='ssh -o StrictHostKeyChecking=no %s@%s '
 DEACTIVATE_CMD='/usr/bin/tegu_standby on;' + \           # Command to kill tegu
     'killall tegu; killall tegu_agent'
 ACTIVATE_CMD='/usr/bin/tegu_standby off;' + \
@@ -82,7 +82,33 @@ def get_checkpoint(host=''):
 # opposed to current node
 def should_be_active(host):
     # Pull latest checkpoint from remote node
-    get_checkpoint(host)
+    # If there's an error, the other guy shouldn't be primary
+    if not get_checkpoint(host):
+        return False
+    if not get_checkpoint():
+        return True
+
+
+    # Check if we or they have latest checkpoint
+    try:
+        # Get clock skew
+        time_r = subprocess.read_call(ssh_cmd(host) + 'date +%s')
+        time_l = subprocess.read_call(ssh_cmd('') + 'date +%s')
+        skew = time_l-time_r
+
+        # Get ours and their checkpoint timestamps
+        ts_r = subprocess.read_call('ls -t ' + LIBDIR + '/chkpt_synch.' + host + '.*.tgz' +
+                                    '| head -1 | read synch_file;' +
+                                    'tar -t -v --full-time -f $synch_file')
+        ts_l = subprocess.read_call('ls -tF ' + CKPTDIR + '/* | grep -v \/')
+
+        return (ts_r+skew > ts_l or (ts_r+skew == ts_l and host < socket.getfqdn())) 
+
+    except subprocess.CalledProcessError:
+        warn("Could not get chkpt timestamps")
+
+    return False
+
 
     # Now check who has the latest chkpoint time
     
