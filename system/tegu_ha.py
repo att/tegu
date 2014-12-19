@@ -109,16 +109,6 @@ def should_be_active(host):
 
     return False
 
-
-    # Now check who has the latest chkpoint time
-    
-#     chkpt_x = get_snapshot(x)
-#     chkpt_i = get_my_snapshot()
-#     skew = get_skew(x)
-#     return chkpt_x.timestamp + skew > chkpt_i.timestamp or
-#         chkpt_x.timestamp + skew == chkpt_i.timestamp and x < i  
-	return False
-
 # Return True if tegu is running on host
 # If host is None, check if tegu is running on current host
 # Use ping API check, standby file may be inconsistent
