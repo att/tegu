@@ -17,7 +17,6 @@ NS_PREFIX='qrouter-'
 #
 routerListPath = NeutronPath + '/routers.json'
 portsPath = NeutronPath + '/ports.json'
-subnetDetailsPath = NeutronPath +'/subnets'
 routersPath = NeutronPath + '/routers'
 portDetailsPath = NeutronPath + '/ports'
 
@@ -82,8 +81,6 @@ else:
   tos = '0'
 
 req = HTTPConnection(NeutronHost, NeutronPort)
-
-req.request('GET', subnetDetailsPath +'/'+ wan + '.json', '', token)
 wanPort = routerPortFor(router, wan, token)
 if(wanPort):
   routerNS = NS_PREFIX + router
