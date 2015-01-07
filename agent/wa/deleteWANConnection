@@ -9,7 +9,7 @@ import subprocess
 lockFile = '/tmp/WAQoSAgent.lock'
 
 # fixme: these should come from keystone.
-NeutronHost='agave101.research.att.com'
+NeutronHost='neutron-host.example.com'
 NeutronPort=9696
 NeutronPath = '/v2.0'
 # constant from l3_agent.py
@@ -111,7 +111,7 @@ if(wanPort):
                    'tos', tos, 'dev', wanRoute[2]])
   # 4. delete the tunnel
   subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
-                   '/sbin/ip', 'tunnel', 'delete', wanRoute[2]])
+                   '/sbin/ip', 'tunnel', 'del', wanRoute[2]])
   # 5. delete the IP, or the port if it's the last remaining address
   if(len(wanPort['fixed_ips']) > 1): 
     req.request('PUT',

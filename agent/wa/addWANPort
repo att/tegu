@@ -9,7 +9,7 @@ import subprocess
 lockFile = '/tmp/WAQoSAgent.lock'
 
 # fixme: these should come from keystone.
-NeutronHost='agave101.research.att.com'
+NeutronHost='neutron-host.example.com'
 NeutronPort=9696
 NeutronPath = '/v2.0'
 # constant from l3_agent.py
@@ -17,7 +17,7 @@ NS_PREFIX='qrouter-'
 #
 routerListPath = NeutronPath + '/routers.json'
 portsPath = NeutronPath + '/ports.json'
-subnetDetailsPath = NeutronPath +'/subnets.json?fields=id&id='
+subnetDetailsPath = NeutronPath +'/subnets'
 routersPath = NeutronPath + '/routers'
 portDetailsPath = NeutronPath + '/ports'
 
@@ -87,8 +87,9 @@ req = HTTPConnection(NeutronHost, NeutronPort)
 # this makes the probably-incorrect assumption that the newly-added address
 # is the last one in the fixed_ips list.
 wanPort = routerPortFor(router, wan, token)
-req.request('GET', subnetDetailsPath + wan, None, token)
+req.request('GET', subnetDetailsPath +'/'+ wan +'.json', None, token)
 wanDetails = json.loads(req.getresponse().read())
+
 if(wanPort):
   req.request('PUT',
               portDetailsPath +'/'+ wanPort['id'] +'.json',

@@ -26,6 +26,6 @@ fi
 
 (
   flock 7
-  echo $IP netns exec $NSROUTER \
+  $IP netns exec $NSROUTER \
    $IP tunnel add $IFTUN mode $TUNMODE local $IPLOCAL remote $IPREMOTE
 ) 7>$LOCKFILE

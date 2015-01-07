@@ -37,6 +37,6 @@ fi
    exit 1
   fi
   
-  echo $IP netns exec $NSROUTER $IFCONFIG $IFTUN up
-  echo $IP netns exec $NSROUTER $IP route add $CIDR $TOS dev $IFTUN
+  $IP netns exec $NSROUTER $IFCONFIG $IFTUN up
+  $IP netns exec $NSROUTER $IP route add $CIDR $TOS dev $IFTUN
 ) 7>$LOCKFILE
