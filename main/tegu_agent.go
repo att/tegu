@@ -14,6 +14,7 @@
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
+				06 Jan 2015 : Wa support.
 */
 
 package main
@@ -45,7 +46,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.1/1a054"
+	version		string = "v1.2/11065"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
@@ -57,6 +58,8 @@ var (
 */
 type json_action struct {
 	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
+	Aid		uint32				// action id to be sent in the response
+	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
 	Qdata	[]string			// queue parms 
 	Fdata	[]string			// flow-mod parms
 	Hosts	[]string			// hosts to execute on if a multihost command
@@ -78,6 +81,7 @@ type agent_msg struct {
 	Edata	[]string		// response error data
 	State	int				// if an ack/nack some state information 
 	Vinfo	string			// agent version info for debugging
+	Rid		uint32			// reuest id that this is a response to
 }
 //----------------------------------------------------------------------------------------------------
 
@@ -107,6 +111,43 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 }
 
 // --------------- request support (command execution) ----------------------------------------------------------
+
+/* Run a wide area port command */
+func (req *json_action ) do_wa_port( ) ( jout []byte, err error ) {
+    var (
+		cmd_str string  
+    )
+	
+	
+	sheep.Baa( 0, ">>>> running wa-port" )
+	parms := req.Data
+
+	//TODO:  need daves command syntax
+	cmd_str = fmt.Sprintf( `echo "host: %s wa_port -t %s -s %s -T %s"`, req.Hosts[0], parms["tenant"], parms["subnet"], parms["token"] )
+	sheep.Baa( 1, "wa_port executing: %s", cmd_str )
+
+	msg := agent_msg{}
+	msg.Ctype = "response"
+	msg.Rtype = "wa_port"
+	msg.Rid = req.Aid				// response id so tegu can map back to requestor
+	msg.Vinfo = version
+	msg.State = 0
+	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
+	sheep.Baa( 1, "wa_port completed: respone data had %d elements", len( msg.Rdata ) )
+
+	if err != nil {
+		msg.State = 1
+		sheep.Baa( 0, "ERR: unable to execute: %s: %s	[TGUAGN000]", cmd_str, err )
+		for i := range msg.Edata {
+			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
+		}
+		jout = nil
+		return
+	}
+
+	jout, err = json.Marshal( msg )
+	return
+}
 
 /*
 	Generate a map that lists physical host and mac addresses.
@@ -280,12 +321,20 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 			case "intermed_queues":							// run script to set up intermediate queues
 					do_intermedq(  req.Actions[i] )
 
+			case "wa_port":
+					p, err := req.Actions[i].do_wa_port( )
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
+
 			default:
 				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
 		}
 	}
 
 	if ridx > 0 {
+				sheep.Baa( 0, ">>>> returning %d responses", ridx )
 		resp = resp[0:ridx]
 	} else {
 		resp = nil

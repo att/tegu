@@ -112,7 +112,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0.1/1c164"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.2/1c164"		// wide area version
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

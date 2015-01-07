@@ -56,6 +56,7 @@
 				18 Nov 2014 : Changes to support lazy osif data fetching
 				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
 					an ip2mac map to be forced out to fqmgr.
+				05 Jan 2015 : Added support for wide area rest interface calls.
 */
 
 package managers
@@ -1019,7 +1020,12 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		}
 	}
 
-	http.HandleFunc( "/tegu/api", deal_with )				// define callback 
+	//  define callbacks that are driven when various http requests are received
+	http.HandleFunc( "/tegu/api", deal_with )				// generic (original) api handler
+	http.HandleFunc( "/tegu/rest/ports", http_wa_ports )	// wide area rest api handlers
+	http.HandleFunc( "/tegu/rest/tunnels", http_wa_tunnel )
+	http.HandleFunc( "/tegu/rest/routes", http_wa_route )
+
 	if ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "" {
 		if  create_cert {
 			http_sheep.Baa( 1, "creating SSL certificate and key: %s %s", *ssl_cert, *ssl_key )
