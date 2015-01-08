@@ -91,6 +91,7 @@ type Network struct {
 	ip2mac		map[string]*string			// IP to mac	Tegu-lite
 	ip2vmid		map[string]*string			// ip to vm-id translation	Tegu-lite
 	vmid2phost	map[string]*string			// vmid to physical host name	Tegu-lite
+	vmip2gw		map[string]*string			// vmid to it's gateway
 	vmid2ip		map[string]*string			// vmid to ip address	Tegu-lite
 	mac2phost	map[string]*string			// mac to phost map generated from OVS agent data (needed to include gateways in graph)
 	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
@@ -144,10 +145,14 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 		for ip, mac := range n.ip2mac {				// add in regular VMs
 			vmid := n.ip2vmid[ip]
-			if vmid != nil {						// skip if we don't find a vmid
-				net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
-				hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
-				i++
+			if vmid != nil && mac != nil {						// skip if we don't find a vmid
+				if n.vmid2phost[*vmid] != nil {
+					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
+					i++
+				} else {
+					net_sheep.Baa( 1, "did NOT add host: mac=%s ip=%s phost=NIL", *mac, ip )
+				}
 			}
 		}
 
@@ -186,7 +191,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 	VM information rather than needing to request everything all at the same time.
 */
 func (net *Network) insert_vm( vm *Net_vm ) {
-	vname, vid, vip4, _, vphost, vmac, vfip := vm.Get_values( )
+	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
 	if vname == nil {								// shouldn't happen, but be safe
 		return
 	}
@@ -226,6 +231,10 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	if net.gwmap == nil {
 		net.gwmap = make( map[string]*string )
 	}
+
+	if net.vmip2gw == nil {
+		net.vmip2gw = make( map[string]*string )
+	}
 	
 
 
@@ -243,6 +252,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 		net.ip2vm[*vip4] = vname
 		net.ip2mac[*vip4] = vmac
 		net.ip2fip[*vip4] = vfip
+		net.vmip2gw[*vip4] = gw
 	}
 
 	if vfip != nil {
@@ -255,7 +265,6 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 			net.gwmap[k] = v
 		}	
 	}
-
 }
 
 
@@ -696,6 +705,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 }
 
 /*
+	DEPRECATED
 	Given a tenant id, find the associated gateway.  Returns the whole tenant/ip string. 
 
 	TODO: return list if multiple gateways
@@ -811,8 +821,10 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		return
 	}
 
-	g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
-	g2 := n.gateway4tid( t2 )
+	//g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
+	//g2 := n.gateway4tid( t2 )
+	g1 := n.vmip2gw[*h1ip]							// pick up the gateway for each of the VMs
+	g2 := n.vmip2gw[*h2ip]
 
 	h2i := nalloc - 1								// insertion point for h2 into pair list
 	pair_list = make( []host_pair, nalloc )			// build the list based on number of validated
@@ -1301,6 +1313,7 @@ func (net *Network) xfer_maps( old_net *Network ) {
 	net.vmid2ip = old_net.vmid2ip
 	net.ip2vmid = old_net.ip2vmid
 	net.vmid2phost = old_net.vmid2phost	
+	net.vmip2gw = old_net.vmip2gw
 	net.ip2mac = old_net.ip2mac
 	net.mac2phost = old_net.mac2phost
 	net.gwmap = old_net.gwmap
