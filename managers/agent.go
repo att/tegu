@@ -370,15 +370,15 @@ func shift_values( list string ) ( new_list string ) {
 
 func Agent_mgr( ach chan *ipc.Chmsg ) {
 	var (
-		port	string = "29055"						// port we'll listen on for connections
-		adata	*agent_data
-		host_list string = ""
-		dscp_list string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
-		refresh int64 = 60
-		iqrefresh int64 = 900							// intermediate queue refresh
+		port		string = "29055"						// port we'll listen on for connections
+		adata		*agent_data
+		host_list	string = ""
+		dscp_list 	string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
+		refresh 	int64 = 60
+		iqrefresh 	int64 = 900							// intermediate queue refresh
 		req_id		uint32 = 1							// sync request id, key for hash (start at 1; 0 should never have an entry)
 		req_track	map[uint32]*pend_req				// hash of pending requests
-		wa_type2name map[int]string						// map REQ_WA types to a string for the agent manager
+		type2name 	map[int]string						// map REQ_ types to a string that is passed as the command constant
 	)
 
 	adata = &agent_data{}
@@ -418,8 +418,12 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	}
 	
 	dscp_list = shift_values( dscp_list )				// must shift values before giving to agent
+	
+	type2name = make( map[int]string, 5 )
+	type2name[REQ_WA_PORT] = "wa_port"					// command constants that get sent off to the agent
+	type2name[REQ_WA_TUNNEL] = "wa_tunnel"
+	type2name[REQ_WA_ROUTE]	= "wa_route"
 
-														// enforce some sanity on config file settings
 	am_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
@@ -471,15 +475,15 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
 	
-					case REQ_WA_PORT, REQ_WA_TUNNEL, REQ_WA_ROUTE:
+					case REQ_WA_PORT, REQ_WA_TUNNEL, REQ_WA_ROUTE:	// wa commands can be setup/sent by a common function
 						if req.Req_data != nil {
 							req_track[req_id] = &pend_req {			// tracked request to have block when response recevied from agent
 								req: req,
 								id:	req_id,
 							}
 
+							adata.send_wa_cmd( type2name[req.Msg_type], smgr, req_track[req_id] )		// do the real work to push to agent
 							req = nil									// prevent immediate response
-							adata.send_wa_cmd( wa_type2name[req.Msg_type], smgr, req_track[req_id] )		// do the real work to push to agent
 							req_id++
 							if req_id == 0 {
 								req_id = 1

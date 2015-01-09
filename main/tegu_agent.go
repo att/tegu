@@ -112,32 +112,49 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 
 // --------------- request support (command execution) ----------------------------------------------------------
 
-/* Run a wide area port command */
-func (req *json_action ) do_wa_port( ) ( jout []byte, err error ) {
+/*	Run a wide area command which fits a generic profile. The agent (us) is expected to know what values need to be pulled
+	from the parm list and how they are placed on the command line. Tegu's agent manager knows what the 
+	interface is with the caller (could be WACC, could be something different) and thus tegu is 
+	responsible for taking the raw stdout and putting it into a form that the requestor can digest.
+
+	Type is "wa_port", "wa_tunnel", or "wa_route"
+ */
+func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error ) {
     var (
 		cmd_str string  
     )
 	
-	
-	sheep.Baa( 0, ">>>> running wa-port" )
-	parms := req.Data
+	sheep.Baa( 0, ">>>> running %s", cmd_type )
+	parms := act.Data
 
 	//TODO:  need daves command syntax
-	cmd_str = fmt.Sprintf( `echo "host: %s wa_port -t %s -s %s -T %s"`, req.Hosts[0], parms["tenant"], parms["subnet"], parms["token"] )
-	sheep.Baa( 1, "wa_port executing: %s", cmd_str )
+	switch cmd_type {
+		case "wa_port":
+				cmd_str = fmt.Sprintf( `echo "result1  result2  result3   miscjunk: host: %s wa_port -t %s -s %s -T %s"`, act.Hosts[0], parms["tenant"], parms["subnet"], parms["token"] )
+
+		case "wa_tunnel":
+				cmd_str = fmt.Sprintf( `echo "result1 result2 result3 result4 result5    addWANTunnel router-uuid remote-ip   host: %s wa_tunnel %s %s %s %s %s"`, 
+						act.Hosts[0], parms["localtenant"], parms["localrouter"], parms["localip"], parms["remoteip"], parms["bandwidth"] )
+
+		case "wa_route":
+				cmd_str = fmt.Sprintf( `echo "host: %s wa_route %s %s %s %s %s %s"`, 
+						act.Hosts[0], parms["localtenant"], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"], parms["bandwidth"] )
+	}
+
+	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )
 
 	msg := agent_msg{}
 	msg.Ctype = "response"
-	msg.Rtype = "wa_port"
-	msg.Rid = req.Aid				// response id so tegu can map back to requestor
+	msg.Rtype = cmd_type
+	msg.Rid = act.Aid				// response id so tegu can map back to requestor
 	msg.Vinfo = version
 	msg.State = 0
-	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
-	sheep.Baa( 1, "wa_port completed: respone data had %d elements", len( msg.Rdata ) )
+	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as json in response format
+	sheep.Baa( 1, "wa_cmd (%s) completed: respone data had %d elements", cmd_type, len( msg.Rdata ) )
 
 	if err != nil {
 		msg.State = 1
-		sheep.Baa( 0, "ERR: unable to execute: %s: %s	[TGUAGN000]", cmd_str, err )
+		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
 		for i := range msg.Edata {
 			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
 		}
@@ -321,8 +338,8 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 			case "intermed_queues":							// run script to set up intermediate queues
 					do_intermedq(  req.Actions[i] )
 
-			case "wa_port":
-					p, err := req.Actions[i].do_wa_port( )
+			case "wa_port", "wa_tunnel", "wa_route":
+					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype )
 					if err == nil {
 						resp[ridx] = p
 						ridx++

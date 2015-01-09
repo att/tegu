@@ -32,8 +32,8 @@ import (
 
 	//"codecloud.web.att.com/gopkgs/bleater"
 	//"codecloud.web.att.com/gopkgs/clike"
-	//"codecloud.web.att.com/gopkgs/token"
-//	"codecloud.web.att.com/gopkgs/ipc"
+	"codecloud.web.att.com/gopkgs/token"
+	"codecloud.web.att.com/gopkgs/ipc"
 	//"codecloud.web.att.com/gopkgs/security"
 
 	//"codecloud.web.att.com/tegu/gizmos"
@@ -172,18 +172,22 @@ func wa_dig_data( in *http.Request, request interface{} ) ( state int, reason st
 	return
 }
 
-/*
-	Handle tegu/rest/ports  api call.  
+/*	Handle tegu/rest/ports  api call.  
+	The http interface is the point where the inbound request is unpacked into a struct
+	that can be passed to the agent manager, and then for taking the response back from 
+	the agent and converting it to the output format reqired by the requestor.  There might
+	be different output formats generated based on the bloody REST URI etc, so this is the 
+	right place to do it (not in the agent, or agent manager).
 */
 func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 	var (
 		state	= http.StatusMethodNotAllowed
-		reason	string
+		data	string
 	)
 
 	request := &wa_port_req{}							// empty request for dig_data to fill
 
-	state, reason = wa_dig_data( in, request )
+	state, reason := wa_dig_data( in, request )
 	if state != http.StatusOK {
 		out.Header().Set( "Content-Type", "application/json" )
 		out.WriteHeader( state )
@@ -193,48 +197,55 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 
 	switch in.Method {
 		case "POST":
-			http_sheep.Baa( 0, ">>>> received POST: ten=%s  subnet=%s\n", request.Tenant, request.Subnet )
-/*
+			http_sheep.Baa( 0, ">>>> wa_ports received POST: ten=%s  subnet=%s\n", request.Tenant, request.Subnet )
 			my_ch := make( chan *ipc.Chmsg )								// channel to wait for response from agent
-
-			//TODO: send request off to agent and wait
 
 			msg := ipc.Mk_chmsg( )
 			msg.Send_req( am_ch, my_ch, REQ_WA_PORT, request, nil )			// send request to agent and block 
 			msg = <- my_ch
 			
 			if msg != nil {
-				state = http.StatusCreated
-				output := msg.Response_data.( []string )						// a collection of records from the stdout
-				if len( output ) > 0  {
-					reason = output[0]
+				if msg.State == nil {										// success if no state
+					state = http.StatusCreated
+					output := msg.Response_data.( []string )						// a collection of records from the stdout
+					if len( output ) > 0  {													// expected output is: router, port-id, ipaddress on a single line
+						ntokens, otokens := token.Tokenise_qpopulated( output[0], " " )		// doesn't stumble over multiple whitespace between tokens like strings.Split does
+						if ntokens >= 3 {
+							data = fmt.Sprintf( `{ "tenant": %q, "router":, %q, "ip": %q }`, otokens[0], otokens[1], otokens[2] )
+						} else {
+							data = `badly formatted response from command: ` + output[0]
+							state = 400			// FIX -- better code
+						}
+					} else {
+						data = ""
+					}
 				} else {
-					reason = ""
+					state = http.StatusInternalServerError
+					data = fmt.Sprintf( "%s", msg.State )
 				}
 			} else {
 				state = http.StatusInternalServerError
-				reason = "missing or no response from agent"
+				data = "missing or no response from agent"
 			}
-*/
-			reason = `{ "tenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "router": "de854701-7b80-4f31-a2e4-f4ad1a988627", "ip": "135.207.50.100" }` 
+			//dummy testing data = `{ "tenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "router": "de854701-7b80-4f31-a2e4-f4ad1a988627", "ip": "135.207.50.100" }` 
 
 			state = http.StatusCreated
 
 		default:
 			http_sheep.Baa( 1, "http_wa_ports: called for unrecognised method: %s", in.Method )
-			reason = fmt.Sprintf( `{ "reason": "%s request method not supported" }`, in.Method )
+			data = fmt.Sprintf( `{ "reason": "%s request method not supported" }`, in.Method )
 			state = http.StatusMethodNotAllowed
 	}
 
 	out.Header().Set( "Content-Type", "application/json" ) // must set type and force write with state before writing data
 	out.WriteHeader( state )		
 	if state != http.StatusOK {
-		if reason == "" {
-			reason = `{ "reason": "bad json request" }`
+		if data == "" {
+			data = `{ "reason": "bad json request" }`
 		}
 	} 
 
-	fmt.Fprintf( out, "%s\n", reason )
+	fmt.Fprintf( out, "%s\n", data )
 	return
 }
 
@@ -244,12 +255,12 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 	var (
 		state	= http.StatusMethodNotAllowed
-		reason	string
+		data	string
 	)
 
 	request := &wa_tunnel_req{ }							// empty request for dig_data to fill
 
-	state, reason = wa_dig_data( in, request )
+	state, reason := wa_dig_data( in, request )
 	if state != http.StatusOK {
 		out.Header().Set( "Content-Type", "application/json" )
 		out.WriteHeader( state )
@@ -259,26 +270,58 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 
 	switch in.Method {
 		case "POST":
-			//TODO: send request off to agent and wait
-
+			http_sheep.Baa( 0, ">>>> wa_tunnel received POST: router=%s  ten=%s\n", request.Local_router, request.Local_tenant )
+			my_ch := make( chan *ipc.Chmsg )								// channel to wait for response from agent
 			state = http.StatusCreated
-			reason = ` {"localTenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "localRouter": "de854701-7b80-4f31-a2e4-f4ad1a988627", "localIp": "135.207.50.100", "remoteIp": "135.207.50.101", "bandwidth": "1000"}`
+			msg := ipc.Mk_chmsg( )
+			msg.Send_req( am_ch, my_ch, REQ_WA_TUNNEL, request, nil )			// send request to agent and block 
+			msg = <- my_ch
+			
+			if msg != nil  {
+				if msg.State == nil {
+					output := msg.Response_data.( []string )						// a collection of records from the stdout
+					if len( output ) > 0  {											// expected output is: router, port-id, ipaddress, cidr [bandwidth] on a single line
+						ntokens, otokens := token.Tokenise_qpopulated( output[0], " " )		// doesn't stumble over multiple whitespace between tokens like strings.Split does
+						if ntokens >= 4 {
+							data = fmt.Sprintf( `{ "tenant": %q, "router":, %q, "ip": %q, "cidr": %q`, otokens[0], otokens[1], otokens[2], otokens[3] )
+							if ntokens >= 5 {
+								data += fmt.Sprintf( ` "bandwidth": %q }`, otokens[4] )
+							} else {
+								data += fmt.Sprintf( `  ` )
+							}
+						} else {
+							data = `badly formatted response from command: ` + output[0]
+							state = 400			// FIX -- better code
+						}
+					} else {
+						data = ""
+					}
+				} else {
+					state = http.StatusInternalServerError
+					data = fmt.Sprintf( "%s", msg.State )
+				}
+			} else {
+				state = http.StatusInternalServerError
+				data = "missing or no response from agent"
+			}
+
+			//dummy testing data = ` {"localTenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "localRouter": "de854701-7b80-4f31-a2e4-f4ad1a988627", "localIp": "135.207.50.100", "remoteIp": "135.207.50.101", "bandwidth": "1000"}`
 
 		default:
 			http_sheep.Baa( 1, "http_wa_tunnel: called for unrecognised method: %s", in.Method )
-			reason = fmt.Sprintf( `{ "reason": "%s request method not supported" }`, in.Method )
+			data = fmt.Sprintf( `{ "reason": "%s request method not supported" }`, in.Method )
 			state = http.StatusMethodNotAllowed
 	}
 
 	out.Header().Set( "Content-Type", "application/json" ) 		// must set type and force write with state before writing data
 	out.WriteHeader( state )		
 	if state != http.StatusOK {
-		if reason == "" {
-			reason = `{ "reason": "bad json request" }`
+		if data == "" {
+			data = `{ "reason": "bad json request" }`
 		}
 	} 
 
-	fmt.Fprintf( out, "%s\n", reason )
+	fmt.Fprintf( out, "%s\n", data )
 
 	return
 }

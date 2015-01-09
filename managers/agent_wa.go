@@ -20,22 +20,18 @@ import (
 	//"fmt"
 	//"os"
 
-	//"codecloud.web.att.com/gopkgs/bleater"
-	//"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/connman"
-	//"codecloud.web.att.com/gopkgs/ipc"
-	//"codecloud.web.att.com/gopkgs/jsontools"
 )
 
 
-/*	Build a wa request and send to agent 
-*/
+/*	Build a wa request and send to agent */
 func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_req ) ( ok bool ) {
 	var (
 		parm_map map[string]string
 		host	string	
 	)
 
+am_sheep.Baa( 1, ">>>> processing: %s\n", atype )
 	if pr.req.Req_data != nil {
 		switch atype {
 			case "wa_port":
