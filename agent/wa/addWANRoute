@@ -1,0 +1,42 @@
+#!/bin/bash
+IP=/sbin/ip
+IFCONFIG=/sbin/ifconfig
+LOCKFILE='/tmp/WAQoSAgent.lock'
+
+if [ $# -lt 4 ]; then
+ echo "USAGE: $0 router-uuid local-ip remote-ip CIDR [tos]"
+ exit 99
+fi
+
+ROUTER=`echo $1 | sed 's/[^0-9a-fA-F\-]//g'`
+NSROUTER=qrouter-${ROUTER}
+IPLOCAL=`echo $2 | sed 's/[^0-9.]//g'`
+IPREMOTE=`echo $3 | sed 's/[^0-9.]//g'`
+CIDR=`echo $4 | sed 's/[^0-9./]//g'`
+
+if [ -z $ROUTER -o -z $IPLOCAL -o -z $IPREMOTE -o -z $CIDR ]; then
+ echo "USAGE: $0 router-uuid local-ip remote-ip CIDR [tos]"
+ exit 99
+fi
+
+if [ $# -gt 4 ]; then
+  TOS='tos '`echo $5 | sed 's/[^0-9]//g'`
+else
+  TOS=''
+fi
+( 
+  flock 7
+  IFTUN=`$IP netns exec $NSROUTER $IP tunnel show |\
+         fgrep $IPLOCAL |\
+         fgrep $IPREMOTE |\
+         awk '{print $1}' |\
+         sed 's/[^a-zA-Z0-9\-]//g'`
+  
+  if [ -z $IFTUN ]; then 
+   echo "Tunnel $IPLOCAL : $IPREMOTE not found on router $ROUTER"
+   exit 1
+  fi
+  
+  $IP netns exec $NSROUTER $IFCONFIG $IFTUN up
+  $IP netns exec $NSROUTER $IP route add $CIDR $TOS dev $IFTUN
+) 7>$LOCKFILE

@@ -1,0 +1,31 @@
+#!/bin/bash
+IP=/sbin/ip
+IFCONFIG=/sbin/ifconfig
+LOCKFILE='/tmp/WAQoSAgent.lock'
+
+TUNMODE='gre'
+IFTUN=${TUNMODE}-`uuidgen`
+# the 14-character if name length limit here reflects constants in neutron
+# we probably should generate a more mnemonic name for the interface
+IFTUN=`echo $IFTUN | sed 's/^\([a-zA-Z0-9\-]\{14\}\).*/\1/'`
+
+if [ $# -lt 3 ]; then
+ echo "USAGE: $0 router-uuid local-ip remote-ip"
+ exit 99
+fi
+
+ROUTER=`echo $1 | sed 's/[^0-9a-fA-F\-]//g'`
+NSROUTER=qrouter-${ROUTER}
+IPLOCAL=`echo $2 | sed 's/[^0-9.]//g'`
+IPREMOTE=`echo $3 | sed 's/[^0-9.]//g'`
+
+if [ -z $ROUTER -o -z $IPLOCAL -o -z $IPREMOTE ]; then
+ echo "USAGE: $0 router-uuid local-ip remote-ip"
+ exit 99
+fi
+
+(
+  flock 7
+  $IP netns exec $NSROUTER \
+   $IP tunnel add $IFTUN mode $TUNMODE local $IPLOCAL remote $IPREMOTE
+) 7>$LOCKFILE
