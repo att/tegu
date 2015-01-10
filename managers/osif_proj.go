@@ -118,6 +118,10 @@ func Mk_osif_project( name string ) ( p *osif_project, err error ) {
 /*
 	Build all translation maps for the given project.
 	Does NOT replace a map with a nil map; we assume this is an openstack glitch.
+
+	CAUTION:  ip2 maps are complete, where vm2 or vmid2 maps are not because
+			they only reference one of the VMs IP addresses where there might
+			be many.
 */
 func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 	
@@ -140,24 +144,20 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 		}
 
 		osif_sheep.Baa( 2, "refresh: creating VM maps from: %s", creds.To_str( ) )
-		vmid2ip, ip2vmid, vm2ip, vmid2host, err := creds.Mk_vm_maps( nil, nil, nil, nil, true )
+		vmid2ip, ip2vmid, vm2ip, vmid2host, vmip2vm, err := creds.Mk_vm_maps( nil, nil, nil, nil, nil, true )
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map VM info (vm): %s; %s   [TGUOSI003]", creds.To_str( ), err )
 			rerr = err
 			creds.Expire()					// force re-auth next go round
 		} else {
-			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d", *p.name, len( vmid2ip ), len( ip2vmid ), len( vm2ip ), len( vmid2host ) )
-			if len( vmid2ip ) > 0 &&  len( ip2vmid ) > 0 &&  len( vm2ip ) > 0 &&  len( vmid2host ) > 0  {		// don't refresh unless all are good
-				p.vmid2ip = vmid2ip
-				p.ip2vmid = ip2vmid
+			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d vmip2vm=%d", 
+					*p.name, len( vmid2ip ), len( ip2vmid ), len( vm2ip ), len( vmid2host ), len( vmip2vm ) )
+			if len( vmip2vm ) > 0 && len( vmid2ip ) > 0 &&  len( ip2vmid ) > 0 &&  len( vm2ip ) > 0 &&  len( vmid2host ) > 0  {		// don't refresh unless all are good
+				p.vmid2ip = vmid2ip						// id and vm name map to just ONE ip address
 				p.vm2ip = vm2ip
-				p.vmid2host = vmid2host
-
-				p.ip2vm = make( map[string]*string )	// need to create the revers map
-				for k, v := range p.vm2ip {
-					dup_str := k						// must have a unique string to reference
-					p.ip2vm[*v] = &dup_str
-				}
+				p.ip2vmid = ip2vmid						// the only complete list of ips
+				p.vmid2host = vmid2host					// id to physical host
+				p.ip2vm = vmip2vm
 			}
 		}
 
@@ -273,6 +273,7 @@ func (p *osif_project) suss_info( search *string ) ( name *string, id *string, i
 	} else {
 		if p.ip2vmid[*search] != nil {			// name is actually an ip
 			ip4 = search
+			id = p.ip2vmid[*ip4]
 			name = p.ip2vm[*ip4]
 		} else {								// assume its an id or project/id
 			if p.vmid2ip[*search] != nil {		// id2ip shouldn't include project, but handle that case
