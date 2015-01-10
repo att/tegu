@@ -45,7 +45,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.1/1a054"
+	version		string = "v1.1/11095"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
