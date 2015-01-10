@@ -78,6 +78,10 @@
 				05 Dec 2014 : Added work round for keystone/privs token investigation issue in AIC once they started using LDAP.
 				07 Dec 2014 : Corrected default tickler time for set intermediate queues.
 				16 Dec 2014 : Corrected bugs in lazy update translation of VM ID to ip.
+				08 Jan 2015 : Corrected a bug that was causing the wrong gateway to be slected as the endpoint for an
+							external reservation.
+				09 Jan 2015 : Augmented the 1/8 fix to not assume the subnet list is limited by project in the creds.
+							Changes to allow for finding all IP addresses assigned to a VM, not just the first.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -112,7 +116,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.2/1c164"		// wide area version
+		version		string = "v3.2/11115"		// wide area version
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

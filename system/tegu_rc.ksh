@@ -21,7 +21,10 @@
 #			01 Dec 2014 - Added restart command; ensure environment is set for failover
 #					support when running 'service tegu standby'.
 #			14 Dec 2014 - Renamed restart to reload since service buggers restart.
+#			18 Dec 2014 - Ignore signal 15 to prevent kill from killing us.
 #----------------------------------------------------------------------------------------
+trap "" 15				# prevent killall from killing the script when run from service
+
 tegu_user=tegu			#### change this if a different user name was setup for tegu
 tegu_group=tegu			#### change this if a different group name was setup for tegu
 
@@ -79,6 +82,7 @@ case "$1" in
 	;;
 
   stop)
+	set +e							# don't exit if either fail (which they will if tegu not running)
 	su -c "killall tegu_agent"
 	su -c "killall tegu"
 	;;
@@ -103,7 +107,8 @@ case "$1" in
 
 
   status)
-	/usr/bin/tegu_req ping
+	/usr/bin/tegu_req ping|grep -q OK		# exit with non-zero if not running
+	exit $?
 	;;
 
   *)

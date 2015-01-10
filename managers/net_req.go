@@ -22,15 +22,16 @@ type Net_vm  struct {
 	ip6		*string			// openstack assigned ip address
 	phost	*string			// phys host where vm is running
 	mac		*string			// MAC
+	gw		*string			// the gateway associated with the VM (if known)
 	fip		*string			// floating ip 
-	gwmap	map[string]*string // the gate way information associated with the VM
+	gwmap	map[string]*string // the gateway information associated with the VM (obsolete)
 }
 
 /*
 	Create a vm insertion structure. Not a good idea to create a nil named structure, but
 	we'll allow it and subs in unnamed.
 */
-func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, fip *string, gwmap map[string]*string )  ( np *Net_vm ) {
+func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, gw *string, fip *string, gwmap map[string]*string )  ( np *Net_vm ) {
 	if name == nil {
 		unv := "unnamed"
 		name = &unv
@@ -43,6 +44,7 @@ func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *st
 		ip6: ip6, 
 		phost: phost,
 		mac: mac,
+		gw: gw,
 		fip: fip,
 		gwmap: gwmap,			// we assume the map is ours to keep
 	}
@@ -53,12 +55,12 @@ func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *st
 /*
 	Returns all values except the gateway map.
 */
-func (vm *Net_vm) Get_values( ) ( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, fip *string ) {
+func (vm *Net_vm) Get_values( ) ( name *string, id *string, ip4 *string, ip6 *string, gw *string, phost *string, mac *string, fip *string ) {
 	if vm == nil {
 		return
 	}
 
-	return vm.name, vm.id, vm.ip4, vm.ip6, vm.phost, vm.mac, vm.fip
+	return vm.name, vm.id, vm.ip4, vm.ip6, vm.phost, vm.gw, vm.mac, vm.fip
 }
 
 /*
