@@ -181,7 +181,12 @@ verbose "populate DEBIAN directory"
 	mkdir -p DEBIAN
 	ls $src_dir/${pkg_name}_debian/[a-z]* | while read f
 	do
-		cp $f DEBIAN/
+		if [[ ${f##*/} == "control" ]]
+		then
+			sed "s/<VER>/$ver/" $f >DEBIAN/${f##*/} 
+		else
+			cp $f DEBIAN/
+		fi
 	done
 )
 cp /tmp/PID$$.md5 DEBIAN/md5sums

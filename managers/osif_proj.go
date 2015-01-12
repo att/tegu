@@ -3,8 +3,8 @@
 
 /*
 	Mnemonic:	osif_proj.go
-	Abstract:	Functions that manage an osif project struct. For now it manages the 
-				related translation maps for the project. In future it might also 
+	Abstract:	Functions that manage an osif project struct. For now it manages the
+				related translation maps for the project. In future it might also
 				be used to reference the associated creds, but not wanting to change
 				the structure that builds that aspect of thigs.
 
@@ -12,6 +12,9 @@
 	Author:		E. Scott Daniels
 
 	Mods:		16 Dec 2014 - Corrected slice out of bounds error in get_host_info()
+				09 Jan 2015 - No longer assume that the gateway list is limited by the project
+					that is valid in the creds.  At least some versions of Openstack were
+					throwing all gateways into the subnet list.
 */
 
 package managers
@@ -23,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/ipc"
 	"codecloud.web.att.com/gopkgs/ostack"
 )
@@ -40,9 +44,54 @@ type osif_project struct {
 	gwmap		map[string]*string
 	ip2fip		map[string]*string
 	fip2ip		map[string]*string
+	gw2cidr		map[string]*string
 
 	rwlock		sync.RWMutex						// must lock to prevent update collisions
 }
+
+// -------------------------------------------------------------------------------------------------
+
+/*	Given an IP address and a network address and number of bits test to
+	see if the IP address is in the subnet. Returns true if the IP address
+	is in the subnet. */
+func in_subnet( ip string, net string, nbits int ) ( bool ) {
+	var (
+		mask int64
+		ipv int64
+		netv int64
+	)
+
+	if nbits > 0 {									// if net bits given, compute the mask and compare
+		ipt := strings.Split( ip, "." )				// tokenise
+		nett := strings.Split( net, "." )
+
+		if len( ipt ) < 4 || len( nett ) < 4 {
+			osif_sheep.Baa( 2, "in_subnet: bad/unsupported ip address or network address: %s %s", ip, net )
+			return false
+		}
+
+		ipv = 0
+		netv = 0
+		for i := 0; i < 4; i++ {
+			ipv <<= 8
+			netv <<= 8
+			
+			ipv += clike.Atoll( ipt[i] )
+			netv += clike.Atoll( nett[i] )
+		}
+
+		mask = 0
+		for i := 0; i < nbits; i++ {
+			mask = (mask >> 1) + 0x80000000
+		}
+
+		return (ipv & mask) ==  netv
+	}
+
+	return false
+}
+
+// -------------------------------------------------------------------------------------------------
 
 /*
 	Make a new project map management block.
@@ -97,12 +146,12 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 			rerr = err
 			creds.Expire()					// force re-auth next go round
 		} else {
-			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d", *p.name, len( vmid2ip ), len( ip2vmid ), len( vm2ip ), len( vmid2host ) ) 
+			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d", *p.name, len( vmid2ip ), len( ip2vmid ), len( vm2ip ), len( vmid2host ) )
 			if len( vmid2ip ) > 0 &&  len( ip2vmid ) > 0 &&  len( vm2ip ) > 0 &&  len( vmid2host ) > 0  {		// don't refresh unless all are good
-				p.vmid2ip = vmid2ip 
-				p.ip2vmid = ip2vmid 
-				p.vm2ip = vm2ip 
-				p.vmid2host = vmid2host 
+				p.vmid2ip = vmid2ip
+				p.ip2vmid = ip2vmid
+				p.vm2ip = vm2ip
+				p.vmid2host = vmid2host
 
 				p.ip2vm = make( map[string]*string )	// need to create the revers map
 				for k, v := range p.vm2ip {
@@ -149,22 +198,69 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 			}
 		}
 
+		_, gw2cidr, err := creds.Mk_snlists( ) 		// get list of gateways and their subnet cidr
+		if err == nil && gw2cidr != nil {
+			p.gw2cidr = gw2cidr
+		} else {
+			if err != nil {
+				osif_sheep.Baa( 1, "WRN: unable to create gateway to cidr map: %s; %s   [TGUOSI007]", creds.To_str( ), err )
+			} else {
+				osif_sheep.Baa( 1, "WRN: unable to create gateway to cidr map: %s  no reason given   [TGUOSI007]", creds.To_str( ) )
+			}
+			creds.Expire()					// force re-auth next go round
+		}
+
 		p.lastfetch = time.Now().Unix()
 	}
 
 	return
 }
 
+/* Suss out the gateway from the list based on the VM's ip address.
+	Must look at the project on the gateway as some flavours of openstack
+	seem to return every subnet, not just the subnets defined for the
+	project listed in the creds.
+*/
+func (p *osif_project) ip2gw( ip4 *string ) ( *string ) {
+	if p == nil || ip4 == nil {
+		return nil
+	}
+
+	ip_toks := strings.Split( *ip4, "/" )			// assume project/ip
+	ip := ""
+	project := ""
+	if len( ip_toks ) > 1 {						// should always be 2, but don't core dump if not
+		ip = ip_toks[1]
+		project = ip_toks[0]					// capture the project for match against the gateway
+	} else {
+		ip = ip_toks[0]
+	}
+		
+	for k, v := range p.gw2cidr {												// key is the project/ip of the gate, value is the cidr
+		k_toks := strings.Split( k, "/" )										// need to match on project too
+		if len( k_toks ) == 1  ||  k_toks[0] ==  project || project == "" {		// safe to check the cidr
+			c_toks := strings.Split( *v, "/" )
+			if in_subnet( ip, c_toks[0], clike.Atoi( c_toks[1] ) ) {
+				osif_sheep.Baa( 1, "mapped ip to gateway for: %s  %s", *ip4, k )
+				return &k
+			}
+		}
+	}
+
+	osif_sheep.Baa( 1, "osif-ip2gw: unable to map ip to gateway for: %s", *ip4 )
+	return nil
+}
+
 /*
 	Supports Get_info by searching for the information but does not do a reload.
 */
-func (p *osif_project) suss_info( search *string ) ( name *string, id *string, ip4 *string, fip4 *string, mac *string, phost *string, gwmap map[string]*string ) {
+func (p *osif_project) suss_info( search *string ) ( name *string, id *string, ip4 *string, fip4 *string, mac *string, gw *string, phost *string, gwmap map[string]*string ) {
 
 	name = nil
 	id = nil
 	ip4 = nil
 
-	if search == nil {
+	if p == nil || search == nil {
 		return
 	}
 
@@ -175,7 +271,7 @@ func (p *osif_project) suss_info( search *string ) ( name *string, id *string, i
 		ip4 = p.vm2ip[*search]
 		name = search
 	} else {
-		if p.ip2vmid[*search] != nil {			// name is actually an ip 
+		if p.ip2vmid[*search] != nil {			// name is actually an ip
 			ip4 = search
 			name = p.ip2vm[*ip4]
 		} else {								// assume its an id or project/id
@@ -193,7 +289,7 @@ func (p *osif_project) suss_info( search *string ) ( name *string, id *string, i
 					ip4 = p.vmid2ip[*id]
 					name = p.ip2vm[*ip4]
 				}
-			} 
+			}
 		}
 	}
 
@@ -205,34 +301,36 @@ func (p *osif_project) suss_info( search *string ) ( name *string, id *string, i
 		id = p.ip2vmid[*ip4]
 	}
 
-	fip4 = p.ip2fip[*ip4] 
-	mac = p.ip2mac[*ip4] 
+	fip4 = p.ip2fip[*ip4]
+	gw = p.ip2gw( ip4 )					// find the gateway for the VM
+	mac = p.ip2mac[*ip4]
 	phost = p.vmid2host[*id]
 	gwmap = make( map[string]*string, len( p.gwmap ) )
 	for k, v := range p.gwmap {
-		gwmap [k] = v					// should be safe to reference the same string
+		gwmap[k] = v					// should be safe to reference the same string
 	}
 
-	return 
+	return
 }
 
 
 /*
 	Looks for the search string treating it first as a VM name, then VM IP address
-	and d finally VM ID (might want to redo that order some day) and if a match in 
+	and finally VM ID (might want to redo that order some day) and if a match in
 	the maps is found, we return the gambit of information.  If not found, we force
-	a reload of the map and then search again.  The new-data flag indicates that the 
-	information wasn't in the previous map. 
+	a reload of the map and then search again.  The new-data flag indicates that the
+	information wasn't in the previous map.
 */
-func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_project bool ) ( 
-		name *string, 
-		id *string, 
-		ip4 *string, 
-		fip4 *string, 
-		mac *string, 
-		phost *string, 
+func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_project bool ) (
+		name *string,
+		id *string,
+		ip4 *string,
+		fip4 *string,
+		mac *string,
+		gw *string,
+		phost *string,
 		gwmap map[string]*string,
-		new_data bool, 
+		new_data bool,
 		err error ) {
 
 	new_data = false
@@ -247,15 +345,15 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 	}
 
 	if time.Now().Unix() - p.lastfetch < 90 {					// if fresh, try to avoid reload
-		name, id, ip4, fip4, mac, phost, gwmap = p.suss_info( search )
-	} 
+		name, id, ip4, fip4, mac, gw, phost, gwmap = p.suss_info( search )
+	}
 
 	if name == nil {											// not found or not fresh, force reload
 		osif_sheep.Baa( 2, "lazy update: data reload for: %s", *p.name )
 		new_data = true		
 		err = p.refresh_maps( creds )
 		if err == nil {
-			name, id, ip4, fip4, mac, phost, gwmap = p.suss_info( search )
+			name, id, ip4, fip4, mac, gw, phost, gwmap = p.suss_info( search )
 		}
 	}
 
@@ -263,7 +361,7 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 }
 
 /*
-	Fill in the ip2mac map that is passed in with ours. Must grab the read lock to make this 
+	Fill in the ip2mac map that is passed in with ours. Must grab the read lock to make this
 	safe.
 */
 func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
@@ -280,7 +378,7 @@ func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
 }
 
 
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 /*
 	Given a project-id/host as input, dig out all of the host's information and build a struct
@@ -316,7 +414,7 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 	if pname == nil {						// it should be an id, but allow for a name/host to be sent in
 		pname = &tokens[0]
 		pid = pname2id[*pname]
-	} 
+	}
 
 	if pid == nil {
 		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s",  *(msg.Req_data.( *string )) )  // might be !project/vm, and so this is ok
@@ -342,15 +440,14 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 	osif_sheep.Baa( 2, "lazy update: get host info setup complete for (%s) %s", *pname, *(msg.Req_data.( *string )) )
 
 	search := *pid + "/" + tokens[1]							// search string must be id/hostname
-	name, id, ip4, fip4, mac, phost, gwmap, _, err := p.Get_info( &search, creds, true )
-
+	name, id, ip4, fip4, mac, gw, phost, gwmap, _, err := p.Get_info( &search, creds, true )
 	if err != nil {
 		msg.State = fmt.Errorf( "unable to retrieve host info: %s", err )
 		msg.Response_ch <- msg
 		return
 	}
 	
-	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, fip4, gwmap )		// build the vm data block for network manager
+	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, fip4, gwmap )		// build the vm data block for network manager
 	msg.Response_ch <- msg																// and send it on its merry way
 
 	return
