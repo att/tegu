@@ -31,23 +31,22 @@ func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_
 		host	string	
 	)
 
-am_sheep.Baa( 1, ">>>> processing: %s\n", atype )
 	if pr.req.Req_data != nil {
 		switch atype {
 			case "wa_port":
 				port_data := pr.req.Req_data.( *wa_port_req )			// get the port request information (token, project, subnet )
 				parm_map = port_data.To_map()							// convert to map to pass to agent as parms
-				host = port_data.host
+				host = *port_data.host
 	
 			case "wa_tunnel":
 				tun_data := pr.req.Req_data.( *wa_tunnel_req )
 				parm_map = tun_data.To_map()
-				host = tun_data.host
+				host = *tun_data.host
 		
 			case "wa_route":
 				route_data := pr.req.Req_data.( *wa_route_req )			// get the port request information (token, project, subnet )
 				parm_map = route_data.To_map()
-				host = route_data.host
+				host = *route_data.host
 		}
 	}
 

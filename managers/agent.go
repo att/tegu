@@ -243,7 +243,6 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 							}
 
 						default:
-							am_sheep.Baa( 1, "processing wa_* response" )
 							if req.Rid > 0 {
 								pr := rt_map[req.Rid]
 								if pr != nil {
@@ -264,9 +263,6 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 							} else {
 								am_sheep.Baa( 1, "WRN: agent response didn't have a request id  or match a generic type: %s [TGUAGTXXX]", req.Rtype )   //FIX message id
 							}
-		
-						// old default -- deprecated
-						//	am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s  [TGUAGT001]", req.Rtype )
 					}
 
 

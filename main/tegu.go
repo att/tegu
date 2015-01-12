@@ -116,7 +116,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.2/11115"		// wide area version
+		version		string = "v3.2/11115a"		// wide area version
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

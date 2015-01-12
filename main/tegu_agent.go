@@ -20,18 +20,12 @@
 package main
 
 import (
-	//"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
 	"math/rand"
-	//"net/http"
 	"os"
-	//"os/exec"
 	"strings"
-	//"sync"
 	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
@@ -46,9 +40,10 @@ import (
 
 // globals
 var (
-	version		string = "v1.2/11065"		// wide area support added
+	version		string = "v1.2/11115"		// wide area support added
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
+	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
 )
 
 
@@ -124,42 +119,40 @@ func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error )
 		cmd_str string  
     )
 	
-	sheep.Baa( 0, ">>>> running %s", cmd_type )
+	ssh_opts := "-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
 	parms := act.Data
 
-	//TODO:  need daves command syntax
 	switch cmd_type {
 		case "wa_port":
-				cmd_str = fmt.Sprintf( `echo "result1  result2  result3   miscjunk: host: %s wa_port -t %s -s %s -T %s"`, act.Hosts[0], parms["tenant"], parms["subnet"], parms["token"] )
+				cmd_str = fmt.Sprintf( `%s %s %s addWANPorts %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0], parms["token"], parms["subnet"], parms["router"] )
 
 		case "wa_tunnel":
-				cmd_str = fmt.Sprintf( `echo "result1 result2 result3 result4 result5    addWANTunnel router-uuid remote-ip   host: %s wa_tunnel %s %s %s %s %s"`, 
-						act.Hosts[0], parms["localtenant"], parms["localrouter"], parms["localip"], parms["remoteip"], parms["bandwidth"] )
+				cmd_str = fmt.Sprintf( `%s %s %s  addWANTunnel %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0],  parms["localrouter"], parms["localip"], parms["remoteip"] )
 
 		case "wa_route":
-				cmd_str = fmt.Sprintf( `echo "host: %s wa_route %s %s %s %s %s %s"`, 
-						act.Hosts[0], parms["localtenant"], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"], parms["bandwidth"] )
+				cmd_str = fmt.Sprintf( `%s %s %s  addWANRoute %s %s %s %s %s`, 
+						ssh_cmd, ssh_opts, act.Hosts[0], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"], parms["bandwidth"] )
 	}
 
 	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )
 
-	msg := agent_msg{}
+	msg := agent_msg{}				// build response to send back
 	msg.Ctype = "response"
 	msg.Rtype = cmd_type
 	msg.Rid = act.Aid				// response id so tegu can map back to requestor
 	msg.Vinfo = version
 	msg.State = 0
 	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as json in response format
-	sheep.Baa( 1, "wa_cmd (%s) completed: respone data had %d elements", cmd_type, len( msg.Rdata ) )
 
 	if err != nil {
 		msg.State = 1
+		sheep.Baa( 1, "wa_cmd (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
 		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
 		for i := range msg.Edata {
 			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
 		}
-		jout = nil
-		return
+	} else {
+		sheep.Baa( 1, "wa_cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
 	}
 
 	jout, err = json.Marshal( msg )
@@ -338,7 +331,7 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 			case "intermed_queues":							// run script to set up intermediate queues
 					do_intermedq(  req.Actions[i] )
 
-			case "wa_port", "wa_tunnel", "wa_route":
+			case "wa_port", "wa_tunnel", "wa_route":				// execute one of the wa commands
 					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype )
 					if err == nil {
 						resp[ridx] = p
@@ -351,7 +344,6 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 	}
 
 	if ridx > 0 {
-				sheep.Baa( 0, ">>>> returning %d responses", ridx )
 		resp = resp[0:ridx]
 	} else {
 		resp = nil
@@ -375,6 +367,7 @@ func main() {
 	id := 		flag.Int( "i", 0, "id" )
 	log_dir :=	flag.String( "l", "stderr", "log_dir" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
+	testing := flag.Bool( "t", false, "testing mode" )
 	verbose :=	flag.Bool( "v", false, "verbose" )
 	vlevel :=	flag.Int( "V", 1, "verbose-level" )
 	flag.Parse()									// actually parse the commandline
@@ -382,6 +375,10 @@ func main() {
 	if *needs_help {
 		usage( version )
 		os.Exit( 0 )
+	}
+
+	if *testing {					// may imply different behaviour....
+		ssh_cmd = "dummy_ssh"			// use a dummy ssh command to prevent sending to the remote host
 	}
 
 	if *id <= 0 {
