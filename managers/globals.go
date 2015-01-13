@@ -87,8 +87,12 @@ const (
 	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
-	REQ_GET_HOSTINFO			// request a full set of host info from the maps
-	
+	REQ_GET_HOSTINFO			// request a full set of host info from the maps	(osif)
+	REQ_GET_SNINFO				// request information about a subnet given a uuid (osif)
+	REQ_GW2PHOST				// given a gateway id return the physical host (osif)
+	REQ_WA_PORT					// agent wa_* requests	(agent manager)
+	REQ_WA_TUNNEL
+	REQ_WA_ROUTE
 )
 
 const (
@@ -148,6 +152,21 @@ var (
 	accept_requests bool = false		// until main says we can, we don't accept requests
 	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value	
 )
+
+//-- osif data passing structs ---------------------------------------------------------------------------------------------
+/*
+	Subnet information. Returned from osif get subnet info request. The token is the openstack token we have
+	for the matching project. This needs to go to the agent so that addWANPort can work. 
+*/
+type Subnet_info struct {
+	name	*string
+	ip		*string
+	project	*string
+	cidr	*string
+	phost	*string
+	uuid	*string
+	token	*string
+}
 
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------
 

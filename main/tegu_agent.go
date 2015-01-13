@@ -14,23 +14,18 @@
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
+				06 Jan 2015 : Wa support.
 */
 
 package main
 
 import (
-	//"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
 	"math/rand"
-	//"net/http"
 	"os"
-	//"os/exec"
 	"strings"
-	//"sync"
 	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
@@ -45,9 +40,10 @@ import (
 
 // globals
 var (
-	version		string = "v1.1/1a054"
+	version		string = "v1.2/11135c"		// wide area support added
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
+	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
 )
 
 
@@ -57,6 +53,8 @@ var (
 */
 type json_action struct {
 	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
+	Aid		uint32				// action id to be sent in the response
+	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
 	Qdata	[]string			// queue parms 
 	Fdata	[]string			// flow-mod parms
 	Hosts	[]string			// hosts to execute on if a multihost command
@@ -78,6 +76,7 @@ type agent_msg struct {
 	Edata	[]string		// response error data
 	State	int				// if an ack/nack some state information 
 	Vinfo	string			// agent version info for debugging
+	Rid		uint32			// reuest id that this is a response to
 }
 //----------------------------------------------------------------------------------------------------
 
@@ -107,6 +106,58 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 }
 
 // --------------- request support (command execution) ----------------------------------------------------------
+
+/*	Run a wide area command which fits a generic profile. The agent (us) is expected to know what values need to be pulled
+	from the parm list and how they are placed on the command line. Tegu's agent manager knows what the 
+	interface is with the caller (could be WACC, could be something different) and thus tegu is 
+	responsible for taking the raw stdout and putting it into a form that the requestor can digest.
+
+	Type is "wa_port", "wa_tunnel", or "wa_route"
+ */
+func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error ) {
+    var (
+		cmd_str string  
+    )
+	
+	ssh_opts := "-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
+	parms := act.Data
+
+	switch cmd_type {
+		case "wa_port":
+				cmd_str = fmt.Sprintf( `%s %s %s sudo /opt/app/bin/addWANPort %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0], parms["token"], parms["wan_uuid"], parms["subnet"] )
+
+		case "wa_tunnel":
+				cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANTunnel %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0],  parms["localrouter"], parms["localip"], parms["remoteip"] )
+
+		case "wa_route":
+				cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANRoute %s %s %s %s`, 
+						ssh_cmd, ssh_opts, act.Hosts[0], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
+	}
+
+	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )
+
+	msg := agent_msg{}				// build response to send back
+	msg.Ctype = "response"
+	msg.Rtype = cmd_type
+	msg.Rid = act.Aid				// response id so tegu can map back to requestor
+	msg.Vinfo = version
+	msg.State = 0
+	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as json in response format
+
+	if err != nil {
+		msg.State = 1
+		sheep.Baa( 1, "wa_cmd (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
+		for i := range msg.Edata {
+			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
+		}
+	} else {
+		sheep.Baa( 1, "wa_cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+	}
+
+	jout, err = json.Marshal( msg )
+	return
+}
 
 /*
 	Generate a map that lists physical host and mac addresses.
@@ -280,6 +331,13 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 			case "intermed_queues":							// run script to set up intermediate queues
 					do_intermedq(  req.Actions[i] )
 
+			case "wa_port", "wa_tunnel", "wa_route":				// execute one of the wa commands
+					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype )
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
+
 			default:
 				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
 		}
@@ -309,6 +367,7 @@ func main() {
 	id := 		flag.Int( "i", 0, "id" )
 	log_dir :=	flag.String( "l", "stderr", "log_dir" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
+	testing := flag.Bool( "t", false, "testing mode" )
 	verbose :=	flag.Bool( "v", false, "verbose" )
 	vlevel :=	flag.Int( "V", 1, "verbose-level" )
 	flag.Parse()									// actually parse the commandline
@@ -316,6 +375,10 @@ func main() {
 	if *needs_help {
 		usage( version )
 		os.Exit( 0 )
+	}
+
+	if *testing {					// may imply different behaviour....
+		ssh_cmd = "dummy_ssh"			// use a dummy ssh command to prevent sending to the remote host
 	}
 
 	if *id <= 0 {

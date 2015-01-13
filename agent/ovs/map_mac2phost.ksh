@@ -11,6 +11,7 @@
 #	Mods:		11 Aug 2014 - Corrected usage message.
 #				14 Oct 2014 - Corrected over stepping after the vlan tag was added to ovs_sp2uuid output
 #				09 Dec 2014 - Corrected bug when sussing out port information.
+#				09 Jan 2015 - Filter off records that don't have a mac address (-1$)
 # ----------------------------------------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------------------------------------
@@ -93,6 +94,6 @@ done | awk '
 	/port:/ && NF >= 6 {					# skip 'internal' ports if they were listed
 		printf( "%s %s\n", $1, $6 )
 	}
-'
+' | grep -v -- "-1$"			# don't want entries that have no mac address
 exit $?
 

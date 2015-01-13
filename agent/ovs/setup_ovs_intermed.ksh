@@ -87,6 +87,8 @@
 #								intent of setting quantum to ~6K.
 #				21 Nov 2014 - Changed to deal with the duplicate MAC addresses (bonded interfaces).
 #				04 Dec 2014 - Added a constant string to identify the target host in failure messages.
+#				16 Dec 2014 - Added new iptables configuration support, disabled support for br-ex.
+#				17 Dec 2014 - Added iptables config support for all named network spaces
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -139,18 +141,109 @@ function logit
 	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $argv0: $@" >&2
 }
 
+# Delete and then install the iptables rules in mangle that do the right thing for our DSCP marked traffic 
+# This must also handle all of the bloody routers that are created in namespaces, so we first generate a 
+# set of commands for the main iptables, then generate the same set for each nameespace. This all goes
+# into a single command file which is then fed into ssh to be executed on the target host. 
+#
+# we assume that this funciton is run asynch and so we capture all output into a file that can be spit out
+# at the end.
+function setup_iptables
+{
+	typeset cmd_string=""					# normall space iptables command list
+	typeset nscmd_string=""					# namespace command
+	typeset cmd_file=/tmp/PID$$.cmds		# cmds to send to the remote to set ip stuff
+	typeset nslist="/tmp/PID$$.nslist"		# list of name spaces from the remote host
+	typeset err_file="/tmp/PID$$.ipterr"
+
+	timeout 15 $ssh_host "ip netns list" >$nslist 2>$err_file
+	if (( $? != 0 ))
+	then
+		echo "CRI: unable to get network name space list from target-host: ${rhost#* }  [FAIL] [QOSSOM007]"
+		sed 's/^/setup_iptables:/' $err_file >&2
+	fi
+
+	typeset iptables_del_base="sudo iptables -D POSTROUTING -t mangle -m dscp --dscp"	# various pieces of the command string
+	typeset iptables_add_base="sudo iptables -A POSTROUTING -t mangle -m dscp --dscp"
+	typeset iptables_tail="-j CLASSIFY --set-class"
+
+	typeset iptables_nsbase="sudo ip netns exec" 										# must insert name space name between base and mid
+	typeset iptables_del_mid="iptables -D POSTROUTING -t mangle -m dscp --dscp"			# reset for the name space specific command
+	typeset iptables_add_mid="iptables -A POSTROUTING -t mangle -m dscp --dscp"
+	
+	(																# create the commands to send; first the master iptables rules, then rules for each name space
+		echo "$iptables_del_base 0 $iptables_tail 1:2;" 
+		for d in ${diffserv//,/ }													# d will be 4x the value that iptables needs
+		do
+			echo "$iptables_del_base $((d/4)) $iptables_tail 1:6;"					# add in delete commands
+		done 
+
+		echo "$iptables_add_base 0 $iptables_tail 1:2;" 
+		for d in ${diffserv//,/ }
+		do
+			echo "$iptables_add_base $((d/4)) $iptables_tail 1:6;"
+		done 
+
+		while read ns 																# for each name space we found
+		do
+			echo "$iptables_nsbase $ns $iptables_del_mid 0 $iptables_tail 1:2;" 				# odd ball delete case first
+			for d in ${diffserv//,/ }
+			do
+				echo "$iptables_nsbase $ns $iptables_del_mid $((d/4)) $iptables_tail 1:6;"			# add in delete commands
+			done 
+		
+			echo "$iptables_nsbase $ns $iptables_add_mid 0 $iptables_tail 1:2;" 				# odd ball add case
+			for d in ${diffserv//,/ }
+			do
+				echo "$iptables_nsbase $ns $iptables_add_mid $((d/4)) $iptables_tail 1:6;" 
+			done
+		done <$nslist 
+	) >$cmd_file
+
+	if [[ -z $ssh_host ]]							# local host -- just pump into ksh
+	then
+		ssh_host="ksh"
+	else
+		typeset ssh_cmd="ssh -T $ssh_opts $thost" 	# different than what we usually use NO -n supplied!!
+	fi
+
+	if [[ -z $no_exec_str ]]								# empty string means we're live
+	then
+		$forreal timeout 15 $ssh_cmd <$cmd_file >$err_file 2>&1
+		if (( $? != 0 ))
+		then
+			echo "CRI: unable to set iptables on target-host: ${rhost#* }  [FAIL] [QOSSOM006]"
+			sed 's/^/setup_iptables:/' $err_file >&2
+		else
+			echo "iptables set up for mangle rules on target-host: ${rhosts#* }"
+			if [[ -n $no_exec_str ]] || (( verbose ))					# if no exec string, then cat out the captured command
+			then
+				sed 's/^/setup_iptables:/' $err_file >&2
+			fi
+		fi
+	else
+		sed "s/^/iptables setup: $no_exec_str /" $cmd_file >&2
+	fi
+
+	rm -f /tmp/PID$$.ipterr 
+}
+
 function usage
 {
 	cat <<-endKat
 
 
-	version 1.1/18274
-	usage: $argv0 [-b bride(s)] [-d difserv] [-e max-tput] [-l log-file] [-n] [-h hostname] [-v]
+	version 1.2/1c164
+	usage: $argv0 [-b bride(s)] [-d difserv] [-D] [-e max-tput] [-h host] [-I] [-l log-file] [-m min] [-n] [-T] [-v] [-x exclude-bridge-list]
 
 	  -b sets the bridge(s) to affect (default br-ex and br-tun). Space separated if there are more 
 	     than one.  Regardless of the bridges listed, this script _always_ sets the ineritence
 	     for tos on br-tun unless no execute (-n) is given.
 	  -D Do not write dropping flow-mods
+	  -I Do not setup irl bridge and queues
+	  -n no execute mode; just say what we'd do
+	  -T Do not set iptables
+	  -x list excludes all bridges in the list (br-rl and br-ex are defaults if not given)
 
 	endKat
 }
@@ -162,7 +255,6 @@ if [[ $argv0 == "/"* ]]
 then
 	PATH="$PATH:${argv0%/*}"		# ensure the directory that contains us is in the path
 fi
-
 one_gbit=1000000000
 
 entry_max_rate=$(expand 10G)
@@ -170,7 +262,8 @@ purge_ok=1
 
 ssh_opts="-o ConnectTimeout=2 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
 verbose=0
-forreal=1
+forreal=""
+allow_iptables=1		# -T turns this off
 allow_reset=1			# -D sets to 0 to prevent writing the dscp reset flowmods
 allow_irl=1				# -I turns off irl configuration
 delete_data=0
@@ -180,8 +273,9 @@ thost=$(hostname)		# target host defaults here, but overridden by -h
 diffserv=184			# diffserv bit to set; voice (46), default
 min=$( expand 500K )	# this generally sets the quantum to about 6000
 max=$( expand 10G )
-#bridges="br-tun br-ex" 	# default bridges to affect; -b overrides
-bridges="" 				# default to all found in the ovs listing; -b will override if needed
+
+bridges="" 					# default to all found in the ovs listing; -b will override if needed
+br_exclude="br-rl br-ex"	# bridges that we should never set up on
 
 while [[ $1 == -* ]]
 do
@@ -191,18 +285,27 @@ do
 		-D)	allow_reset=0;;						# do not write the dscp reset flowmods
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-h)	
-			thost=$2; 							# override target host
-			rhost="-h $2"; 						# set option for any ovs_sp2uuid calls etc
-			ssh_host="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
-			shift
+			if [[ $2 != "localhost"  && $2 != "127.0.0.1" ]]
+			then
+				thost=$2; 							# override target host
+				rhost="-h $2"; 						# set option for any ovs_sp2uuid calls etc
+				ssh_host="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+				shift
+			fi
 			;;
 
 		-I)	allow_irl=0;;
 
 		-l)  log_file=$2; shift;;
 		-m)	min=$( expand $2 ); shift;;
-		-n)	no_exec_str="no exec: "; noexec="-n";;
+		-n)	no_exec_str="no exec: " 
+			forreal="logit noexec (-n) mode: "
+			noexec="-n"
+			;;
+
+		-T)	allow_iptables=0;;
 		-v) vflag="-v"; verbose=1;;
+		-x)	br_exclude="$2"; shift;;
 
 		-\?)	usage
 				exit 0
@@ -226,6 +329,11 @@ then
 	sudo="sudo"					# must use sudo for the ovs-vsctl commands
 fi
 
+
+if (( allow_iptables ))
+then
+	setup_iptables &			# do this asynch we'll wait at end
+fi
 
 if (( allow_irl ))				# do this first so that we can snag the assigned rate limit port from ovs_sp2uuid output
 then
@@ -362,62 +470,70 @@ then
 	done <$queue_data
 fi
 
-if [[ -z $bridges ]]
+if [[ -z $bridges ]]					# build list of bridges to work on if not explicitly given
 then
 	while read br 
 	do
-		if [[ $br != "br-rl" ]]			# should be trapped later, but doesn't hurt to prevent inclusion here too
+		#if [[ $br != "br-rl" ]]			# should be trapped later, but doesn't hurt to prevent inclusion here too
+		if [[ " $br_exclude " != *" $br "* ]]		# if not excluded (whitespace IS important)
 		then
 			bridges+="$br "
+		else
+			logit "bridge list: excluding bridge: $br		[OK]"
 		fi
 	done <$fmod_data
 fi
+logit "bridge list: $bridges"
 
 if [[ -s $queue_data ]]
 then
+	kflag=""
 	for br in $bridges
 	do
-		#if ! coq_test.ksh $vflag -l "$br" $noexec $rhost $queue_data >/tmp/PID$$.coq		# -k keeps unreferenced queues
-		if ! create_ovs_queues $vflag -l "$br" $noexec $rhost $queue_data >/tmp/PID$$.coq		# -k keeps unreferenced queues
+		if ! create_ovs_queues $kflag $vflag -l "$br" $noexec $rhost $queue_data >/tmp/PID$$.coq		# kflag (-k) keeps unreferenced queues; delete them only on first call
 		then
 			logit "CRI: unable to set one or more ovs queues on target-host: ${rhost#* }   [FAIL] [QLTSOM003]"
 			cat /tmp/PID$$.coq >&2
 			rm -f /tmp/PID$$.*
 			exit 1
 		fi
+
+		kflag="-k"
 	done
 else
 	logit "no queue setup data was generated  [WARN]" 
 	logit "to verify: ovs_sp2uuid -a $rhost any"
 fi
 
+# Send flow-mods which cause packets with DSCP values in our list to be queued on the priority queue and
+# all others to be queued on the best effort queue.
+#
 # CAUTION:  the order that the action parameters are supplied is VERY important!! Don't mess with them 
 #			unless you know what you are doing. It is also important that neither rule we generate for
 #			each dscp value has any kind of 'send' (normal, output, enqueue) action. 
 #
 rc=0
-while read b		# for each bridge listed set a flow mod to push marked packets onto the priority queue
+#while read b		# for each bridge listed set a flow mod to push marked packets onto the priority queue
+for b in $bridges
 do
-	if [[ $b != "br-rl" ]]				# never assign anything to the rate limiting bridge
-	then
-		for dscp in $diffserv				# might be multiple values, space separated
-		do
-			send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  add 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
-			lrc=0
-			rc=$(( lrc + $? ))
-			send_ovs_fmod $noexec $rhost -T 91 -t 0  --match -T $dscp --action -m 1/1  -N  add 0xbeef $b				# cannot set meta before resub, so set in alternate table
-			rc=$(( lrc + $? ))
-	
-			if (( lrc == 0  ))
-			then
-				logit "${no_exec_str}intermediate flow-mods were set on ${rhost% } dscp=$dscp bridge=$b	[OK]"
-			else
-				logit "CRI: unable to set flow-mod for bridge=$b  dscp=$dscp on target-host: ${rhost#* }   [FAIL]  [QLTSOM004]"
-				rc=1
-			fi
-		done
-	fi
-done <$fmod_data
+	logit "set DSCP pri/best-eff fmods on bridge: $b  dscp=$diffserv"
+	for dscp in ${diffserv//,/ }			# might be multiple values, space or comma separated
+	do
+		send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  add 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
+		lrc=0
+		rc=$(( lrc + $? ))
+		send_ovs_fmod $noexec $rhost -T 91 -t 0  --match -T $dscp --action -m 1/1  -N  add 0xbeef $b				# cannot set meta before resub, so set in alternate table
+		rc=$(( lrc + $? ))
+
+		if (( lrc == 0  ))
+		then
+			logit "${no_exec_str}intermediate flow-mods were set on ${rhost% } dscp=$dscp bridge=$b	[OK]"
+		else
+			logit "CRI: unable to set flow-mod for bridge=$b  dscp=$dscp on target-host: ${rhost#* }   [FAIL]  [QLTSOM004]"
+			rc=1
+		fi
+	done
+done
 
 
 # Configure OVS to promote dscp value into gre header
@@ -494,6 +610,8 @@ then
 else
 	logit "no dropping flow-mods written -D was set"
 fi
+
+wait					# hold up for any asynch calls
 
 rm -f /tmp/PID$$.*
 exit $rc

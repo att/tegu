@@ -78,6 +78,8 @@
 #					mac address.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
 #				05 Dec 2014 - Corrected bug with picking up uuid for switch id rather than MAC.
+#				16 Dec 2014 - Corrected bug caused because we must use uuids when doing intermediate queues
+#					but tegu doesn't know anything but mac addresses.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -185,6 +187,7 @@ static_q0size=0			# -s enables; causes q0 to be statically sized rather than var
 while [[ $1 == -* ]]
 do
 	case $1 in 
+		-D)	;;							# ignore deprecated 
 		-d)	delete_data=1;;
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-h)	
@@ -280,13 +283,17 @@ create_list=""
 	/^switch: / && NF > 2 { 			# collect switch data
 		if( limit["all"] || limit[$2] || limit[$4] )		# if switch dpid or name is in the list, or allowing all
 		{
-			swmap[$2] = $3;					# map of switches that live on the host
-			swmap[$3] = $3;					# setup intermediate queues now lists things by uuid, so map both ways
+			swmap[$2] = $3;					# map of switches that live on the host (by mac)
+			swmap[$3] = $3;					# setup intermediate queues now lists things by uuid, so map by uuid too
 			cur_switch = $3;				# current switch, all ports that follow are childern of this
+			cur_swmac = $2;					# also need to track switch by its mac because tegu only has mac addresses
 			alt2switch[$4] = $2				# pick up br-int etc to do late binding; map to switch id in ovs
 		}
 		else
+		{
 			cur_switch = ""
+			cur_swmac = ""
+		}
 		next;
 	}
 
@@ -295,23 +302,33 @@ create_list=""
 			next;
 
 		swpt2uuid[cur_switch,$3] = $2;		# map switch/port combination to uuid
-		#printf( ">>>mapping port: %s, %s = %s\n", cur_switch, $3, $2 ) >"/dev/fd/2"
+		swpt2uuid[cur_swmac,$3] = $2;
+
 		q0max[cur_switch,$3] = max_rate;	# q0 on switch/port starts at full bandwidth
+		q0max[cur_swmac,$3] = max_rate;
+
 		assigned[cur_switch"-"$3] = -1;		# track what we assigned so we can delete everything else
+		assigned[cur_swmac"-"$3] = -1;
 
 		if( NF > 5 )						# add mac to allow mac to port mapping for late binding (2014.10.04)
 		{
 			xmac = $5;
 			gsub( ":", "", xmac );
 			mac2port[cur_switch,xmac] = $3				# needed to do late binding of switch to vm ports
+			mac2port[cur_swmac,xmac] = $3
 		}
 		else								# assume this is something like int-br-em* (no mac or additional information available)
 		{
 			if( alt2switch[$4] == "" )		# there is an "internal port" which maps to the switch name; ignore that and capture all others
 			{
 				sw2sw_links[cur_switch] = sw2sw_links[cur_switch] $4 " "		# collect all switch to switch link names (e.g. int-br-eth2)
+				sw2sw_links[cur_swmac] = sw2sw_links[cur_swmac] $4 " "
+
 				sw2sw_ports[cur_switch] = sw2sw_ports[cur_switch] $3 " " 		# collect all switch to switch port numberss
+				sw2sw_ports[cur_swmac] = sw2sw_ports[cur_swmac] $3 " "
+
 				swlinks2port[cur_switch,$4] = $3								# this captures the name which we will use if we add ability to map to @br-eth3 or somesuch
+				swlinks2port[cur_swmac,$4] = $3
 			}
 		}
 		next;
@@ -357,7 +374,6 @@ create_list=""
 			for( i = 1; i <= n; i++ )
 			{
 				pt = d[i];
-				#printf( ">>>adding port to switchiq: %s,%s,%s = %s\n", sw,  pt, spq,  mmp2iq[mmp] ) >"/dev/fd/2";
 
 				if( !switch_has_port[sw,pt] )
 				{
@@ -445,7 +461,6 @@ create_list=""
 
 				swpt2cq[s,p] = sprintf( "@qc%d", qcid );			# map switch/port to the queue combo
 				printf( "\n" );
-				#printf( ">>>>>swpt2cq[(%s),(%s)] = %s\n", s, p,  swpt2cq[s,p] ) >"/dev/fd/2"
 				qcid++;
 			}
 		}
