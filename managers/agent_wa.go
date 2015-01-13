@@ -24,8 +24,11 @@ import (
 )
 
 
-/*	Build a wa request and send to agent */
-func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_req ) ( ok bool ) {
+/*	Build a wa request and send to agent 
+	The default wan_uuid is used if the WAN uuid isn't supplied by the requestor and comes
+	in from the config file.
+*/
+func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_req, def_wan_uuid *string ) ( ok bool ) {
 	var (
 		parm_map map[string]string
 		host	string	
@@ -36,6 +39,10 @@ func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_
 			case "wa_port":
 				port_data := pr.req.Req_data.( *wa_port_req )			// get the port request information (token, project, subnet )
 				parm_map = port_data.To_map()							// convert to map to pass to agent as parms
+				if parm_map["wan_uuid"] == "" {
+					parm_map["wan_uuid"] = *def_wan_uuid
+				}
+
 				host = *port_data.host
 	
 			case "wa_tunnel":

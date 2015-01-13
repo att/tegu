@@ -622,14 +622,14 @@ func get_sninfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map
 
 	tokens := strings.Split( msg.Req_data.( string ), " " )			// we expect data to be project subnet separated by a space
 	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
-		msg.State = fmt.Errorf( "project subnet string" )
+		msg.State = fmt.Errorf( "(%s) is not project subnet", msg.Req_data.( string ) )
 		msg.Response_ch <- msg
 		return
 	}
 
 	p, _, creds, err := pid2data( &tokens[0], os_refs, os_projs, id2pname, pname2id )
 	if err != nil {
-		osif_sheep.Baa( 1, "get sn info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )  
+		osif_sheep.Baa( 1, "get sn info: unable to map to a project: %s: %s",  msg.Req_data.( string ), err )  
 		msg.State = err
 		msg.Response_ch <- msg
 		return
@@ -639,6 +639,7 @@ func get_sninfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map
 	si.uuid = &tokens[1]
 	si.name, si.project, si.cidr, si.ip, si.phost, err = p.get_sninfo( &tokens[1], creds ) 	// dig out the subnet info
 	if err == nil  &&  si.name != nil {
+		si.token = creds.Get_token()			// get our admin token which needs to be passed to the agent
 		msg.State = nil 
 		msg.Response_data = si
 		//osif_sheep.Baa( 1, ">>>> got subnet info:  %s %s %s %s %s", *si.name, *si.project, *si.cidr, *si.ip, *si.phost )

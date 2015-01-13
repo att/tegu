@@ -33,9 +33,9 @@ import (
 // --- wa request/response structs ------------------------------------------------------------------
 
 /*
-	Request and response structs. Fields are public so that we can use the json (un)marhsal
-	calls to bundle and unbundle the data. Tags are needed to support the WACC (java?) camel
-	case that doesn't have a leading capitalised letter.
+	Request structs. Fields are public so that we can use the json (un)marhsal calls to 
+	bundle and unbundle the data. Tags are needed to support the WACC (java?) camel case 
+	that doesn't have a leading capitalised letter.
 	
 	The structs contain information that is expected to be received from WACC in json form
 	and contain internal information that is needed when passing the data into the agent manager
@@ -70,9 +70,29 @@ type wa_route_req struct {
 	host			*string		// tegu private information
 }
 
+type wa_conns_req struct {
+	Token	string
+	Tenant	string
+	Subnet	string
+}
+
 // ---- request specific functions ------------------------------------------------------------------
 /* Generate a hash of parameter things from the structure */
 func (r *wa_port_req) To_map( ) ( map[string]string ) {
+	if r == nil {
+		return nil
+	}
+
+	m := make( map[string]string )
+	m["token"] = r.Token
+	m["tenant"] = r.Tenant
+	m["subnet"] = r.Subnet
+
+	return m
+}
+
+/* Generate a hash of parameter things from the structure */
+func (r *wa_conns_req) To_map( ) ( map[string]string ) {
 	if r == nil {
 		return nil
 	}
@@ -151,9 +171,10 @@ func wa_dig_data( in *http.Request, request interface{} ) ( state int, reason st
 func send_http_err( out http.ResponseWriter, state int, msg string ) {
 	http_sheep.Baa( 1, "unable to complete http request: %s", msg )
 
-	out.Header().Set( "Content-Type", "application/json" )
+	//out.Header().Set( "Content-Type", "application/json" )
+	out.Header().Set( "Content-Type", "text/pain" )
 	out.WriteHeader( state )
-	fmt.Fprintf( out, "%s\n", msg )
+	fmt.Fprintf( out, `{ "reason": %q }`, msg )
 }
 
 
@@ -169,11 +190,11 @@ func http_subnet_info( project *string, subnet *string ) ( si *Subnet_info, err 
 	msg.Send_req( osif_ch, my_ch, REQ_GET_SNINFO, *project + " " +  *subnet, nil )	// ask osif to dig up the info
 	msg = <- my_ch													// block until we get a response
 	if msg.State != nil {
-		err = fmt.Errorf( "unable to get subnet information: %s", msg.State )
+		err = fmt.Errorf( "unable to get subnet information: %s: %s", *subnet, msg.State )
 		return
 	} else {
 		if msg.Response_data == nil {
-			err = fmt.Errorf( "unable to get subnet information: no data, no error" )
+			err = fmt.Errorf( "subnet_info: unable to get subnet information: no data, no error" )
 			return
 		}
 	}
@@ -204,14 +225,25 @@ func http_gw2phost( project *string, router *string ) ( host *string, err error 
 	err = nil
 
 	msg := ipc.Mk_chmsg( )
+	if *project == "" {
+		http_sheep.Baa( 1, "gw2phost: project was empty" )
+		err = fmt.Errorf( "gw2phost: project string was missing" )
+		return
+	}
+	if *router == "" {
+		http_sheep.Baa( 1, "gw2phost: router was empty" )
+		err = fmt.Errorf( "gw2phost: router string was missing" )
+		return
+	}
+
 	msg.Send_req( osif_ch, my_ch, REQ_GW2PHOST, *project + " " +  *router, nil )	// ask osif to dig up the info
 	msg = <- my_ch													// block until we get a response
 	if msg.State != nil {
-		err = fmt.Errorf( "unable to get router phost information: %s", msg.State )
+		err = fmt.Errorf( "gw2phost: unable to get router phost information: %s %s", *router,  msg.State )
 		return
 	} else {
 		if msg.Response_data == nil {
-			err = fmt.Errorf( "unable to get subnet information: no data, no error" )
+			err = fmt.Errorf( "unable to get router information: no data, no error" )
 			return
 		}
 	}
@@ -262,6 +294,7 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 
 			cidr := si.cidr
 			request.host = si.phost
+			request.Token = *si.token	// must send our token in for admin privs
 
 			msg := ipc.Mk_chmsg( )
 			msg.Send_req( am_ch, my_ch, REQ_WA_PORT, request, nil )			// send request to agent and block 
@@ -280,7 +313,7 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 							}
 
 							// CAUTION: output from script is router-uuid, port-uuid, ip, but WACC wants only router and ip back (0 and 2)
-							data = fmt.Sprintf( `{ "tenant": %q, "router":, %q, "ip": %q, "cidr": %q }`, request.Tenant, otokens[0], otokens[2], *cidr )
+							data = fmt.Sprintf( `{ "tenant": %q, "router": %q, "ip": %q, "cidr": %q }`, request.Tenant, otokens[0], otokens[2], *cidr )
 						} else {
 							data = fmt.Sprintf( "wa_port response wasn't correct: %d tokens (expected 3); %d lines (required 1)", ntokens, len( output ) )
 							state = http.StatusInternalServerError
@@ -305,7 +338,12 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 			state = http.StatusMethodNotAllowed
 	}
 
-	out.Header().Set( "Content-Type", "application/json" ) // must set type and force write with state before writing data
+	if state > 299 { 
+		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
+		data = fmt.Sprintf( `{ "reason": %q }`, data )
+	} else {
+		out.Header().Set( "Content-Type", "application/json" ) 
+	}
 	out.WriteHeader( state )		
 	if state > 299 && data == "" {
 		data = "bad json request"
@@ -354,7 +392,7 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 			
 			if msg != nil  {
 				if msg.State == nil {
-					data = fmt.Sprintf( `{ "tenant": %q, "router":, %q, "ip": %q`, request.Local_tenant, request.Local_router, request.Local_ip )
+					data = fmt.Sprintf( `{ "tenant": %q, "router": %q, "ip": %q`, request.Local_tenant, request.Local_router, request.Local_ip )
 					if request.Bandwidth != "" {
 						data += fmt.Sprintf( `, "bandwidth": %q }`, request.Bandwidth )
 					} else {
@@ -378,7 +416,13 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 			state = http.StatusMethodNotAllowed
 	}
 
-	out.Header().Set( "Content-Type", "application/json" ) 		// must set type and force write with state before writing data
+	//out.Header().Set( "Content-Type", "application/json" ) 		// must set type and force write with state before writing data
+	if state > 299 { 
+		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
+		data = fmt.Sprintf( `{ "reason": %q }`, data )
+	} else {
+		out.Header().Set( "Content-Type", "application/json" ) 
+	}
 	out.WriteHeader( state )		
 	if state > 299 && data == "" {
 		data = "bad json request"
@@ -444,7 +488,13 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 			state = http.StatusMethodNotAllowed
 	}
 
-	out.Header().Set( "Content-Type", "application/json" )
+	if state > 299 { 
+		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
+		data = fmt.Sprintf( `{ "reason": %q }`, data )
+	} else {
+		out.Header().Set( "Content-Type", "application/json" ) 
+	}
+	//out.Header().Set( "Content-Type", "application/json" )
 	out.WriteHeader( state )		// must lead with the overall state, followed by reason or data
 	if state > 299 && data == "" {
 		data = "bad json request"

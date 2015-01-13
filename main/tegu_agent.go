@@ -40,7 +40,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.2/11115"		// wide area support added
+	version		string = "v1.2/11135c"		// wide area support added
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
@@ -124,14 +124,14 @@ func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error )
 
 	switch cmd_type {
 		case "wa_port":
-				cmd_str = fmt.Sprintf( `%s %s %s addWANPorts %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0], parms["token"], parms["subnet"], parms["router"] )
+				cmd_str = fmt.Sprintf( `%s %s %s sudo /opt/app/bin/addWANPort %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0], parms["token"], parms["wan_uuid"], parms["subnet"] )
 
 		case "wa_tunnel":
-				cmd_str = fmt.Sprintf( `%s %s %s  addWANTunnel %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0],  parms["localrouter"], parms["localip"], parms["remoteip"] )
+				cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANTunnel %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0],  parms["localrouter"], parms["localip"], parms["remoteip"] )
 
 		case "wa_route":
-				cmd_str = fmt.Sprintf( `%s %s %s  addWANRoute %s %s %s %s %s`, 
-						ssh_cmd, ssh_opts, act.Hosts[0], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"], parms["bandwidth"] )
+				cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANRoute %s %s %s %s`, 
+						ssh_cmd, ssh_opts, act.Hosts[0], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
 	}
 
 	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )

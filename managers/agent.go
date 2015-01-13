@@ -375,6 +375,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		req_id		uint32 = 1							// sync request id, key for hash (start at 1; 0 should never have an entry)
 		req_track	map[uint32]*pend_req				// hash of pending requests
 		type2name 	map[int]string						// map REQ_ types to a string that is passed as the command constant
+		def_wan_uuid *string = nil						// default uuid for the wan (from config)
 	)
 
 	adata = &agent_data{}
@@ -402,6 +403,13 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 				am_sheep.Baa( 1, "iqrefresh in configuration file is too small, set to 90 seconds" )
 				iqrefresh = 90
 			}
+		}
+		if p := cfg_data["agent"]["wan_uuid"]; p != nil {		// uuid that gets passed to the agent for the add-port call
+			def_wan_uuid = p
+			am_sheep.Baa( 1, "wan uuid will default to: %s", *def_wan_uuid )
+		} else {
+			dup_str := ""
+			def_wan_uuid = &dup_str
 		}
 	}
 	if cfg_data["default"] != nil {						// we pick some things from the default section too
@@ -478,7 +486,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 								id:	req_id,
 							}
 
-							adata.send_wa_cmd( type2name[req.Msg_type], smgr, req_track[req_id] )		// do the real work to push to agent
+							adata.send_wa_cmd( type2name[req.Msg_type], smgr, req_track[req_id], def_wan_uuid )		// do the real work to push to agent
 							req = nil									// prevent immediate response
 							req_id++
 							if req_id == 0 {

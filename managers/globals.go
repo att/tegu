@@ -155,7 +155,8 @@ var (
 
 //-- osif data passing structs ---------------------------------------------------------------------------------------------
 /*
-	Subnet information. Returned from osif get subnet info request.
+	Subnet information. Returned from osif get subnet info request. The token is the openstack token we have
+	for the matching project. This needs to go to the agent so that addWANPort can work. 
 */
 type Subnet_info struct {
 	name	*string
@@ -164,6 +165,7 @@ type Subnet_info struct {
 	cidr	*string
 	phost	*string
 	uuid	*string
+	token	*string
 }
 
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------
