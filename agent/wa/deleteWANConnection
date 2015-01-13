@@ -113,6 +113,8 @@ if(wanPort):
   subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
                    '/sbin/ip', 'tunnel', 'del', wanRoute[2]])
   # 5. delete the IP, or the port if it's the last remaining address
+  subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
+                   '/sbin/ip', 'address', 'del', tunnelIF[1])
   if(len(wanPort['fixed_ips']) > 1): 
     req.request('PUT',
                 portDetailsPath +'/'+ wanPort['id'] +'.json',
