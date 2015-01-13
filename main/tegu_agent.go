@@ -15,6 +15,7 @@
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
 				06 Jan 2015 : Wa support.
+				13 Jan 2015 : Added check for "exits" result fro wa_route.
 */
 
 package main
@@ -40,7 +41,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.2/11135c"		// wide area support added
+	version		string = "v1.2/11135d"		// wide area support added
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
@@ -117,6 +118,7 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error ) {
     var (
 		cmd_str string  
+		allow_exists bool = false		// we might allow file exists "errors" if this is set
     )
 	
 	ssh_opts := "-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
@@ -124,6 +126,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error )
 
 	switch cmd_type {
 		case "wa_port":
+				allow_exists = true
 				cmd_str = fmt.Sprintf( `%s %s %s sudo /opt/app/bin/addWANPort %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0], parms["token"], parms["wan_uuid"], parms["subnet"] )
 
 		case "wa_tunnel":
@@ -146,9 +149,19 @@ func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error )
 
 	if err != nil {
 		msg.State = 1
-		sheep.Baa( 1, "wa_cmd (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
-		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
-		for i := range msg.Edata {
+		if allow_exists && msg.Edata != nil && len( msg.Edata ) > 0 {
+			if strings.Contains( msg.Edata[0], "File exists" ) {
+				sheep.Baa( 1, "WRN wa_cmd (%s) indicates element (route, etc.) exists;  stdout: %d lines; stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+				msg.State = 0
+			}
+		} 
+
+		if msg.State > 0 {
+			sheep.Baa( 1, "wa_cmd (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+			sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
+		}
+
+		for i := range msg.Edata {								// capture stderr even when issuing warning
 			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
 		}
 	} else {
