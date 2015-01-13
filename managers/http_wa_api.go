@@ -15,7 +15,7 @@
 	Date:		05 January 2015
 	Author:		E. Scott Daniels
 
-	Mods:		
+	Mods:		13 Jan 2015 - Added delete support
 */
 
 package managers
@@ -71,28 +71,20 @@ type wa_route_req struct {
 }
 
 type wa_conns_req struct {
-	Token	string
-	Tenant	string
-	Subnet	string
+	Token		string
+	Tenant		string
+	Router		string
+	Subnet		string
+	Remote_cidr	string		`json:"remoteCidr";`
+	Wan_uuid	string
+	Tos			string					// optional (future)
+
+	host		*string
 }
 
 // ---- request specific functions ------------------------------------------------------------------
 /* Generate a hash of parameter things from the structure */
 func (r *wa_port_req) To_map( ) ( map[string]string ) {
-	if r == nil {
-		return nil
-	}
-
-	m := make( map[string]string )
-	m["token"] = r.Token
-	m["tenant"] = r.Tenant
-	m["subnet"] = r.Subnet
-
-	return m
-}
-
-/* Generate a hash of parameter things from the structure */
-func (r *wa_conns_req) To_map( ) ( map[string]string ) {
 	if r == nil {
 		return nil
 	}
@@ -134,6 +126,23 @@ func (r *wa_route_req) To_map( ) ( map[string]string ) {
 	m["remoteip"] = r.Remote_ip
 	m["remote_cidr"] = r.Remote_cidr
 	m["bandwidth"] = r.Bandwidth
+
+	return m
+}
+
+/* Generate a hash of parameter things from the structure */
+func (r *wa_conns_req) To_map( ) ( map[string]string ) {
+	if r == nil {
+		return nil
+	}
+
+	m := make( map[string]string )
+	m["tenant"] = r.Tenant
+	m["router"] = r.Router
+	m["subnet"] = r.Subnet
+	m["wan_uuid"] = r.Wan_uuid
+	m["remote_cidr"] = r.Remote_cidr
+	m["tos"] = r.Tos
 
 	return m
 }
@@ -287,8 +296,8 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 
 			si, err := http_subnet_info( &request.Tenant, &request.Subnet ) 			// suss out subnet info to get host and cidr
 			if err != nil {
-				http_sheep.Baa( 1, "wa_post: couldn't dig subnet info: %s", err )
-				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "%s", err ) )
+				http_sheep.Baa( 1, "wa_port: couldn't dig subnet info: %s", err )
+				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_port/post: %s", err ) )
 				return
 			} 
 
@@ -324,11 +333,11 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 				} else {
 					http_sheep.Baa( 1, "wa_ports request failed: %s", msg.State )
 					state = http.StatusInternalServerError
-					data = fmt.Sprintf( "script failed: %s", msg.State )
+					data = fmt.Sprintf( "wa_port/post: script failed: %s", msg.State )
 				}
 			} else {
 				state = http.StatusInternalServerError
-				data = "missing or no response from agent"
+				data = "wa_port/post: missing or no response from agent"
 			}
 			//data = `{ "tenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "router": "de854701-7b80-4f31-a2e4-f4ad1a988627", "ip": "135.207.50.100" }` 
 
@@ -381,7 +390,7 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 
 			request.host, err = http_gw2phost( &request.Local_tenant, &request.Local_router )
 			if err != nil {
-				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "%s",  err ) )
+				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_tunnel/post: %s",  err ) )
 				return
 			}
 
@@ -400,11 +409,11 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 					}
 				} else {
 					state = http.StatusInternalServerError
-					data = fmt.Sprintf( "script failed: %s", msg.State )
+					data = fmt.Sprintf( "wa_tunnel/post: script failed: %s", msg.State )
 				}
 			} else {
 				state = http.StatusInternalServerError
-				data = "missing or no response from agent"
+				data = "wa_tunnel/post: missing or no response from agent"
 			}
 
 			//data = `{ "tenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "router": "de854701-7b80-4f31-a2e4-f4ad1a988627", "ip": "135.207.50.100", "cidr": "192.168.1.0/24", "bandwidth": "1000"}`
@@ -459,7 +468,7 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 			var err		error
 			request.host, err = http_gw2phost( &request.Local_tenant, &request.Local_router )
 			if err != nil {
-				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "%s", err ) )
+				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_route/post: %s", err ) )
 				return
 			}
 
@@ -475,11 +484,11 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 					data = ""
 				} else {
 					state = http.StatusInternalServerError
-					data = fmt.Sprintf( "script failed: %s",  msg.State )
+					data = fmt.Sprintf( "wa_route/post: script failed: %s",  msg.State )
 				}
 			} else {
 				state = http.StatusInternalServerError
-				data = "no response from agent"
+				data = "wa_tunnel/post: no response from agent"
 			}
 
 		default:
@@ -506,3 +515,73 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 	return
 }
 
+
+/*	Handle tegu/rest/connections  api calls.  
+*/
+func http_wa_conns( out http.ResponseWriter, in *http.Request ) {
+	var (
+		state	= http.StatusMethodNotAllowed
+		data	string
+	)
+
+	request := &wa_conns_req{}							// empty request for dig_data to fill
+
+	state, reason := wa_dig_data( in, request )
+	if state != http.StatusOK {
+		send_http_err( out, state, reason )
+		return
+	}
+
+	switch in.Method {
+		case "DELETE":
+			state = http.StatusCreated
+			var err		error
+			http_sheep.Baa( 1, "wa_ports received DELETE: ten=%s  router=%s wan=%s subnet=%s\n", request.Tenant, request.Router, request.Wan_uuid, request.Subnet )
+			my_ch := make( chan *ipc.Chmsg )								// channel for responses (osif and agent requests)
+
+			si, err := http_subnet_info( &request.Tenant, &request.Router ) 			// suss out subnet info to get host
+			if err != nil {
+				http_sheep.Baa( 1, "wa_conns: couldn't dig host info: ten=%s router=%s %s", request.Tenant, request.Router, err )
+				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_conns/del %s", err ) )
+				return
+			} 
+
+			request.host = si.phost
+			request.Token = *si.token				// must send our token in for admin privs
+
+			msg := ipc.Mk_chmsg( )
+			msg.Send_req( am_ch, my_ch, REQ_WA_DELCONN, request, nil )			// send request to agent and block 
+			msg = <- my_ch
+
+			if msg != nil {
+				if msg.State == nil {
+					state = http.StatusNoContent
+					data = ""
+				} else {
+					state = http.StatusInternalServerError
+					data = fmt.Sprintf( "swa_conns/del: cript failed: %s",  msg.State )
+				}
+			} else {
+				state = http.StatusInternalServerError
+				data = "wa_conns/del: no response from agent"
+			}
+
+		default:
+			http_sheep.Baa( 1, "http_wa_ports: called for unrecognised method: %s", in.Method )
+			data = fmt.Sprintf( "%s request method not supported", in.Method )
+			state = http.StatusMethodNotAllowed
+	}
+
+	if state > 299 { 
+		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
+		data = fmt.Sprintf( `{ "function": "wa_conns", "%s" "reason": %q }`, data )
+	} else {
+		out.Header().Set( "Content-Type", "application/json" ) 
+	}
+
+	out.WriteHeader( state )		
+
+	http_sheep.Baa( 1, "wa_port finished: %d: %s", state, data )
+	fmt.Fprintf( out, "%s", data )
+	return
+}

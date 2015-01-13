@@ -90,9 +90,10 @@ const (
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps	(osif)
 	REQ_GET_SNINFO				// request information about a subnet given a uuid (osif)
 	REQ_GW2PHOST				// given a gateway id return the physical host (osif)
-	REQ_WA_PORT					// agent wa_* requests	(agent manager)
-	REQ_WA_TUNNEL
-	REQ_WA_ROUTE
+	REQ_WA_PORT					// agent wa_* requests	(agent manager) add port
+	REQ_WA_TUNNEL				// create a tunnel
+	REQ_WA_ROUTE				// create a route
+	REQ_WA_DELCONN				// delete connection
 )
 
 const (

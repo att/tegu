@@ -54,6 +54,15 @@ func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_
 				route_data := pr.req.Req_data.( *wa_route_req )			// get the port request information (token, project, subnet )
 				parm_map = route_data.To_map()
 				host = *route_data.host
+
+			case "wa_del_conns":
+				conns_data := pr.req.Req_data.( *wa_conns_req )			// pull the data from the message
+				parm_map = conns_data.To_map()							// build a map to send to the agent
+				if parm_map["wan_uuid"] == "" {							// push in our default if it didn't come from request
+					parm_map["wan_uuid"] = *def_wan_uuid
+				}
+
+				host = *conns_data.host
 		}
 	}
 

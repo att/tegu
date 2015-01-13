@@ -41,7 +41,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.2/11135d"		// wide area support added
+	version		string = "v1.2/11135e"		// wide area support added
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
@@ -113,7 +113,7 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 	interface is with the caller (could be WACC, could be something different) and thus tegu is 
 	responsible for taking the raw stdout and putting it into a form that the requestor can digest.
 
-	Type is "wa_port", "wa_tunnel", or "wa_route"
+	Type is "wa_del_conn" "wa_port", "wa_tunnel", or "wa_route"
  */
 func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error ) {
     var (
@@ -135,6 +135,11 @@ func (act *json_action ) do_wa_cmd( cmd_type string ) ( jout []byte, err error )
 		case "wa_route":
 				cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANRoute %s %s %s %s`, 
 						ssh_cmd, ssh_opts, act.Hosts[0], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
+
+		case "wa_del_conn":
+				// per dave's script:  token wan-subnet-uuid router-or-subnet-uuid CIDR [tos]
+				cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/deleteWANConnection %s %s %s %s`, ssh_cmd, ssh_opts, 
+						act.Hosts[0],  parms["token"], parms["wan_uuid"], parms["router"], parms["remote_cidr"] )
 	}
 
 	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )
