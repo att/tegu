@@ -87,16 +87,22 @@ if(wanPort):
   
   # 1. grab the old route, we'll need the interface name.
   # produces ['10.7.0.0', 'dev', 'gre-90db5528-0d',  'src', '10.0.2.1']
-  wanRoute = subprocess.check_output(['/sbin/ip', 'netns', 'exec', routerNS,
+  tunnelIF = subprocess.check_output(['/sbin/ip', 'netns', 'exec', routerNS,
                                       '/sbin/ip', 'route', 'get', destCIDR,
-                                      'tos', tos]).splitlines()[0].split()
+                                      'tos', tos]).splitlines()[0].split()[2]
   # 2. grab the GRE interface IP, we'll need it to remove it from the port
   # produces ['link/gre', '10.254.2.2', 'peer', '10.254.1.1']
-  tunnelIF = subprocess.check_output(['/sbin/ip', 'netns', 'exec', routerNS,
+  tunnelIP = subprocess.check_output(['/sbin/ip', 'netns', 'exec', routerNS,
                                       '/sbin/ip', 'address', 'show',
-                                      wanRoute[2]]).splitlines()[1].split()
+                                      tunnelIF]).splitlines()[1].split()[1]
+  # ... and the port device name, so we can remove its address
+  # produces ['629:', 'qr-dc2c3783-84:', ...]
+  portIF = subprocess.check_output(['/sbin/ip', 'netns', 'exec', routerNS,
+                                    '/sbin/ip', 'address', 'show', 'to',
+                                    tunnelIP]).splitlines()[0].split()[1]
+  portIF = portIF.rstrip(':')
   if(len(filter(lambda ip:
-                  ip['ip_address'] == tunnelIF[1],
+                  ip['ip_address'] == tunnelIP,
                 wanPort['fixed_ips'])) < 1):
     # this is bogus, obviously: if we're being called to clean up after
     # a failed attempt to create the connection, which managed to create
@@ -108,20 +114,20 @@ if(wanPort):
   # 3. delete the route
   subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
                    '/sbin/ip', 'route', 'delete', destCIDR,
-                   'tos', tos, 'dev', wanRoute[2]])
+                   'tos', tos, 'dev', tunnelIF])
   # 4. delete the tunnel
   subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
-                   '/sbin/ip', 'tunnel', 'del', wanRoute[2]])
+                   '/sbin/ip', 'tunnel', 'del', tunnelIF])
   # 5. delete the IP, or the port if it's the last remaining address
   subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
-                   '/sbin/ip', 'address', 'del', tunnelIF[1]])
+                   '/sbin/ip', 'address', 'del', tunnelIP, 'dev', portIF])
   if(len(wanPort['fixed_ips']) > 1): 
     req.request('PUT',
                 portDetailsPath +'/'+ wanPort['id'] +'.json',
                 json.dumps({'port':
                               {'fixed_ips':
                                 filter(lambda ip:
-                                         ip['ip_address'] != tunnelIF[1],
+                                         ip['ip_address'] != tunnelIP,
                                          wanPort['fixed_ips'])
                               }
                            }),
