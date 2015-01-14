@@ -17,8 +17,6 @@ package managers
 
 import (
 	"encoding/json"
-	//"fmt"
-	//"os"
 
 	"codecloud.web.att.com/gopkgs/connman"
 )
@@ -55,7 +53,7 @@ func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_
 				parm_map = route_data.To_map()
 				host = *route_data.host
 
-			case "wa_del_conns":
+			case "wa_del_conn":
 				conns_data := pr.req.Req_data.( *wa_conns_req )			// pull the data from the message
 				parm_map = conns_data.To_map()							// build a map to send to the agent
 				if parm_map["wan_uuid"] == "" {							// push in our default if it didn't come from request
@@ -63,6 +61,9 @@ func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_
 				}
 
 				host = *conns_data.host
+
+			default:
+				am_sheep.Baa( 0, "WRN: send_wa_cmd didn't receognise the action type; %s", atype )
 		}
 	}
 

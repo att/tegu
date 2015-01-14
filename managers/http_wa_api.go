@@ -138,6 +138,7 @@ func (r *wa_conns_req) To_map( ) ( map[string]string ) {
 
 	m := make( map[string]string )
 	m["tenant"] = r.Tenant
+	m["token"] = r.Token
 	m["router"] = r.Router
 	m["subnet"] = r.Subnet
 	m["wan_uuid"] = r.Wan_uuid
@@ -534,14 +535,15 @@ func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 
 	switch in.Method {
 		case "DELETE":
-			state = http.StatusCreated
 			var err		error
+
+			state = http.StatusCreated
 			http_sheep.Baa( 1, "wa_ports received DELETE: ten=%s  router=%s wan=%s subnet=%s\n", request.Tenant, request.Router, request.Wan_uuid, request.Subnet )
 			my_ch := make( chan *ipc.Chmsg )								// channel for responses (osif and agent requests)
 
-			si, err := http_subnet_info( &request.Tenant, &request.Router ) 			// suss out subnet info to get host
+			si, err := http_subnet_info( &request.Tenant, &request.Subnet ) 			// suss out subnet info to get host
 			if err != nil {
-				http_sheep.Baa( 1, "wa_conns: couldn't dig host info: ten=%s router=%s %s", request.Tenant, request.Router, err )
+				http_sheep.Baa( 1, "wa_conns: couldn't dig host info: ten=%s subnet=%s %s", request.Tenant, request.Subnet, err )
 				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_conns/del %s", err ) )
 				return
 			} 
@@ -574,7 +576,7 @@ func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 
 	if state > 299 { 
 		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
-		data = fmt.Sprintf( `{ "function": "wa_conns", "%s" "reason": %q }`, data )
+		data = fmt.Sprintf( `{ "function": "wa_conns", "reason": %q }`, data )
 	} else {
 		out.Header().Set( "Content-Type", "application/json" ) 
 	}

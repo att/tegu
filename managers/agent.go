@@ -427,6 +427,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	type2name[REQ_WA_PORT] = "wa_port"					// command constants that get sent off to the agent
 	type2name[REQ_WA_TUNNEL] = "wa_tunnel"
 	type2name[REQ_WA_ROUTE]	= "wa_route"
+	type2name[REQ_WA_DELCONN] = "wa_del_conn"
 
 	am_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
 
@@ -479,7 +480,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
 	
-					case REQ_WA_PORT, REQ_WA_TUNNEL, REQ_WA_ROUTE:	// wa commands can be setup/sent by a common function
+					case REQ_WA_PORT, REQ_WA_TUNNEL, REQ_WA_ROUTE, REQ_WA_DELCONN:	// wa commands can be setup/sent by a common function
 						if req.Req_data != nil {
 							req_track[req_id] = &pend_req {			// tracked request to have block when response recevied from agent
 								req: req,
