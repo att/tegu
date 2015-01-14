@@ -16,7 +16,8 @@
 #	Date:		25 July 2014
 #	Author:		E. Scott Daniels
 #
-#	Mod:
+#	Mod:		14 Jan - added provision to reload that will search for an old style name (no host)
+#					if one with a host cannot be found.
 # --------------------------------------------------------------------------------------------------
 
 trap "rm -f /tmp/PID$$.*" 1 2 3 15 EXIT
@@ -158,8 +159,12 @@ else
 	ls -t $libd/chkpt_synch.*.*.tgz | head -1 |read synch_file
 	if [[ -z $synch_file ]]
 	then
-		echo "WRN: cannot find a synch file, no restore of synchronised data" >&2
-		exit 2
+		ls -t $libd/chkpt_synch.*.tgz | head -1 | read synch_file		# old style (no host name)
+		if [[ -z $synch_file ]]
+		then
+			echo "WRN: cannot find a synch file, no restore of synchronised data" >&2
+			exit 2
+		fi
 	fi
 
 	bfile=$libd/synch_backup.tgz		# we'll take a snapshot of what was there just to prevent some accidents
