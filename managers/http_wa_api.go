@@ -518,7 +518,7 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 
 /*	Handle tegu/rest/connections  api calls.  
 */
-func http_wa_conns( out http.ResponseWriter, in *http.Request ) {
+func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 	var (
 		state	= http.StatusMethodNotAllowed
 		data	string
