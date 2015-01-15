@@ -534,7 +534,7 @@ func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 	}
 
 	switch in.Method {
-		case "DELETE":
+		case "POST", "DELETE":					// WACC is not able to send a body with a delete request, so we handle a post too.
 			var err		error
 
 			state = http.StatusCreated

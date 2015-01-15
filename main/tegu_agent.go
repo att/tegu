@@ -1,4 +1,4 @@
-// vi: sw=4 ts=4:
+/*rm/ vi: sw=4 ts=4:
 
 /*
 
@@ -41,7 +41,7 @@ import (
 
 // globals
 var (
-	version		string = "v1.2/11135e"		// wide area support added
+	version		string = "v1.2/11136a"		// wide area support added
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
@@ -349,7 +349,7 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 			case "intermed_queues":							// run script to set up intermediate queues
 					do_intermedq(  req.Actions[i] )
 
-			case "wa_port", "wa_tunnel", "wa_route":				// execute one of the wa commands
+			case "wa_port", "wa_tunnel", "wa_route", "wa_del_conn":				// execute one of the wa commands
 					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype )
 					if err == nil {
 						resp[ridx] = p
