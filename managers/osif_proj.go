@@ -530,6 +530,12 @@ func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[stri
 	p *osif_project, rpid *string, creds *ostack.Ostack, err error ) {
 	orig := pid								// hold for error message if needed
 
+	if pid == nil {
+		osif_sheep.Baa( 1, "pid2data project id passed in was nil" )
+		err = fmt.Errorf( "%s missing project id" ) 
+		return
+	}
+
 	pname := id2pname[*pid]
 	if pname == nil {						// [0] should be an id, but allow for a name to be sent in
 		pname = pid
@@ -537,18 +543,36 @@ func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[stri
 	}
 
 	if pid == nil {
-		err = fmt.Errorf( "%s could not be mapped to a osif_project", *orig ) 
+		osif_sheep.Baa( 1, "pid2data project id passed in could not be mapped to a name, or name to project: %s", *orig )
+		if osif_sheep.Get_level( ) > 1 {
+			for k, v := range id2pname {
+				osif_sheep.Baa( 2, "id2pname[%s] == %s", k, *v )
+			}
+		}
+		err = fmt.Errorf( "%s could not be mapped to a project name", *orig ) 
 		return
 	}
 
 	p = os_projs[*pid]
 	if p == nil {
+		osif_sheep.Baa( 1, "pid2data project id could not be mapped to os_proj entry: %s", *orig )
+		if osif_sheep.Get_level( ) > 1 {
+			for k := range os_projs {
+				osif_sheep.Baa( 2, "os_proj[%s] exists", k )
+			}
+		}
 		err = fmt.Errorf( "%s could not be mapped to a osif_project", *orig ) 
 		return
 	}
 
 	creds = os_refs[*pname]
 	if creds == nil {
+		osif_sheep.Baa( 1, "pid2data project id could not be mapped to os_refs entry (creds): %s", *orig )
+		if osif_sheep.Get_level( ) > 1 {
+			for k, v := range os_refs {
+				osif_sheep.Baa( 2, "os_refs[%s] expired: %v", k, v.Is_expired() )
+			}
+		}
 		err = fmt.Errorf( "%s could not be mapped to a openstack credentials", *orig )
 		p = nil
 		return
