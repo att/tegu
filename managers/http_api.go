@@ -56,6 +56,7 @@
 				18 Nov 2014 : Changes to support lazy osif data fetching
 				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
 					an ip2mac map to be forced out to fqmgr.
+				16 Jan 2014 : Support port masks in flow-mods.
 */
 
 package managers
@@ -101,12 +102,12 @@ func mk_resname( ) ( string ) {
 	If the resulting host names match (project/host[:port]) then we return an error
 	as this isn't allowed. 
 */
-func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2 int, err error ) {
+func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, err error ) {
 	
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
-	p1 = 0
-	p2 = 0
+	p1 = &zero_string
+	p2 = &zero_string
 	
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host
@@ -121,7 +122,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2
 	tokens := strings.Split( h1x, ":" )
 	if len( tokens ) > 1 {
 		h1x = tokens[0]
-		p1 = clike.Atoi( tokens[1] )
+		p1 = &tokens[1]
 	}
 	
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
@@ -142,7 +143,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2
 	tokens = strings.Split( h2x, ":" )
 	if len( tokens ) > 1 {
 		h2x = tokens[0]
-		p2 = clike.Atoi( tokens[1] )
+		p2 = &tokens[1]
 	}
 
 	return

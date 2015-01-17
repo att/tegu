@@ -44,6 +44,8 @@
 				17 Nov 2014 : Updated to support lazy data collection from openstack -- must update host
 						information and push to network as we load from a checkpoint file.
 				19 Nov 2014 : correct bug in loading reservation path.
+				16 Jan 2014 : Allow mask on a tcp/udp port specification and to set priority a bit higher
+						when a transport port is specified.
 */
 
 package managers
@@ -225,7 +227,7 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 		pushed_count int = 0
 	)
 
-	rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
+	rm_sheep.Baa( 3, "pushing reservations, %d in cache", len( i.cache ) )
 	set_alt := false
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
@@ -254,7 +256,11 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 					for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
 						fmod := Mk_fqreq( &rname )						// default flow mod request with empty match/actions
 
-						fmod.Pri =	400									// override the defaults
+						if *p1 != "0" || *p2 != "0" {					// port oriented flow-mods get a slightly higher priority
+							fmod.Pri =	405								// override the defaults
+						} else {
+							fmod.Pri =	400								// no port specification, higher than most, but allow a match on port first
+						}
 						fmod.Cookie =	0xdead
 						fmod.Single_switch = false						// path involves multiple switches by default
 						fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
@@ -278,7 +284,7 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 
 														//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
 						tptype_list := "none"							// default to no specific protocol 
-						if p1 > 0 || p2 > 0 {							// if either port is specified, then we need to generate for both udp and tcp
+						if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
 							tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
 						}
 						tptype_toks := strings.Split( tptype_list, " " )
@@ -338,7 +344,7 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 		}
 	}
 
-	if push_count > 0 || rm_sheep.Would_baa( 2 ) {			// bleat if we pushed something, or if higher level is set in the sheep
+	if push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
 		rm_sheep.Baa( 1, "push_bw_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
 	}
 

@@ -15,6 +15,7 @@
 				09 Jan 2015 - No longer assume that the gateway list is limited by the project
 					that is valid in the creds.  At least some versions of Openstack were
 					throwing all gateways into the subnet list.
+				16 Jan 2014 : Support port masks in flow-mods.
 */
 
 package managers
@@ -187,7 +188,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 		}
 	
 
-		gwmap, _, _, _, err := creds.Mk_gwmaps( nil, nil, nil, nil, true, false )		
+		gwmap, _, _, _, _, _, err := creds.Mk_gwmaps( nil, nil, nil, nil, nil, nil, true, false )		
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", creds.To_str( ), err )
 			creds.Expire()					// force re-auth next go round

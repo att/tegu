@@ -33,6 +33,7 @@
 				14 Oct 2014 - Added check to prevent ip2mac table from being overlaid if new table is empty.
 				11 Nov 2014 - Added ability to append a suffix string to hostnames returned by openstack.
 				13 Nov 2014 - Corrected out of bounds range exception in add_phost_suffix (when given a string with a single blank)
+				16 Jan 2015 - Changes to allow transport port to cary a mask in addition to the port value.
 */
 
 package managers
@@ -305,12 +306,12 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		match_opts += " -d " + *dmac
 	}
 
-	if data.Match.Tpsport > 0 {
-		match_opts += fmt.Sprintf( " -p %s:%d", *data.Tptype, data.Match.Tpsport )
+	if *data.Match.Tpsport != "0" {
+		match_opts += fmt.Sprintf( " -p %s:%s", *data.Tptype, *data.Match.Tpsport )
 	}
 
-	if data.Match.Tpdport > 0 {
-		match_opts += fmt.Sprintf( " -P %s:%d", *data.Tptype, data.Match.Tpdport )
+	if *data.Match.Tpdport != "0" {
+		match_opts += fmt.Sprintf( " -P %s:%s", *data.Tptype, *data.Match.Tpdport )
 	}
 
 	if data.Extip != nil  &&   *data.Extip != "" {					// an external IP address must be matched in addition to gw mac
