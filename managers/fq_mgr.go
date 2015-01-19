@@ -34,6 +34,7 @@
 				11 Nov 2014 - Added ability to append a suffix string to hostnames returned by openstack.
 				13 Nov 2014 - Corrected out of bounds range exception in add_phost_suffix (when given a string with a single blank)
 				16 Jan 2015 - Changes to allow transport port to cary a mask in addition to the port value.
+				19 Jan 2015 - Limit the queue list to run only on hosts listed.
 */
 
 package managers
@@ -159,12 +160,13 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 */
 func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	var (
-		qjson	string			// final full json blob
-		qjson_pfx	string		// static prefix
+		qjson	string						// final full json blob
+		qjson_pfx	string					// static prefix
 		sep = ""
 	)
 
-	if phsuffix != nil {									// need to conert the host names in the list to have suffix
+	target_hosts := make( map[string]bool )					// hosts that are actually affected by the queue list
+	if phsuffix != nil {									// need to convert the host names in the list to have suffix
 		nql := make( []string, len( qlist ) )
 
 		for i := range qlist {
@@ -172,12 +174,21 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 			if len( toks ) == 2 {
 				nh := add_phost_suffix( &toks[0],  phsuffix )		// add the suffix
 				nql[i] = *nh + "/" +  toks[1]
+				target_hosts[*nh] = true
 			} else {
 				nql[i] = qlist[i]
+				fq_sheep.Baa( 1, "target host not snarfed: %s", qlist[i] )
 			}
 		}
 
 		qlist = nql
+	} else {												// just snarf the list of hosts affected
+		for i := range qlist {
+			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
+			if len( toks ) == 2 {
+				target_hosts[toks[0]] = true
+			}
+		}
 	}
 
 	fq_sheep.Baa( 1, "adjusting queues:  sending %d queue setting items to agents",  len( qlist ) );
@@ -192,14 +203,14 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 
 	qjson_pfx+= ` ], "hosts": [ `
 
-	hosts := strings.Split( *hlist, " " )
 	sep = ""
-	for i := range hosts {			// build one request per host and send to agents -- multiple ageents then these will fan out
-		qjson = qjson_pfx			// seed the next request with the constant prefix
-		qjson += fmt.Sprintf( "%s%q", sep, hosts[i] )
+	for h := range target_hosts {			// build one request per host and send to agents -- multiple ageents then these will fan out
+		qjson = qjson_pfx					// seed the next request with the constant prefix
+		qjson += fmt.Sprintf( "%s%q", sep, h )
 
 		qjson += ` ] } ] }`
 	
+		fq_sheep.Baa( 2, "queue update: host=%s %s", h, qjson )
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send this as a short request to one agent
 	}
