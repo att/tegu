@@ -18,7 +18,7 @@ import (
 )
 
 /*
-	Create a structure that is initialised such that the defaults to acciently cause
+	Create a structure that is initialised such that the default is to not actually cause
 	a match to be generated and forces output to none.
 */
 func Mk_fqreq( id *string )  ( np *Fq_req ) {

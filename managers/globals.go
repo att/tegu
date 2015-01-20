@@ -136,7 +136,7 @@ var (
 
 	tegu_sheep	*bleater.Bleater		// parent sheep that controls the 'master' bleating volume and is used by 'library' functions (allocated in init below)
 	net_sheep	*bleater.Bleater		// indivual sheep for each goroutine (each is responsible for allocating their own sheep)
-	am_sheep	*bleater.Bleater
+	am_sheep	*bleater.Bleater		// global so that all related functions have access to them
 	fq_sheep	*bleater.Bleater
 	osif_sheep	*bleater.Bleater
 	rm_sheep	*bleater.Bleater

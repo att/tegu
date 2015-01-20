@@ -394,7 +394,10 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-	if data.Swid == nil {											// blast the fmod to all named hosts if a single target is not named
+	//FIX-ME:  This check _should_ be based on Espq.Switch and not swid but need to confirm that nothing is sending 
+	//			with nil swid and something like br-int in Espq.Switch first.
+	// 			When this is changed, res_mgr will be affected in table_9x_fmods().
+	if data.Swid == nil {											// blast the fmod to all known hosts if a single target is not named
 		hosts := strings.Split( *hlist, " " )
 		for i := range hosts {
 			tmsg := ipc.Mk_chmsg( )									// must have one per since we dont wait for an ack
@@ -411,9 +414,8 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		if phsuffix != nil {											// we need to add the physical host suffix
 			sw_name = add_phost_suffix( sw_name, phsuffix ) 			// TODO: this needs to handle intermediate switches properly; ok for Q-lite, but not full
 		}
-		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s add 0x%x %s"`, 
-			*sw_name, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
-			//data.Espq.Switch, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
+		json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0x%x %s"`, 
+			*sw_name, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )				// Espq.Switch has real name (host) of switch
 		json += ` ] } ] }`
 		fq_sheep.Baa( 2, "json: %s", json )
 
