@@ -16,7 +16,8 @@
 #	Date:		25 July 2014
 #	Author:		E. Scott Daniels
 #
-#	Mod:
+#	Mod:		14 Jan - added provision to reload that will search for an old style name (no host)
+#					if one with a host cannot be found.
 # --------------------------------------------------------------------------------------------------
 
 trap "rm -f /tmp/PID$$.*" 1 2 3 15 EXIT
@@ -140,8 +141,9 @@ then
 
 	m=$( date +%M )						# current minutes
 	n=$(( (m/5) * 5 ))					# round current minutes to previous 5 min boundary
+	host=$( hostname )
 	tfile=/tmp/PID$$.chkpt.tgz			# local tar file
-	rfile=$libd/chkpt_synch.$n.tgz	# remote archive (we should save just 12 so no need for cleanup)
+	rfile=$libd/chkpt_synch.$host.$n.tgz	# remote archive (we should save just 12 so no need for cleanup)
 	tar -cf - chkpt |gzip >$tfile
 	
 	while read host
@@ -154,11 +156,15 @@ then
 		fi
 	done <$etcd/standby_list
 else
-	ls -t $libd/chkpt_synch.*.tgz | head -1 |read synch_file
+	ls -t $libd/chkpt_synch.*.*.tgz | head -1 |read synch_file
 	if [[ -z $synch_file ]]
 	then
-		echo "WRN: cannot find a synch file, no restore of synchronised data" >&2
-		exit 2
+		ls -t $libd/chkpt_synch.*.tgz | head -1 | read synch_file		# old style (no host name)
+		if [[ -z $synch_file ]]
+		then
+			echo "WRN: cannot find a synch file, no restore of synchronised data" >&2
+			exit 2
+		fi
 	fi
 
 	bfile=$libd/synch_backup.tgz		# we'll take a snapshot of what was there just to prevent some accidents

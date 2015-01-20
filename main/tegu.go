@@ -82,6 +82,9 @@
 							external reservation.
 				09 Jan 2015 : Augmented the 1/8 fix to not assume the subnet list is limited by project in the creds.
 							Changes to allow for finding all IP addresses assigned to a VM, not just the first.
+				16 Jan 2015 : Added support for mask on the transport port specification.
+							Changed meta table flow-mod generation to happen with queue changes and to push only to nodes
+							in the queue list rather than to all nodes.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu

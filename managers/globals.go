@@ -17,6 +17,7 @@
 				27 Aug 2014 - Added Fq_req support.
 				03 Sep 2014 - Added transport type field to fq_req struct.
 				05 Sep 2014 - Allow version, used in ping, to be set by main.
+				16 Jan 2014 : Support port masks in flow-mods.
 */
 
 package managers
@@ -115,6 +116,7 @@ var (
 
 	shell_cmd	string = "/bin/ksh"						// preferred shell, cfg can override in default section
 	empty_str	string = ""								// go prevents &"", so these make generating a pointer to default strings easier
+	zero_string	string = "0"
 	default_sdn	string = "localhost:8080"				// default controller (skoogi)
 	local_host	string = "localhost"
 
@@ -139,7 +141,7 @@ var (
 
 	tegu_sheep	*bleater.Bleater		// parent sheep that controls the 'master' bleating volume and is used by 'library' functions (allocated in init below)
 	net_sheep	*bleater.Bleater		// indivual sheep for each goroutine (each is responsible for allocating their own sheep)
-	am_sheep	*bleater.Bleater
+	am_sheep	*bleater.Bleater		// global so that all related functions have access to them
 	fq_sheep	*bleater.Bleater
 	osif_sheep	*bleater.Bleater
 	rm_sheep	*bleater.Bleater
@@ -180,8 +182,8 @@ type Subnet_info struct {
 type Fq_parms struct {
 	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
 	Ip2		*string
-	Tpsport	int					// transport layer source port
-	Tpdport int					// transport layer dest port
+	Tpsport	*string				// transport layer source port
+	Tpdport *string				// transport layer dest port
 	Swport	int					// the switch port 
 	Smac	*string				// source mac
 	Dmac	*string				// dest mac

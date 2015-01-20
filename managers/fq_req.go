@@ -7,6 +7,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		24 Sep 2014 : Added support for vlan id setting.
+				16 Jan 2014 : Support port masks in flow-mods.
 */
 
 package managers
@@ -17,7 +18,7 @@ import (
 )
 
 /*
-	Create a structure that is initialised such that the defaults to acciently cause
+	Create a structure that is initialised such that the default is to not actually cause
 	a match to be generated and forces output to none.
 */
 func Mk_fqreq( id *string )  ( np *Fq_req ) {
@@ -27,16 +28,16 @@ func Mk_fqreq( id *string )  ( np *Fq_req ) {
 	fq_match := &Fq_parms{
 		Swport:	-1,				// these defaults will not generate any match criteria
 		Dscp:	-1,
-		Tpsport: -1,
-		Tpdport: -1,
+		Tpsport: &zero_string,
+		Tpdport: &zero_string,
 	}
 
 	fq_action := &Fq_parms{		// these defaults will not generate any actions
 		Meta:	nil,	
 		Swport:	-1,
 		Dscp:	-1,
-		Tpsport: -1,
-		Tpdport: -1,
+		Tpsport: &zero_string,
+		Tpdport: &zero_string,
 	}
 		
 	np = &Fq_req {							// fq-mgr request data
