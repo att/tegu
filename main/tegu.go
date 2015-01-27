@@ -86,6 +86,7 @@
 							Changed meta table flow-mod generation to happen with queue changes and to push only to nodes
 							in the queue list rather than to all nodes.
 				26 Jan 2015 : Corrected bug in fq_mgr that was causing inbound data to use meta marking in base+1 rather than base table.
+				27 Jan 2015 : Allow bandwidth to be specified as a decimal (e.g 10.2M) on a reservation command.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -120,7 +121,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0.1/11265"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0.1/11275"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
