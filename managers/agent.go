@@ -334,7 +334,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		host_list string = ""
 		dscp_list string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
 		refresh int64 = 60
-		iqrefresh int64 = 900							// intermediate queue refresh
+		iqrefresh int64 = 1800							// intermediate queue refresh (this can take a long time, keep from clogging the works)
 	)
 
 	adata = &agent_data{}
@@ -378,6 +378,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	am_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
+	tklr.Add_spot( 10, ach, REQ_INTERMEDQ, nil, 1 );		  			// tickle once, very soon, to start an intermediate refresh asap
 	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping 
 	tklr.Add_spot( iqrefresh, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// reocurring tickle to ensure intermediate switches are properly set
 
