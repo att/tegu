@@ -85,6 +85,8 @@
 				16 Jan 2015 : Added support for mask on the transport port specification.
 							Changed meta table flow-mod generation to happen with queue changes and to push only to nodes
 							in the queue list rather than to all nodes.
+				26 Jan 2015 : Corrected bug in fq_mgr that was causing inbound data to use meta marking in base+1 rather than base table.
+				27 Jan 2015 : Allow bandwidth to be specified as a decimal (e.g 10.2M) on a reservation command.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu

@@ -35,6 +35,8 @@
 				13 Nov 2014 - Corrected out of bounds range exception in add_phost_suffix (when given a string with a single blank)
 				16 Jan 2015 - Changes to allow transport port to cary a mask in addition to the port value.
 				19 Jan 2015 - Limit the queue list to run only on hosts listed.
+				26 Jan 2015 - Corrected table number problem -- outbound data should resub through the base+1 table, but inbound
+					packets should resub through the base table, not base+1.
 */
 
 package managers
@@ -609,10 +611,10 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 						resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
-						if cdata.Single_switch {
+						if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
 							resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
 						} else {
-							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for traffic going through the rate limiting bridge
+							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
 						}
 						cdata.Resub = &resub_list
 				

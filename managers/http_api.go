@@ -58,6 +58,7 @@
 					an ip2mac map to be forced out to fqmgr.
 				05 Jan 2015 : Added support for wide area rest interface calls.
 				16 Jan 2014 : Support port masks in flow-mods.
+				27 Jan 2014 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
 */
 
 package managers
@@ -598,10 +599,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
 							subtokens := strings.Split( *tmap["bandw"], "," )
-							bandw_in = clike.Atoll( subtokens[0] )
-							bandw_out = clike.Atoll( subtokens[1] )
+							bandw_in = int64( clike.Atof( subtokens[0] ) )
+							bandw_out = int64( clike.Atof( subtokens[1] ) )
 						} else {
-							bandw_in = clike.Atoll( *tmap["bandw"] )				// no comma, so single value applied to each
+							bandw_in = int64( clike.Atof( *tmap["bandw"] ) )		// no comma, so single value applied to each
 							bandw_out = bandw_in
 						}
 
