@@ -40,6 +40,7 @@ package managers
 import (
 	//"bufio"
 	//"errors"
+	"encoding/json"
 	"fmt"
 	//"io"
 	"math/rand"
@@ -380,20 +381,64 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 	action_opts = fmt.Sprintf( "%s %s", action_opts, output )		// set up actions
 
-	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+	// ---- end building the fmod parms, now build an agent message and send it to agent manager to send -------------
+	//base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
 	if data.Swid == nil {											// blast the fmod to all named hosts if a single target is not named
 		hosts := strings.Split( *hlist, " " )
 		for i := range hosts {
 			tmsg := ipc.Mk_chmsg( )									// must have one per since we dont wait for an ack
 
-			json := base_json
+		//	json := base_json
+//.....
+	
+			msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
+			msg.Actions = make( []action, 1 )
+			msg.Actions[0].Atype = "flowmod"
+			msg.Actions[0].Hosts = make( []string, 1 )
+			msg.Actions[0].Hosts[0] = hosts[i]
+			msg.Actions[0].Fdata = make( []string, 1 )
+			msg.Actions[0].Fdata[0] = fmt.Sprintf( `"%s -t %d -p %d %s %s add 0x%x %s"`, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
+
+			json, err := json.Marshal( msg )			// bundle into a json string
+			if err != nil {
+				fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+			} else {
+				fq_sheep.Baa( 2, "json: %s", json )
+				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+			}
+//.....
+
+/*
 			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0x%x %s"`, hosts[i], table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
 			json += ` ] } ] }`
 			fq_sheep.Baa( 2, "json: %s", json )
 			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+*/
 		}
 	} else {															// fmod goes only to the named switch
+		sw_name := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
+		if phsuffix != nil {											// we need to add the physical host suffix
+			sw_name = add_phost_suffix( sw_name, phsuffix ) 			// TODO: this needs to handle intermediate switches properly; ok for Q-lite, but not full
+		}
+	
+		msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
+		msg.Actions = make( []action, 1 )
+		msg.Actions[0].Atype = "flowmod"
+		msg.Actions[0].Hosts = make( []string, 1 )
+		msg.Actions[0].Hosts[0] = *sw_name
+		msg.Actions[0].Fdata = make( []string, 1 )
+		msg.Actions[0].Fdata[0] = fmt.Sprintf( `"-t %d -p %d %s %s add 0x%x %s"`, *sw_name, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	
+		json, err := json.Marshal( msg )						// bundle into a json string
+		if err != nil {
+			fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+		} else {
+			fq_sheep.Baa( 2, "json: %s", json )
+			tmsg := ipc.Mk_chmsg( )
+			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+		}
+
+/*
 		json := base_json
 		sw_name := &data.Espq.Switch 
 		if phsuffix != nil {											// we need to add the physical host suffix
@@ -407,6 +452,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+*/
 	}
 }
 

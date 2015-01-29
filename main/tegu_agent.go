@@ -14,38 +14,34 @@
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
+				14 Jan 2014 : Added ssh-broker support. (bump to 2.0)
 */
 
 package main
 
 import (
-	//"bufio"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
 	"math/rand"
-	//"net/http"
 	"os"
-	//"os/exec"
-	"strings"
-	//"sync"
 	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
 	"codecloud.web.att.com/gopkgs/extcmd"
 	"codecloud.web.att.com/gopkgs/connman"
 	"codecloud.web.att.com/gopkgs/jsontools"
+	"codecloud.web.att.com/gopkgs/ssh_broker"
+	"codecloud.web.att.com/gopkgs/token"
 
 	//"codecloud.web.att.com/gopkgs/clike"
-	//"codecloud.web.att.com/gopkgs/token"
 	//"codecloud.web.att.com/gopkgs/ipc"
 )
 
 // globals
 var (
-	version		string = "v1.1/11095"
+	version		string = "v2.0/11295"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 )
@@ -106,28 +102,109 @@ func connect2tegu( smgr *connman.Cmgr, host_port *string, data_chan chan *connma
 	}
 }
 
+
+/*
+	Dumps the bytes buffer a line at a time to our real stdout device.
+*/
+func dump_stderr( stderr bytes.Buffer, prefix string ) {
+		for {												// read until the first error which we assume is io.EOF
+			line, err := stderr.ReadBytes( '\n' )
+			if err == nil {
+				sheep.Baa( 0, "%s stderr:  %s", prefix, bytes.TrimRight( line, "\n" ) )
+			} else {
+				return
+			}
+		}
+
+	return
+}
+
+/*
+	Accept an array and a bytes buffer; save the newline separated records in buf into the array starting at 
+	the index (sidx). Returns the index
+*/
+func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
+		idx = sidx
+		for {												// read until the first error which we assume is io.EOF
+			line, err := buf.ReadBytes( '\n' )
+			if err == nil {
+				if idx < len( a ) {
+					a[idx] = string( line )
+					idx++
+				}
+			} else {
+				return
+			}
+		}
+
+	return
+}
+
 // --------------- request support (command execution) ----------------------------------------------------------
 
 /*
-	Generate a map that lists physical host and mac addresses.
-	
+	Generate a map that lists physical host and mac addresses. Timeout is the max number of 
+	seconds that we will wait for all responses.  If timeout seconds passes before all 
+	responses are received we will return what we have.
 */
-func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
+func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
     var (
 		cmd_str string  
     )
 
-	cmd_str = strings.Join( req.Hosts, " " )
-	cmd_str = "map_mac2phost " + cmd_str
+	//cmd_str = strings.Join( req.Hosts, " " )
+	//cmd_str = "map_mac2phost " + cmd_str
 
-	msg := agent_msg{}
+	ssh_rch := make( chan *ssh_broker.Broker_msg )		// channel for ssh results
+	//defer ssh_rch.Close()
+	wait4 := 0											// number of responses to wait for
+	for k, v := range req.Hosts {						// submit them all out non-blocking
+		cmd_str = fmt.Sprintf( "PATH=%s:$PATH map_mac2phost -p %s localhost", *path, v )		
+		err := broker.NBRun_cmd( req.Hosts[k], cmd_str, wait4, ssh_rch )
+		if err != nil {
+			sheep.Baa( 1, "WRN: error submitting map_mac2phost command on %s", v )
+		} else {
+			wait4++
+		}
+	}
+
+	msg := agent_msg{}									// message to return
 	msg.Ctype = "response"
 	msg.Rtype = "map_mac2phost"
 	msg.Vinfo = version
 	msg.State = 0
-	msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
+
+	rdata := make( []string, 8192 )		// might need to revisit this limit
+	ridx := 0
+
+	sheep.Baa( 1, " map_mac2phost: waiting for %d responses", wait4 )
+	timer_pop := false						// indicates a timeout for loop exit
+	for wait4 > 0 && !timer_pop {			// wait for responses back on the channel or the timer to pop
+		select {
+			case <- time.After( timeout * time.Second ):		// timeout after 15 seconds
+				sheep.Baa( 1, "WRN: timeout waiting for mac2phost responses; %d replies not received", wait4 )
+				timer_pop = true
+
+			case resp := <- ssh_rch:					// response from broker
+				wait4--
+				sheep.Baa( 1, " map_mac2phost: received response, continue to wait for %d more responses", wait4 )
+				stdout, stderr, err := resp.Get_results()
+				host, _, _ := resp.Get_info()
+				if err != nil {
+					sheep.Baa( 1, "WRN: error running map_mac2phost command on %s", host )
+				} else {
+					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
+				}
+				dump_stderr( stderr, "map_mac2phost" + host )			// always dump stderr
+		}
+	}
+
+	msg.Rdata = rdata[0:ridx]										// return just what was filled in
+
+	//msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
 	sheep.Baa( 1, "map_mac2phost completed: respone data had %d elements", len( msg.Rdata ) )
 
+/*
 	if err != nil {
 		msg.State = 1
 		sheep.Baa( 0, "ERR: unable to execute: %s: %s	[TGUAGN000]", cmd_str, err )
@@ -136,6 +213,7 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 		}
 		jout = nil
 	}
+*/
 
 	jout, err = json.Marshal( msg )
 	return
@@ -144,15 +222,15 @@ func do_map_mac2phost( req json_action ) ( jout []byte, err error ) {
 /*
 	Executes the setup_ovs_intermed script on each host listed.
 */
-func do_intermedq( req json_action ) {
+func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string ) {
 
-	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts" )
+	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts (broker)" )
 
 	for i := range req.Hosts {
-		cmd_str := fmt.Sprintf( `setup_ovs_intermed -h %s -d "%s"`, req.Hosts[i], req.Dscps )
+		cmd_str := fmt.Sprintf( `PATH=%s:$PATH setup_ovs_intermed -d "%s"`, *path, req.Dscps )
+    	sheep.Baa( 1, "executing via broker on %s: %s", req.Hosts[i], cmd_str )
 
-    	sheep.Baa( 2, "executing: %s", cmd_str )
-
+		/* --- original ----
 		_, edata, err := extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a set of strings
 		if err != nil {
 			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s	[TGUAGN001]", err )
@@ -162,6 +240,25 @@ func do_intermedq( req json_action ) {
 		for i := range edata {
 			sheep.Baa( 0, "set-intermed stderr:  %s", edata[i] )
 		}
+		*/
+
+		_, stderr, err := broker.Run_cmd( req.Hosts[i], cmd_str )
+		if err != nil {
+			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s	[TGUAGN001]", err )
+		} else {
+        	sheep.Baa( 2, "queues adjusted succesfully on host: %s ", req.Hosts[i] )
+		}
+		dump_stderr( *stderr, "set-intermed" )
+/*
+		for {
+			line, err := stderr.ReadBytes( '\n' )
+			if err == nil {
+				sheep.Baa( 0, "set-intermed stderr:  %s", bytes.TrimRight( line, "\n" ) )
+			} else {
+				break
+			}
+		}
+*/
 	}
 }
 
@@ -214,12 +311,14 @@ func do_setqueues( req json_action ) {
 	to be executed.   We must build the command by hand because the Command() function
 	doesn't properly handle quotes. 
 */
-func do_fmod( req json_action ) ( err error ){
+func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err error ){
 
 	for i := range req.Fdata {
-		cstr := fmt.Sprintf( "%s send_ovs_fmod %s", shell_cmd, req.Fdata[i] )
-    	sheep.Baa( 1, "executing: %s", cstr )
+		//cstr := fmt.Sprintf( "%s send_ovs_fmod %s", shell_cmd, req.Fdata[i] )
+		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod -n %s`, *path, req.Fdata[i] )		// TESTING -- no-exec (-n)  is for testing
+    	sheep.Baa( 1, "executing via broker on %s: %s", req.Hosts[0], cstr )
 
+/* --- original
 		_, edata, err := extcmd.Cmd2strings( cstr )
 		if err != nil {
 			sheep.Baa( 0, "ERR: send fmod failed: %s	[TGUAGN005]", err )
@@ -228,6 +327,22 @@ func do_fmod( req json_action ) ( err error ){
 		}
 		for i := range edata {
 			sheep.Baa( 1, "fmod stderr:  %s", edata[i] )
+		}
+
+*/
+		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )				// there is only one host ever for flow-mods
+		if err != nil {
+			sheep.Baa( 0, "ERR: send fmod failed: %s	[TGUAGN005]", err )
+		} else {
+        	sheep.Baa( 2, "fmod succesfully sent: %s", cstr )
+		}
+		for {
+			line, err := stderr.ReadBytes( '\n' )
+			if err == nil {
+				sheep.Baa( 0, "send_fmod stderr:  %s", bytes.TrimRight( line, "\n" ) )
+			} else {
+				break
+			}
 		}
 	}
 
@@ -243,7 +358,7 @@ func do_fmod( req json_action ) ( err error ){
 	Returns a list of responses that should be written back to tegu, or nil if none of the 
 	requests produced responses.
 */
-func handle_blob( jblob []byte ) ( resp [][]byte ) {
+func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp [][]byte ) {
 	var (
 		req	json_request		// unpacked request struct
 		ridx int = 0
@@ -254,6 +369,7 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
     err := json.Unmarshal( jblob, &req )           // unpack the json 
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to unpack request: %s	[TGUAGN006]", err )
+		sheep.Baa( 0, "got: %s", jblob )
 		return
 	}
 
@@ -268,17 +384,17 @@ func handle_blob( jblob []byte ) ( resp [][]byte ) {
 					do_setqueues( req.Actions[i] )
 
 			case "flowmod":									// set a flow mod
-					do_fmod( req.Actions[i] )
+					do_fmod( req.Actions[i], broker, path )
 
 			case "map_mac2phost":							// run script to generate mac to physical host mappings 
-					p, err := do_map_mac2phost( req.Actions[i] )
+					p, err := do_map_mac2phost( req.Actions[i], broker, path, 15 )
 					if err == nil {
 						resp[ridx] = p
 						ridx++
 					}
 
 			case "intermed_queues":							// run script to set up intermediate queues
-					do_intermedq(  req.Actions[i] )
+					do_intermedq(  req.Actions[i], broker, path )
 
 			default:
 				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
@@ -301,14 +417,33 @@ func usage( version string ) {
 }
 
 func main() {
-	var (
-		//jc			*jsontools.Jsoncache		// where we stash input until a complete blob is read
-	)
+
+	home := os.Getenv( "HOME" )
+	def_user := os.Getenv( "LOGNAME" )
+	def_rdir := "/tmp/tegu/b"					// rsync directory created on remote hosts
+	def_rlist := 								// list of scripts to copy to remote hosts for execution
+			"/usr/bin/send_ovs_fmod " +
+			"/usr/bin/ovs_sp2uuid " +
+			"/usr/bin/setup_ovs_intermed " +
+			"/usr/bin/create_ovs_queues " +
+			"/usr/bin/map_mac2phost " +
+			"/usr/bin/ql_setup_irl.ksh "
+
+	if home == "" {
+		home = "/home/tegu"					// probably bogus, but we'll have something
+	}
+	def_key := home + "/.ssh/id_rsa," + home + "/.ssh/id_dsa"		// default ssh key to use
 
 	needs_help := flag.Bool( "?", false, "show usage" )
+	//env_file := flag.String( "e", "", "environment file" )
 	id := 		flag.Int( "i", 0, "id" )
+	key_files :=	flag.String( "k", def_key, "ssh-key file(s) for broker" )
 	log_dir :=	flag.String( "l", "stderr", "log_dir" )
+	no_rsync := flag.Bool( "no-rsync", false, "turn off rsync" )
+	rdir := flag.String( "rdir", def_rdir, "rsync remote directory" )
+	rlist := flag.String( "rlist", def_rlist, "rsync file list" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
+	user	:=  flag.String( "u", def_user, "ssh user-name" )
 	verbose :=	flag.Bool( "v", false, "verbose" )
 	vlevel :=	flag.Int( "V", 1, "verbose-level" )
 	flag.Parse()									// actually parse the commandline
@@ -323,7 +458,7 @@ func main() {
 		os.Exit( 1 )
 	}
 
-	sheep = bleater.Mk_bleater( 1, os.Stderr )
+	sheep = bleater.Mk_bleater( 0, os.Stderr )
 	sheep.Set_prefix( fmt.Sprintf( "agent-%d", *id ) )		// append the pid so that if multiple agents are running they'll use different log files
 
 	if *needs_help {
@@ -355,6 +490,27 @@ func main() {
 	
 	connect2tegu( smgr, tegu_host, sess_mgr )				// establish initial connection 
 
+	ntoks, key_toks := token.Tokenise_populated( *key_files, " ," )		// allow space or , seps and drop nil tokens
+	if ntoks <= 0 {
+		sheep.Baa( 0, "CRI: no ssh key files given (-k)" )
+		os.Exit( 1 )
+	}
+	keys := make( []string, ntoks )
+	for i := range key_toks  {
+		keys[i] = key_toks[i]
+	}
+	broker := ssh_broker.Mk_broker( *user,  keys )
+	if broker == nil {
+		sheep.Baa( 0, "CRI: unable to create an ssh broker" )
+		os.Exit( 1 )
+	}
+	if ! *no_rsync {
+		sheep.Baa( 1, "will sync these files to remote hosts: %s", *rlist )
+		broker.Add_rsync( rlist, rdir )
+	}
+	sheep.Baa( 1, "successfully created ssh_broker for user: %s, command path: %s", *user, *rdir )
+
+
 	for {
 		select {									// wait on input from any channel -- just one now, but who knows
 			case sreq := <- sess_mgr:				// data from the network
@@ -373,7 +529,7 @@ func main() {
 						jc.Add_bytes( sreq.Buf )
 						jblob := jc.Get_blob()		// get next blob if ready
 						for ; jblob != nil ; {
-							resp := handle_blob( jblob )
+							resp := handle_blob( jblob, broker, rdir )
 							if resp != nil {
 								for i := range resp {
 									smgr.Write( sreq.Id, resp[i] )

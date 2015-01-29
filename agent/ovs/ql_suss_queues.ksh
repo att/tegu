@@ -12,6 +12,7 @@
 #				08 Sep 2014 - Ported from the original quick and dirty script (suss_ovs_queues) to make
 #					it usable by the tegu agents in a q-lite environment.
 #				10 Nov 2014 - Added connect timeout to ssh calls
+#				28 Jan 2015 - Changes to eliminate uneeded ssh call if -h parm is for this host or localhost
 # -----------------------------------------------------------------------------------------------------------------
 
 
@@ -21,7 +22,6 @@ then
 fi
 
 ssh_opts="-o ConnectTimeout=2 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
-rhost=""
 ssh=""						# if -h given, this gets populated with the ssh command needed to run this on the remote
 
 backlevel_ovs=0					# assume modren ovs (1.10+)
@@ -34,8 +34,11 @@ do
 	case $1 in 
 		-b)	backlevel_ovs=1;;
 		-B)	show_headers=0; bridge=$2; shift;;
-		-h)	rhost="-h $2"
-			ssh="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+		-h)	
+			if [[ $2 != $(hostname)  && $2 != "localhost" ]]
+			then
+				ssh="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+			fi
 			shift
 			;;
 

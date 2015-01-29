@@ -187,7 +187,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 		}
 	
 
-		gwmap, _, _, _, err := creds.Mk_gwmaps( nil, nil, nil, nil, true, false )		
+		gwmap, _, _, _, _, _, err := creds.Mk_gwmaps( nil, nil, nil, nil, nil, nil, true, false )		
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", creds.To_str( ), err )
 			creds.Expire()					// force re-auth next go round

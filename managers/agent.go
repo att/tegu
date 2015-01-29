@@ -48,6 +48,7 @@ type action struct {			// specific action
 	Atype	string				// something like map_mac2phost, or intermed_queues
 	Hosts	[]string			// list of hosts to apply the action to
 	Dscps	string				// space separated list of dscp values
+	Fdata	[]string			// flowmod command data
 }
 
 type agent_cmd struct {			// overall command

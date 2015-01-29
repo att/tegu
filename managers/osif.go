@@ -66,6 +66,7 @@
 						to use a list of active (up) hosts rather than every host known to 
 						openstack.
 				05 Dec 2014 - Added work round for AIC admin issue after they flipped to LDAP.
+				16 Jan 2014 : Support port masks in flow-mods.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
