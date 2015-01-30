@@ -132,7 +132,7 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 			line, err := buf.ReadBytes( '\n' )
 			if err == nil {
 				if idx < len( a ) {
-					a[idx] = string( line )
+					a[idx] = string( line[0:len( line )-1] )	// remove trailing newline
 					idx++
 				}
 			} else {
@@ -158,6 +158,8 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 		cmd_str string  
     )
 
+	startt := time.Now().Unix()
+
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
 	//defer ssh_rch.Close()
 	wait4 := 0											// number of responses to wait for
@@ -182,6 +184,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 
 	sheep.Baa( 1, "map_mac2phost: waiting for %d responses", wait4 )
 	timer_pop := false						// indicates a timeout for loop exit
+	errcount := 0
 	for wait4 > 0 && !timer_pop {			// wait for responses back on the channel or the timer to pop
 		select {
 			case <- time.After( timeout * time.Second ):		// timeout after 15 seconds
@@ -190,11 +193,12 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 
 			case resp := <- ssh_rch:					// response from broker
 				wait4--
-				stdout, stderr, err := resp.Get_results()
+				stdout, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "map_mac2phost: received response from %s err=%v, waiting for %d more", host, err != nil, wait4 )
+				sheep.Baa( 1, "map_mac2phost: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
 					sheep.Baa( 1, "WRN: error running map_mac2phost command on %s", host )
+					errcount++
 				} else {
 					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
 				}
@@ -205,7 +209,8 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	}
 
 	msg.Rdata = rdata[0:ridx]										// return just what was filled in
-	sheep.Baa( 1, "map_mac2phost completed: respone data had %d elements", len( msg.Rdata ) )
+	endt := time.Now().Unix()
+	sheep.Baa( 1, "map-mac2phost: timeout=%v %ds elapsed for %d hosts %d errors %d elements", timer_pop, endt - startt, len( req.Hosts ), errcount, len( msg.Rdata ) )
 
 	jout, err = json.Marshal( msg )
 	return
@@ -219,6 +224,8 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	as the broker writes the response back on the channel.
 */
 func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
+
+	startt := time.Now().Unix()
 
 	running_sim = true										// prevent queuing another of these
 	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts (broker)" )
@@ -247,9 +254,9 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 
 			case resp := <- ssh_rch:							// response back from the broker
 				wait4--
-				_, stderr, err := resp.Get_results()
+				_, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "setup-intermed: received response from %s err=%v, waiting for %d more", host, err != nil, wait4 )
+				sheep.Baa( 1, "setup-intermed: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
 					sheep.Baa( 1, "WRN: error running setup-intermed queue command on %s", host )
 					errcount++
@@ -260,7 +267,8 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 		}
 	}
 
-	sheep.Baa( 1, "setup-intermed: completed with %d errors", errcount )
+	endt := time.Now().Unix()
+	sheep.Baa( 1, "setup-intermed: timeout=%v %ds elapsed for %d hosts %d errors", timer_pop, endt - startt, len( req.Hosts ), errcount )
 	running_sim = false
 }
 
@@ -275,56 +283,15 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 
 	We'll use the brokers 'send script for execution' feature rather to execute our script. 
 */
-/*
-func do_setqueues( req json_action ) {
-    var (
-        err error
-    )
-
-    fname := fmt.Sprintf( "/tmp/tegu_setq_%d_%x_%02d.data", os.Getpid(), time.Now().Unix(), rand.Intn( 10 ) )
-    sheep.Baa( 2, "adjusting queues: creating %s will contain %d items", fname, len( req.Qdata ) );
-
-    f, err := os.Create( fname )
-    if err != nil {
-        sheep.Baa( 0, "ERR: unable to create data file: %s: %s	[TGUAGN002]", fname, err )
-        return
-    }
-
-    for i := range req.Qdata {
-        sheep.Baa( 2, "writing queue info: %s", req.Qdata[i] )
-        fmt.Fprintf( f, "%s\n", req.Qdata[i] )
-    }
-
-    err = f.Close( )
-    if err != nil {
-        sheep.Baa( 0, "ERR: unable to create data file (close): %s: %s	[TGUAGN003]", fname, err )
-        return
-    }
-
-	for i := range req.Hosts {
-		cmd_str := fmt.Sprintf( `%s create_ovs_queues -h %s %s`, shell_cmd, req.Hosts[i], fname )
-    	sheep.Baa( 1, "executing: %s", cmd_str )
-
-		_, edata, err := extcmd.Cmd2strings( cmd_str ) 										// execute command and package output as a set of strings
-    	if err != nil  {
-        	sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", req.Hosts[i], fname, err )
-    	} else {
-        	sheep.Baa( 1, "queues adjusted succesfully on: %s", req.Hosts[i] )
-    	}
-		for i := range edata {																// always put out stderr
-			sheep.Baa( 0, "create queues stderr:  %s", edata[i] )
-		}
-	}
-}
-*/
-
 func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
     var (
         err error
     )
 
+	startt := time.Now().Unix()
+
     fname := fmt.Sprintf( "/tmp/tegu_setq_%d_%x_%02d.data", os.Getpid(), time.Now().Unix(), rand.Intn( 10 ) )
-    sheep.Baa( 2, "adjusting queues: creating %s will contain %d items", fname, len( req.Qdata ) );
+    sheep.Baa( 3, "adjusting queues: creating %s will contain %d items", fname, len( req.Qdata ) );
 
     f, err := os.Create( fname )
     if err != nil {
@@ -334,7 +301,7 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 
 	fmt.Fprintf( f, "#!/usr/bin/env ksh\ncat <<endKat | PATH=%s:$PATH create_ovs_queues\n", *path )
     for i := range req.Qdata {
-        sheep.Baa( 2, "writing queue info: %s", req.Qdata[i] )
+        sheep.Baa( 3, "writing queue info: %s", req.Qdata[i] )
         fmt.Fprintf( f, "%s\n", req.Qdata[i] )
     }
 	fmt.Fprintf( f, "endKat\n" )
@@ -368,9 +335,9 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 
 			case resp := <- ssh_rch:							// response back from the broker
 				wait4--
-				_, stderr, err := resp.Get_results()
+				_, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "create-q: received response from %s err=%v, waiting for %d more", host, err != nil, wait4 )
+				sheep.Baa( 1, "create-q: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
         			sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", host, fname, err )
 					errcount++
@@ -383,9 +350,15 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 		}
 	}
 
-	if errcount == 0 {
-		sheep.Baa( 1, "would delete file: %s", fname )
+	endt := time.Now().Unix()
+	sheep.Baa( 1, "create-q: timeout=%v %ds elapsed %d hosts %d errors", timer_pop, endt - startt, len( req.Hosts ), errcount )
+
+	if errcount == 0 {							// ditch the script we built earlier if all successful
+		os.Remove( fname )
+	} else {
+		sheep.Baa( 1, "create-q: %d errors, generated script file kept: %s", fname )
 	}
+	
 }
 
 /*
@@ -394,13 +367,17 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 */
 func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err error ){
 
+	startt := time.Now().Unix()
+
+	errcount := 0
 	for i := range req.Fdata {
 		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[i] )
     	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
 
-		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )				// there is only one host ever for flow-mods
+		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )				// there is at most only one host when sending fmods
 		if err != nil {
-			sheep.Baa( 0, "ERR: send fmod failed: %s	[TGUAGN005]", err )
+			sheep.Baa( 0, "ERR: send fmod failed host=%s: %s	[TGUAGN005]", req.Hosts[0], err )
+			errcount++
 		} else {
         	sheep.Baa( 2, "fmod succesfully sent: %s", cstr )
 		}
@@ -413,6 +390,9 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err e
 			}
 		}
 	}
+
+	endt := time.Now().Unix()
+	sheep.Baa( 1, "fmod: %ds elapsed %d fmods %d errors", endt - startt, len( req.Fdata ),  errcount )
 
 	return
 }
@@ -462,8 +442,8 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					}
 
 			case "intermed_queues":													// setup intermediate queues
-					if ! running_sim {
-						go do_intermedq(  req.Actions[i], broker, path, 60 )		// this can run asynch since there isn't any output
+					if ! running_sim {												// it's not good to start overlapping setup scripts
+						go do_intermedq(  req.Actions[i], broker, path, 3600 )		// this can run asynch since there isn't any output
 					} else {
 						sheep.Baa( 1, "handle blob: setqueues still running, not restarted" )
 					}
@@ -492,33 +472,33 @@ func main() {
 
 	home := os.Getenv( "HOME" )
 	def_user := os.Getenv( "LOGNAME" )
-	def_rdir := "/tmp/tegu/b"					// rsync directory created on remote hosts
+	def_rdir := "/tmp/tegu_b"					// rsync directory created on remote hosts
 	def_rlist := 								// list of scripts to copy to remote hosts for execution
-			"/usr/bin/send_ovs_fmod " +
-			"/usr/bin/ovs_sp2uuid " +
-			"/usr/bin/setup_ovs_intermed " +
 			"/usr/bin/create_ovs_queues " +
 			"/usr/bin/map_mac2phost " +
-			"/usr/bin/ql_setup_irl.ksh "
+			"/usr/bin/ovs_sp2uuid " +
+			"/usr/bin/purge_ovs_queues " +
+			"/usr/bin/ql_setup_irl.ksh " +
+			"/usr/bin/send_ovs_fmod " +
+			"/usr/bin/setup_ovs_intermed "
 
 	if home == "" {
 		home = "/home/tegu"					// probably bogus, but we'll have something
 	}
 	def_key := home + "/.ssh/id_rsa," + home + "/.ssh/id_dsa"		// default ssh key to use
 
-	needs_help := flag.Bool( "?", false, "show usage" )
-	//env_file := flag.String( "e", "", "environment file" )
-	id := 		flag.Int( "i", 0, "id" )
-	key_files :=	flag.String( "k", def_key, "ssh-key file(s) for broker" )
-	log_dir :=	flag.String( "l", "stderr", "log_dir" )
+	needs_help := flag.Bool( "?", false, "show usage" )				// define recognised command line options
+	id := flag.Int( "i", 0, "id" )
+	key_files := flag.String( "k", def_key, "ssh-key file(s) for broker" )
+	log_dir := flag.String( "l", "stderr", "log_dir" )
 	parallel := flag.Int( "p", 10, "parallel ssh commands" )
 	no_rsync := flag.Bool( "no-rsync", false, "turn off rsync" )
 	rdir := flag.String( "rdir", def_rdir, "rsync remote directory" )
 	rlist := flag.String( "rlist", def_rlist, "rsync file list" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
-	user	:=  flag.String( "u", def_user, "ssh user-name" )
-	verbose :=	flag.Bool( "v", false, "verbose" )
-	vlevel :=	flag.Int( "V", 1, "verbose-level" )
+	user	:= flag.String( "u", def_user, "ssh user-name" )
+	verbose := flag.Bool( "v", false, "verbose" )
+	vlevel := flag.Int( "V", 1, "verbose-level" )
 	flag.Parse()									// actually parse the commandline
 
 	if *needs_help {
@@ -599,7 +579,7 @@ func main() {
 						connect2tegu( smgr, tegu_host, sess_mgr )
 						
 					case connman.ST_DATA:
-						sheep.Baa( 2, "data: [%s]  %d bytes received", sreq.Id, len( sreq.Buf ) )
+						sheep.Baa( 3, "data: [%s]  %d bytes received", sreq.Id, len( sreq.Buf ) )
 						jc.Add_bytes( sreq.Buf )
 						jblob := jc.Get_blob()		// get next blob if ready
 						for ; jblob != nil ; {
