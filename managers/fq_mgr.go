@@ -398,7 +398,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 			msg.Actions[0].Hosts = make( []string, 1 )
 			msg.Actions[0].Hosts[0] = hosts[i]
 			msg.Actions[0].Fdata = make( []string, 1 )
-			msg.Actions[0].Fdata[0] = fmt.Sprintf( `"%s -t %d -p %d %s %s add 0x%x %s"`, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
+			msg.Actions[0].Fdata[0] = fmt.Sprintf( `%s -t %d -p %d %s %s add 0x%x %s`, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
 
 			json, err := json.Marshal( msg )			// bundle into a json string
 			if err != nil {
@@ -428,7 +428,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		msg.Actions[0].Hosts = make( []string, 1 )
 		msg.Actions[0].Hosts[0] = *sw_name
 		msg.Actions[0].Fdata = make( []string, 1 )
-		msg.Actions[0].Fdata[0] = fmt.Sprintf( `"-t %d -p %d %s %s add 0x%x %s"`, *sw_name, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	
+		msg.Actions[0].Fdata[0] = fmt.Sprintf( `-t %d -p %d %s %s add 0x%x %s`, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	
 		json, err := json.Marshal( msg )						// bundle into a json string
 		if err != nil {
 			fq_sheep.Baa( 0, "unable to build json to set flow mod" )

@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/extcmd"
+	//"codecloud.web.att.com/gopkgs/extcmd"
 	"codecloud.web.att.com/gopkgs/connman"
 	"codecloud.web.att.com/gopkgs/jsontools"
 	"codecloud.web.att.com/gopkgs/ssh_broker"
@@ -44,6 +44,9 @@ var (
 	version		string = "v2.0/11295"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
+
+	running_sim	bool = false	// prevent queueing more if one is running (set up intermediate)
+	running_map bool = false	// map phost
 )
 
 
@@ -145,17 +148,17 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 /*
 	Generate a map that lists physical host and mac addresses. Timeout is the max number of 
 	seconds that we will wait for all responses.  If timeout seconds passes before all 
-	responses are received we will return what we have.
+	responses are received we will return what we have. The map command is executed on all
+	hosts, so we send a non-blocking command to the broker for each host and wait for the 
+	responses to come back on the channel.  This allows them to run in parallel across
+	the cluster.
 */
 func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
     var (
 		cmd_str string  
     )
 
-	//cmd_str = strings.Join( req.Hosts, " " )
-	//cmd_str = "map_mac2phost " + cmd_str
-
-	ssh_rch := make( chan *ssh_broker.Broker_msg )		// channel for ssh results
+	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
 	//defer ssh_rch.Close()
 	wait4 := 0											// number of responses to wait for
 	for k, v := range req.Hosts {						// submit them all out non-blocking
@@ -177,7 +180,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	rdata := make( []string, 8192 )		// might need to revisit this limit
 	ridx := 0
 
-	sheep.Baa( 1, " map_mac2phost: waiting for %d responses", wait4 )
+	sheep.Baa( 1, "map_mac2phost: waiting for %d responses", wait4 )
 	timer_pop := false						// indicates a timeout for loop exit
 	for wait4 > 0 && !timer_pop {			// wait for responses back on the channel or the timer to pop
 		select {
@@ -187,84 +190,92 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 
 			case resp := <- ssh_rch:					// response from broker
 				wait4--
-				sheep.Baa( 1, " map_mac2phost: received response, continue to wait for %d more responses", wait4 )
 				stdout, stderr, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
+				sheep.Baa( 1, "map_mac2phost: received response from %s err=%v, waiting for %d more", host, err != nil, wait4 )
 				if err != nil {
 					sheep.Baa( 1, "WRN: error running map_mac2phost command on %s", host )
 				} else {
 					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
 				}
-				dump_stderr( stderr, "map_mac2phost" + host )			// always dump stderr
+				if err != nil || sheep.Would_baa( 2 ) {
+					dump_stderr( stderr, "map_mac2phost" + host )			// always dump stderr on error, or in chatty mode
+				}
 		}
 	}
 
 	msg.Rdata = rdata[0:ridx]										// return just what was filled in
-
-	//msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a json in response format
 	sheep.Baa( 1, "map_mac2phost completed: respone data had %d elements", len( msg.Rdata ) )
-
-/*
-	if err != nil {
-		msg.State = 1
-		sheep.Baa( 0, "ERR: unable to execute: %s: %s	[TGUAGN000]", cmd_str, err )
-		for i := range msg.Edata {
-			sheep.Baa( 0, "stderr: %s", msg.Edata[i] )
-		}
-		jout = nil
-	}
-*/
 
 	jout, err = json.Marshal( msg )
 	return
 }
 
 /*
-	Executes the setup_ovs_intermed script on each host listed.
+	Executes the setup_ovs_intermed script on each host listed. This command can take 
+	a significant amount of time on each host (10s of seconds) and so we submit the 
+	command to the broker for each host in non-blocking mode to allow them to 
+	run concurrently. Once submitted, we collect the results (reporting errors)
+	as the broker writes the response back on the channel.
 */
-func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string ) {
+func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
 
+	running_sim = true										// prevent queuing another of these
 	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts (broker)" )
 
+	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
+	wait4 := 0												// number of responses to wait for
 	for i := range req.Hosts {
 		cmd_str := fmt.Sprintf( `PATH=%s:$PATH setup_ovs_intermed -d "%s"`, *path, req.Dscps )
-    	sheep.Baa( 1, "executing via broker on %s: %s", req.Hosts[i], cmd_str )
+    	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[i], cmd_str )
 
-		/* --- original ----
-		_, edata, err := extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as a set of strings
+		err := broker.NBRun_cmd( req.Hosts[i], cmd_str, wait4, ssh_rch )
 		if err != nil {
-			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s	[TGUAGN001]", err )
+			sheep.Baa( 0, "ERR: unable to submit command: %s: %s	[TGUAGNXXX]", cmd_str, err )
 		} else {
-        	sheep.Baa( 2, "queues adjusted succesfully" )
+			wait4++
 		}
-		for i := range edata {
-			sheep.Baa( 0, "set-intermed stderr:  %s", edata[i] )
-		}
-		*/
-
-		_, stderr, err := broker.Run_cmd( req.Hosts[i], cmd_str )
-		if err != nil {
-			sheep.Baa( 0, "ERR: setup_ovs_intermed failed: %s	[TGUAGN001]", err )
-		} else {
-        	sheep.Baa( 2, "queues adjusted succesfully on host: %s ", req.Hosts[i] )
-		}
-		dump_stderr( *stderr, "set-intermed" )
-/*
-		for {
-			line, err := stderr.ReadBytes( '\n' )
-			if err == nil {
-				sheep.Baa( 0, "set-intermed stderr:  %s", bytes.TrimRight( line, "\n" ) )
-			} else {
-				break
-			}
-		}
-*/
 	}
+
+	timer_pop := false
+	errcount := 0
+	for wait4 > 0 && !timer_pop {							// collect responses logging any errors
+		select {
+			case <- time.After( timeout * time.Second ):		// timeout
+				sheep.Baa( 1, "WRN: timeout waiting for setup-intermed responses; %d replies not received   [TGUAGNXXX]", wait4 )
+				timer_pop = true
+
+			case resp := <- ssh_rch:							// response back from the broker
+				wait4--
+				_, stderr, err := resp.Get_results()
+				host, _, _ := resp.Get_info()
+				sheep.Baa( 1, "setup-intermed: received response from %s err=%v, waiting for %d more", host, err != nil, wait4 )
+				if err != nil {
+					sheep.Baa( 1, "WRN: error running setup-intermed queue command on %s", host )
+					errcount++
+				} 
+				if err != nil || sheep.Would_baa( 2 ) {
+					dump_stderr( stderr, "setup-intermed" + host )			// always dump on error, or if chatty
+				}
+		}
+	}
+
+	sheep.Baa( 1, "setup-intermed: completed with %d errors", errcount )
+	running_sim = false
 }
 
 /*
-	Execute a create_ovs_queues for each host in the list.
+	Execute a create_ovs_queues for each host in the list. The create queues script is unique inasmuch
+	as it expects an input file that is supplied either as a filename as $1, or on stdin if $1 is omitted.
+	To send the data file for the command to execute, we'll create a tmp file on the local machine which
+	is a script that echos the data into the script:
+		cat <<endKat | create_ovs_queues
+			data passed to us
+		endKat
+
+	We'll use the brokers 'send script for execution' feature rather to execute our script. 
 */
+/*
 func do_setqueues( req json_action ) {
     var (
         err error
@@ -305,31 +316,88 @@ func do_setqueues( req json_action ) {
 		}
 	}
 }
+*/
+
+func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
+    var (
+        err error
+    )
+
+    fname := fmt.Sprintf( "/tmp/tegu_setq_%d_%x_%02d.data", os.Getpid(), time.Now().Unix(), rand.Intn( 10 ) )
+    sheep.Baa( 2, "adjusting queues: creating %s will contain %d items", fname, len( req.Qdata ) );
+
+    f, err := os.Create( fname )
+    if err != nil {
+        sheep.Baa( 0, "ERR: unable to create data file: %s: %s	[TGUAGN002]", fname, err )
+        return
+    }
+
+	fmt.Fprintf( f, "#!/usr/bin/env ksh\ncat <<endKat | PATH=%s:$PATH create_ovs_queues\n", *path )
+    for i := range req.Qdata {
+        sheep.Baa( 2, "writing queue info: %s", req.Qdata[i] )
+        fmt.Fprintf( f, "%s\n", req.Qdata[i] )
+    }
+	fmt.Fprintf( f, "endKat\n" )
+
+    err = f.Close( )
+    if err != nil {
+        sheep.Baa( 0, "ERR: unable to create data file (close): %s: %s	[TGUAGN003]", fname, err )
+        return
+    }
+
+	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
+	wait4 := 0												// number of responses to wait for
+	for i := range req.Hosts {
+    	sheep.Baa( 1, "via broker on %s: create_ovs_queues embedded in %s", req.Hosts[i], fname )
+
+		err := broker.NBRun_on_host( req.Hosts[i], fname, "", wait4, ssh_rch )		// sends the file as input to be executed on the host
+		if err != nil {
+			sheep.Baa( 0, "ERR: unable to submit command: %s: %s	[TGUAGNXXX]", fname, err )
+		} else {
+			wait4++
+		}
+	}
+
+	timer_pop := false
+	errcount := 0
+	for wait4 > 0 && !timer_pop {							// collect responses logging any errors
+		select {
+			case <- time.After( timeout * time.Second ):		// timeout
+				sheep.Baa( 1, "WRN: timeout waiting for create-q responses; %d replies not received   [TGUAGNXXX]", wait4 )
+				timer_pop = true
+
+			case resp := <- ssh_rch:							// response back from the broker
+				wait4--
+				_, stderr, err := resp.Get_results()
+				host, _, _ := resp.Get_info()
+				sheep.Baa( 1, "create-q: received response from %s err=%v, waiting for %d more", host, err != nil, wait4 )
+				if err != nil {
+        			sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", host, fname, err )
+					errcount++
+				}  else {
+        			sheep.Baa( 1, "queues adjusted succesfully on: %s", host )
+				}
+				if err != nil || sheep.Would_baa( 2 ) {
+					dump_stderr( stderr, "create-q" + host )			// always dump on error, or if chatty
+				}
+		}
+	}
+
+	if errcount == 0 {
+		sheep.Baa( 1, "would delete file: %s", fname )
+	}
+}
 
 /*
 	Extracts the information from the action passed in and causes the fmod command
-	to be executed.   We must build the command by hand because the Command() function
-	doesn't properly handle quotes. 
+	to be executed.   
 */
 func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err error ){
 
 	for i := range req.Fdata {
-		//cstr := fmt.Sprintf( "%s send_ovs_fmod %s", shell_cmd, req.Fdata[i] )
-		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod -n %s`, *path, req.Fdata[i] )		// TESTING -- no-exec (-n)  is for testing
-    	sheep.Baa( 1, "executing via broker on %s: %s", req.Hosts[0], cstr )
+		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[i] )
+    	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
 
-/* --- original
-		_, edata, err := extcmd.Cmd2strings( cstr )
-		if err != nil {
-			sheep.Baa( 0, "ERR: send fmod failed: %s	[TGUAGN005]", err )
-		} else {
-        	sheep.Baa( 2, "fmod succesfully sent" )
-		}
-		for i := range edata {
-			sheep.Baa( 1, "fmod stderr:  %s", edata[i] )
-		}
-
-*/
 		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )				// there is only one host ever for flow-mods
 		if err != nil {
 			sheep.Baa( 0, "ERR: send fmod failed: %s	[TGUAGN005]", err )
@@ -381,7 +449,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 	for i := range req.Actions {
 		switch( req.Actions[i].Atype ) {
 			case "setqueues":								// set queues
-					do_setqueues( req.Actions[i] )
+					do_setqueues( req.Actions[i], broker, path, 30 )
 
 			case "flowmod":									// set a flow mod
 					do_fmod( req.Actions[i], broker, path )
@@ -393,8 +461,12 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 						ridx++
 					}
 
-			case "intermed_queues":							// run script to set up intermediate queues
-					do_intermedq(  req.Actions[i], broker, path )
+			case "intermed_queues":													// setup intermediate queues
+					if ! running_sim {
+						go do_intermedq(  req.Actions[i], broker, path, 60 )		// this can run asynch since there isn't any output
+					} else {
+						sheep.Baa( 1, "handle blob: setqueues still running, not restarted" )
+					}
 
 			default:
 				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
@@ -439,6 +511,7 @@ func main() {
 	id := 		flag.Int( "i", 0, "id" )
 	key_files :=	flag.String( "k", def_key, "ssh-key file(s) for broker" )
 	log_dir :=	flag.String( "l", "stderr", "log_dir" )
+	parallel := flag.Int( "p", 10, "parallel ssh commands" )
 	no_rsync := flag.Bool( "no-rsync", false, "turn off rsync" )
 	rdir := flag.String( "rdir", def_rdir, "rsync remote directory" )
 	rlist := flag.String( "rlist", def_rlist, "rsync file list" )
@@ -509,6 +582,7 @@ func main() {
 		broker.Add_rsync( rlist, rdir )
 	}
 	sheep.Baa( 1, "successfully created ssh_broker for user: %s, command path: %s", *user, *rdir )
+	broker.Start_initiators( *parallel )
 
 
 	for {
