@@ -5,6 +5,9 @@
 #				package (.deb) file. 
 #	Date: 		May 2014
 #	Author:		E. Scott Daniels
+#
+#	Mods:		30 Jan 2015 - Added support for python
+# -------------------------------------------------------------------------------------------
 
 function usage
 {
@@ -101,9 +104,9 @@ do
 		seen[${target%/*}]="true"
 	fi
 
-	if [[ ! -f $src ]]							# possibly foo given for foo.ksh
+	if [[ ! -f $src ]]							# possibly foo given for foo.ksh, foo.bsh or foo.py
 	then
-		for x in .ksh .sh .bsh					# assume all other files must retain extension for their interpreter to work
+		for x in .ksh .sh .bsh .py				# assume all other files must retain extension for their interpreter to work
 		do
 			if [[ -f "$src$x" ]]
 			then
