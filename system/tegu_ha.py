@@ -115,11 +115,10 @@ def extract_dt( str, c1, c2 ):
     try:                             # prevent stack dump if missing time, or wrong format
         toks = string.split( str )
         ttoks = string.split( toks[c2], "." )     # ls listing has decimal which pythong %S cannot handle
-        logit( "converting time: " +  toks[c1] + " " + ttoks[0] )
         to = time.strptime( toks[c1] + " " + ttoks[0], "%Y-%m-%d %H:%M:%S" )    # build time object
         return int( time.mktime( to ) )
     except Exception:
-        logit( "unable to build a timestamp from: %s and %s", (toks[c1], ttoks[0]) )
+        logit( "unable to build a timestamp from: %s and %s" % (toks[c1], ttoks[0]) )
         return 0
 
     return 0
