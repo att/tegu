@@ -41,7 +41,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.0/11295"
+	version		string = "v2.0/12015/a"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -478,7 +478,7 @@ func main() {
 			"/usr/bin/map_mac2phost " +
 			"/usr/bin/ovs_sp2uuid " +
 			"/usr/bin/purge_ovs_queues " +
-			"/usr/bin/ql_setup_irl.ksh " +
+			"/usr/bin/ql_setup_irl " +
 			"/usr/bin/send_ovs_fmod " +
 			"/usr/bin/setup_ovs_intermed "
 
