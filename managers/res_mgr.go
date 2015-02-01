@@ -48,6 +48,8 @@
 						when a transport port is specified.
 						Changed when meta table flow-mods are pushed (now with queues and only to hosts in 
 						the queue list).
+				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files 
+						written only when there are updates.
 */
 
 package managers
@@ -827,7 +829,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
 				all_sys_up = true
-				tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
+				// periodic checkpointing turned off with the introduction of tegu_ha
+				//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
 			case REQ_CHKPT:
 				if all_sys_up {
