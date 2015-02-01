@@ -15,6 +15,7 @@
 				09 Jan 2015 - No longer assume that the gateway list is limited by the project
 					that is valid in the creds.  At least some versions of Openstack were
 					throwing all gateways into the subnet list.
+				16 Jan 2014 : Support port masks in flow-mods.
 */
 
 package managers

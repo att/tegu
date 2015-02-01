@@ -22,6 +22,7 @@
 #					support when running 'service tegu standby'.
 #			14 Dec 2014 - Renamed restart to reload since service buggers restart.
 #			18 Dec 2014 - Ignore signal 15 to prevent kill from killing us.
+#			30 Jan 2015 - Added start of ha daemon.
 #----------------------------------------------------------------------------------------
 trap "" 15				# prevent killall from killing the script when run from service
 
@@ -79,6 +80,7 @@ case "$1" in
   start)
 	su -c "PATH=$PATH start_tegu" tegu
 	su -c "PATH=$PATH start_tegu_agent 1 2 3 4 5" tegu
+	su -c "PATH=$PATH start_tegu_ha"					# start high avail daemon 
 	;;
 
   stop)
@@ -94,6 +96,7 @@ case "$1" in
 		chown $tegu_user:$tegu_group /etc/tegu/standby	
 		su -c "PATH=$PATH start_tegu" tegu >/dev/null 2>&1		# this will fail, but we want to ensure environment (cron etc.) is setup
 	fi
+	su -c "PATH=$PATH start_tegu_ha"					# start high avail daemon 
 	;;
 
   reload)
