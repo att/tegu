@@ -30,4 +30,4 @@
 ../main/tegu_agent usr/bin/
 
 ../system/tegu_rc etc/init.d/tegu
-../system/crontab.qlite etc/tegu/crontab
+../system/crontab.qlite etc/tegu/crontab 664
