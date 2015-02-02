@@ -80,7 +80,7 @@ case "$1" in
   start)
 	su -c "PATH=$PATH start_tegu" tegu
 	su -c "PATH=$PATH start_tegu_agent 1 2 3 4 5" tegu
-	su -c "PATH=$PATH start_tegu_ha"					# start high avail daemon 
+	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon 
 	;;
 
   stop)
