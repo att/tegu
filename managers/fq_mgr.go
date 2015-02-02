@@ -37,6 +37,7 @@
 				19 Jan 2015 - Limit the queue list to run only on hosts listed.
 				26 Jan 2015 - Corrected table number problem -- outbound data should resub through the base+1 table, but inbound
 					packets should resub through the base table, not base+1.
+				01 Feb 2015 - Corrected bug itroduced when host name removed from fmod parmss (agent w/ ssh-broker changes).
 */
 
 package managers
@@ -406,9 +407,6 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		for i := range hosts {
 			tmsg := ipc.Mk_chmsg( )									// must have one per since we dont wait for an ack
 
-		//	json := base_json
-//.....
-	
 			msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
 			msg.Actions = make( []action, 1 )
 			msg.Actions[0].Atype = "flowmod"
@@ -424,14 +422,6 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 				fq_sheep.Baa( 2, "json: %s", json )
 				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 			}
-//.....
-
-/*
-			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0x%x %s"`, hosts[i], table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
-			json += ` ] } ] }`
-			fq_sheep.Baa( 2, "json: %s", json )
-			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
-*/
 		}
 	} else {															// fmod goes only to the named switch
 		sw_name := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
@@ -445,7 +435,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		msg.Actions[0].Hosts = make( []string, 1 )
 		msg.Actions[0].Hosts[0] = *sw_name
 		msg.Actions[0].Fdata = make( []string, 1 )
-		msg.Actions[0].Fdata[0] = fmt.Sprintf( `-t %d -p %d %s %s add 0x%x %s`, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	
+		msg.Actions[0].Fdata[0] = fmt.Sprintf( `%s -t %d -p %d %s %s add 0x%x %s`, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	
 		json, err := json.Marshal( msg )						// bundle into a json string
 		if err != nil {
 			fq_sheep.Baa( 0, "unable to build json to set flow mod" )
@@ -454,21 +444,6 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 			tmsg := ipc.Mk_chmsg( )
 			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 		}
-
-/*
-		json := base_json
-		sw_name := &data.Espq.Switch 
-		if phsuffix != nil {											// we need to add the physical host suffix
-			sw_name = add_phost_suffix( sw_name, phsuffix ) 			// TODO: this needs to handle intermediate switches properly; ok for Q-lite, but not full
-		}
-		json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0x%x %s"`, 
-			*sw_name, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )				// Espq.Switch has real name (host) of switch
-		json += ` ] } ] }`
-		fq_sheep.Baa( 2, "json: %s", json )
-
-		tmsg := ipc.Mk_chmsg( )
-		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
-*/
 	}
 }
 
