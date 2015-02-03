@@ -23,6 +23,9 @@
 #			14 Dec 2014 - Renamed restart to reload since service buggers restart.
 #			18 Dec 2014 - Ignore signal 15 to prevent kill from killing us.
 #			30 Jan 2015 - Added start of ha daemon.
+#			02 Feb 2015 - Changed start to start only the ha daemon which will start tegu
+#					if needed on this host. Added forceup option to allow tegu to be forced
+#					to start without the ha daemon. 
 #----------------------------------------------------------------------------------------
 trap "" 15				# prevent killall from killing the script when run from service
 
@@ -77,16 +80,31 @@ fi
 export PATH="${PATH:+$PATH:}/usr/bin:/usr/sbin:/sbin"	# ensure key directories are there
 
 case "$1" in
-  start)
+  forceup)												# forces tegu to be started; might be stopped immediately by ha daemon
 	su -c "PATH=$PATH start_tegu" tegu
 	su -c "PATH=$PATH start_tegu_agent 1 2 3 4 5" tegu
-	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon 
 	;;
 
-  stop)
-	set +e							# don't exit if either fail (which they will if tegu not running)
+  forcedown)											# force tegu and agents down; ha might well restart them
+	set +e
 	su -c "killall tegu_agent"
 	su -c "killall tegu"
+	;;
+
+  start)
+	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon; let it decided if Tegu should be running here
+	;;
+
+  stop)								# stop everything, including the ha process
+	set +e							# don't exit if either fail (which they will if tegu not running)
+	ha_pid="$(ps aux | grep "[p]ython.*tegu_ha" | awk '{ print $2 }' )"			# get the pid of the ha process
+	if test -n "$ha_pid"
+	then
+		su -c "kill -9 $ha_pid" tegu		# python seems to ignore term signals, send it down hard
+	fi
+
+	su -c "killall tegu_agent" tegu
+	su -c "killall tegu" tegu
 	;;
 
   standby)
@@ -100,12 +118,12 @@ case "$1" in
 	;;
 
   reload)
+	set +e
 	su -c "killall tegu_agent"
 	su -c "killall tegu"
-	sleep 1
-	su -c "PATH=$PATH start_tegu" tegu
-	sleep 1
-	su -c "PATH=$PATH start_tegu_agent 1 2 3 4 5" tegu
+	
+	# tegu_ha will restart things (safe to run this even if tegu_ha is already running)
+	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon; let it decided if Tegu should be running here
 	;;
 
 

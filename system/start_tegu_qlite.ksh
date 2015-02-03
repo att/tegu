@@ -170,7 +170,7 @@ fi
 
 if [[ ! -d $ckpt_dir ]]					# ensure checkpoint spot
 then
-	if ! mkdir $ckpt_dir
+	if ! mkdir -p $ckpt_dir
 	then
 		echo "CRI: unable to make the checkpoint directory: $ckpt_dir   [FAIL]" >&2 >&2
 		exit 1
@@ -197,7 +197,7 @@ fi
 
 if [[ ! -d $logd ]]
 then
-	if ! mkdir $logd
+	if ! mkdir -p $logd
 	then
 		echo "CRI: unable to create $logd directory   [FAIL]" >&2
 		exit 1
