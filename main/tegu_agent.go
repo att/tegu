@@ -118,8 +118,6 @@ func dump_stderr( stderr bytes.Buffer, prefix string ) {
 				return
 			}
 		}
-
-	return
 }
 
 /*
@@ -139,8 +137,6 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 				return
 			}
 		}
-
-	return
 }
 
 // --------------- request support (command execution) ----------------------------------------------------------
@@ -595,7 +591,5 @@ func main() {
 				}
 		}			// end select
 	}
-
-	os.Exit( 0 )
 }
 
