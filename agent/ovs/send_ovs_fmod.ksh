@@ -52,6 +52,7 @@
 #				12 Nov 2014 - Extended the connect timeout to 10s
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
+#				04 Feb 2014 - Set initial value of rhost to "" to prevent ssh to localhost
 # ---------------------------------------------------------------------------------------------
 
 function logit
@@ -294,7 +295,7 @@ mode="options"
 output="normal"
 match=""
 ignore_irl=0				# -I will set to 1 and we'll not require br-rl and veth to set fmods on br-int
-rhost="-h localhost"		# parm for commands like ovs_sp2uuid that need to know; default to this host
+rhost=""					# parm for commands like ovs_sp2uuid that need to know; default to this host
 thost="$(hostname)"
 priority=200
 ssh_host=""					# if -h given set to the ssh command needed to execute on the remote host
