@@ -13,6 +13,9 @@
 	Author:		Kaustubh Joshi
 	Mod:		2014 15 Dec - Created script
 				2015 30 Jan - Minor fixes.
+                2015 04 Feb - Change to ensure that the stanby file is always
+                    there when tegu isn't running on the current host. (needed
+                    only for monitoring at this point).
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -53,6 +56,8 @@ TEGU_PROTO = 'http'
 
 SSH_CMD = 'ssh -o StrictHostKeyChecking=no %s@%s '
 
+STANDBY_FILE = ETCDIR + "/standby"                   # standby file which must exist if tegu not suppoed to be running here (monitoring)
+ACTIVE_FILE = ETCDIR + "/active"                     # created when tegu is active for monitoring we assume.
 DEACTIVATE_CMD = '/usr/bin/tegu_standby on;' \
     'killall tegu; killall tegu_agent'               # Command to kill tegu
 ACTIVATE_CMD = '/usr/bin/tegu_standby off;' \
@@ -212,6 +217,7 @@ def activate_tegu(host=''):
 
 def main_loop(standby_list, this_node, priority):
     '''Main heartbeat and liveness check loop'''
+    stdby_err = False
     priority_wait = False
     while True:
         if not priority_wait:
@@ -254,6 +260,19 @@ def main_loop(standby_list, this_node, priority):
                 activate_tegu()            # Start local tegu
             else:
                 priority_wait = True
+        else:
+            if not i_am_active:                     # must ensure that the standby file is there if we aren't active
+                if not os.path.isfile( STANDBY_FILE ):
+                    try:
+                        os.close( os.open( STANDBY_FILE, os.O_WRONLY | os.O_CREAT ) )
+                        os.remove( ACTIVE_FILE )
+                        logit( "created standby file" )
+                    except OSError:
+                        if not stdby_err:           # log it only once until we're successful
+                            logit( "couldn't create standby file" )
+                            stdby_err = True
+                else:
+                    stdby_err = False
     # end loop
 
 def main():
