@@ -502,7 +502,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								reason = ""
 								res_paused = true
 							} else {
-								reason = fmt.Sprintf( "s", req.State )
+								reason = fmt.Sprintf( "%s", req.State )
 							}
 						}
 					} 
@@ -669,7 +669,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								reason = ""
 								res_paused = false
 							} else {
-								reason = fmt.Sprintf( "s", req.State )
+								reason = fmt.Sprintf( "%s", req.State )
 							}
 						}
 					}

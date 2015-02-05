@@ -50,22 +50,22 @@ type wa_port_req struct {
 }
 
 type wa_tunnel_req struct {
-	Local_tenant	string	`json:"localTenant";`		// uuid
-	Local_router	string	`json:"localRouter";`		// uuid
-	Local_ip		string	`json:"localIp";`
-	Remote_ip		string	`json:"remoteIp";`
-	Bandwidth		string	`json:"bandwidth";`			// optional
+	Local_tenant	string	`json:"localTenant"`		// uuid
+	Local_router	string	`json:"localRouter"`		// uuid
+	Local_ip		string	`json:"localIp"`
+	Remote_ip		string	`json:"remoteIp"`
+	Bandwidth		string	`json:"bandwidth"`			// optional
 
 	host			*string		// tegu private information
 }
 
 type wa_route_req struct {
-	Local_tenant	string	`json:"localTenant";`
-	Local_router	string	`json:"localRouter";`
-	Local_ip		string	`json:"localIp";`
-	Remote_ip		string	`json:"remoteIp";`
-	Remote_cidr 	string	`json:"remoteCidr";`
-	Bandwidth		string	`json:"bandwidth";`
+	Local_tenant	string	`json:"localTenant"`
+	Local_router	string	`json:"localRouter"`
+	Local_ip		string	`json:"localIp"`
+	Remote_ip		string	`json:"remoteIp"`
+	Remote_cidr 	string	`json:"remoteCidr"`
+	Bandwidth		string	`json:"bandwidth"`
 
 	host			*string		// tegu private information
 }
@@ -75,7 +75,7 @@ type wa_conns_req struct {
 	Tenant		string
 	Router		string
 	Subnet		string
-	Remote_cidr	string		`json:"remoteCidr";`
+	Remote_cidr	string		`json:"remoteCidr"`
 	Wan_uuid	string
 	Tos			string					// optional (future)
 

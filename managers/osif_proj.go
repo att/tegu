@@ -533,7 +533,7 @@ func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[stri
 
 	if pid == nil {
 		osif_sheep.Baa( 1, "pid2data project id passed in was nil" )
-		err = fmt.Errorf( "%s missing project id" ) 
+		err = fmt.Errorf( "missing project id" ) 
 		return
 	}
 
