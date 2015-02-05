@@ -52,6 +52,7 @@
 #				12 Nov 2014 - Extended the connect timeout to 10s
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
+#				04 Feb 2014 - Set initial value of rhost to "" to prevent ssh to localhost
 # ---------------------------------------------------------------------------------------------
 
 function logit
@@ -193,7 +194,7 @@ function check_irl
 
 	get_ovs_data
 
-	awk -v rhost="${rhost#* }" '
+	awk -v rhost="${thost#* }" '	# rhost used only for log message if needed
 		/switch:.*br-rl/ { 
 			sw = "rl";
 			have_rl = 1;
@@ -294,7 +295,8 @@ mode="options"
 output="normal"
 match=""
 ignore_irl=0				# -I will set to 1 and we'll not require br-rl and veth to set fmods on br-int
-rhost="-h localhost"
+rhost=""					# parm for commands like ovs_sp2uuid that need to know; default to this host
+thost="$(hostname)"
 priority=200
 ssh_host=""					# if -h given set to the ssh command needed to execute on the remote host
 ssh_opts="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"	# we tollerate a bit more connect time wait here
@@ -323,8 +325,12 @@ do
 					;;
 
 
-				-h)	rhost="-h $2" 							# simple rhost for ovs_sp2uuid calls
-					ssh_host="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+				-h)	
+					if [[ $2 != $thost &&  $2 != "localhost" ]]		# if a different host set up to run the command there
+					then
+						rhost="-h $2" 							# simple rhost for ovs_sp2uuid calls
+						ssh_host="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+					fi
 					shift
 					;;
 
@@ -451,7 +457,7 @@ do
 						then
 							action+="mod_vlan_vid:$vid "	# save the value found
 						else
-							logit "CRI: unable to map mac to vlan id: $2 on target-host: ${rhost#* }	[FAIL] [QLTSFM002]"
+							logit "CRI: unable to map mac to vlan id: $2 on target-host: ${thost#* }	[FAIL] [QLTSFM002]"
 							cat $ovs_data >&2
 							exit 1
 						fi
@@ -527,11 +533,11 @@ case $1 in
 				timeout 20  $ssh_host $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_shortprotolist
 				if (( $? != 0 ))
 				then
-					echo "unable to set protocols for brige: ${lbswitch:-$3} on ${rhost#* }" >&2
+					echo "unable to set protocols for brige: ${lbswitch:-$3} on ${thost#* }" >&2
 					rm -f /tmp/PID$$.*
 					exit 1
 				else
-					echo "retried protocol with shorter list: $of_shortprotolist on ${rhost#* }  [OK]"
+					echo "retried protocol with shorter list: $of_shortprotolist on ${thost#* }  [OK]"
 				fi
 			fi
 		fi
@@ -552,7 +558,7 @@ case $1 in
 
 		if (( rc != 0 ))
 		then
-			logit "CRI: unable to insert flow mod on target-host: ${rhost% *}  [QLTSFM001]"
+			logit "CRI: unable to insert flow mod on target-host: ${thost% *}  [QLTSFM001]"
 		fi
 		rm -f /tmp/PID$$.*
 		exit $rc
@@ -586,7 +592,7 @@ case $1 in
 		timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist del-flows ${lbswitch:-$3} "$fmod"
 		if (( $? != 0 ))
 		then
-			logit "unable to delete flow mod on ${rhost#* }: $fmod		[FAIL]"
+			logit "unable to delete flow mod on ${thost#* }: $fmod		[FAIL]"
 		fi
 		rm -f /tmp/PID$$.*
 		exit $?

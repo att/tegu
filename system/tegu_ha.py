@@ -12,6 +12,10 @@
   	Date:		15 December 2015
 	Author:		Kaustubh Joshi
 	Mod:		2014 15 Dec - Created script
+				2015 30 Jan - Minor fixes.
+                2015 04 Feb - Change to ensure that the stanby file is always
+                    there when tegu isn't running on the current host. (needed
+                    only for monitoring at this point).
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -35,14 +39,15 @@ import time
 import os
 import socket
 import subprocess
+import string
 
 # Directory locations
 TEGU_ROOT = os.getenv('TEGU_ROOT', '/var')              # Tegu root dir
 LIBDIR = os.getenv('TEGU_LIBD', TEGU_ROOT+'/lib/tegu')
 LOGDIR = os.getenv('TEGU_LOGD', TEGU_ROOT+'/log/tegu')
-ETCDIR = os.getenv('TEGU_ETCD', TEGU_ROOT+'/etc/tegu')
+ETCDIR = os.getenv('TEGU_ETCD', '/etc/tegu')
 CKPTDIR = os.getenv('TEGU_CKPTD', LIBDIR+'/chkpt')      # Checkpoints directory
-LOGFILE = LOGDIR+'/tegu.std'				            # log file for script
+LOGFILE = LOGDIR+'/tegu_ha.log'				            # log file for this script
 
 # Tegu config parameters
 TEGU_PORT = os.getenv('TEGU_PORT', 29444)		     # tegu's api listen port
@@ -65,12 +70,28 @@ PRI_WAIT_SEC = 5                     # Backoff to let higher prio tegu take over
 STDBY_LIST = ETCDIR + '/standby_list'# list of other hosts that might run tegu
 
 # if present then this is a standby machine and we don't start
-STDBY_FILE = ETCDIR + 'standby'
+STDBY_FILE = ETCDIR + '/standby'
 VERBOSE = 0
+
+def logit(msg):
+    '''Log error message on stdout with timestamp'''
+    now = time.gmtime()
+    sys.stderr.write("%4d/%02d/%02d %02d:%02d %s\n" %
+                     (now.tm_year, now.tm_mon, now.tm_mday,
+                      now.tm_hour, now.tm_min, msg))
+    sys.stderr.flush()
+
+def crit(msg):
+    '''Print critical message to log'''
+    logit("CRI: " + msg)
+
+def err(msg):
+    '''Print error message to log'''
+    logit("ERR: " + msg)
 
 def warn(msg):
     '''Print warning message to log'''
-    sys.stderr.write(msg)
+    logit("WRN: " + msg)
 
 def ssh_cmd(host):
     '''Return ssh command line for host. Empty host imples local execution.'''
@@ -89,31 +110,80 @@ def get_checkpoint(host=''):
         warn("Could not sync chkpts from %s" % host)
     return False
 
+def extract_dt(dt_str, dt_col, tm_col):
+    '''
+        Given a string assumed to be from a long ls listing or
+        from a verbose tar output, extract the date and time
+        and return the unix timestamp. If the time/date components
+        are not recognisable, then returns 0.
+    '''
+    # prevent stack dump if missing time, or wrong format
+    try:
+        toks = string.split(dt_str)
+        # ls listing has decimal which python %S cannot handle
+        ttoks = string.split(toks[tm_col], ".")
+        # build time object
+        tobj = time.strptime(toks[dt_col] + " " + ttoks[0], "%Y-%m-%d %H:%M:%S")
+        return int(time.mktime(tobj))
+    except (ValueError, IndexError):
+        logit("unable to build a timestamp from: %s and %s"
+              % (toks[dt_col], ttoks[0]))
+    return 0
+
 def should_be_active(host):
     '''Returns True if host should be active as opposed to current node'''
 
-    ts_r_cmd = 'ls -t ' + LIBDIR + '/chkpt_synch.' + host + '.*.tgz | head -1 '\
-        '| read synch_file; tar -t -v --full-time -f $synch_file'
-    ts_l_cmd = 'ls -tF ' + CKPTDIR + '/* | grep -v \\/'
+    # need short name for ls command
+    htoks = string.split(host, ".")
+
+    # Cmd to suss out the most recent checkpoint file that was in the
+    # most recent tar from host.  Sort to ensure order by date from
+    # tar output then take first. Redirect stderr to null because
+    # python doesn't ignore closed pipe signals and thus they
+    # propagate causing sort and grep to complain once for each line
+    # of output it tries to write after head closes the pipe.
+    ts_r_cmd = 'tar -t -v --full-time -f $(ls -t ' + LIBDIR + '/chkpt_synch.'\
+        + htoks[0] + '.*.tgz | head -1) | (grep resmgr_ | sort -r -k 4,5 '\
+        + '| head -1) 2>/dev/null'
+
+    # cmd to suss out the long listing of the most recent of our
+    # checkpoint files. Specifically look for resmgr_ files as there
+    # might be other files in the directory. -F and grep -v might be
+    # overkill, but aren't harmful.
+    ts_l_cmd = 'ls --full-time -tF ' + CKPTDIR + '/resmgr_* '\
+        + '| grep -v "\\/\\$" 2>/dev/null' + '| head -1'
 
     # Pull latest checkpoint from remote node
-    # If there's an error, the other guy shouldn't be primary
+    # If theres an error, the other guy shouldn't be primary
     if not get_checkpoint(host):
         return False
     if not get_checkpoint():
         return True
 
-
     # Check if we or they have latest checkpoint
     try:
         # Get clock skew
-        time_r = subprocess.check_output(ssh_cmd(host) + 'date +%s')
-        time_l = subprocess.check_output(ssh_cmd('') + 'date +%s')
+        logit("checking clock skew: " + ssh_cmd(host) + 'date +%s')
+
+        # I don't grok why shell=True is needed, but it fails without
+        time_r = int(subprocess.check_output(ssh_cmd(host) + '/bin/date +%s',
+                                             shell=True))
+        time_l = int(subprocess.check_output(ssh_cmd('') + 'date +%s',
+                                             shell=True))
         skew = time_l-time_r
 
-        # Get ours and their checkpoint timestamps
-        ts_r = subprocess.check_output(ts_r_cmd)
-        ts_l = subprocess.check_output(ts_l_cmd)
+        # Get ours and their checkpoint file info
+        # get ls listing info string
+        ts_r_s = subprocess.check_output(ts_r_cmd, shell=True)
+        ts_l_s = subprocess.check_output(ts_l_cmd, shell=True)
+
+        if ts_r_s == "" or ts_l_s == "":
+            logit("unable to find chkpt file info host:" + host)
+            return False
+
+        # convert listing strings in numeric timestamps
+        ts_r = extract_dt(ts_r_s, 3, 4)
+        ts_l = extract_dt(ts_l_s, 5, 6)
 
         return ts_r+skew > ts_l or \
             (ts_r+skew == ts_l and host < socket.getfqdn())
@@ -128,8 +198,11 @@ def is_active(host='localhost'):
        If host is None, check if tegu is running on current host
        Use ping API check, standby file may be inconsistent'''
 
-    curl_str = ('curl --connect-timeout 3 -s -d "ping" %s://%s:%d/tegu/api ' + \
-        '| grep -q -i pong') % (TEGU_PROTO, host, TEGU_PROTO)
+    # must use no-proxy to avoid proxy servers gumming up the works
+    # grep stderr redirected to avoid pipe complaints
+    curl_str = ('curl --noproxy \'*\' --connect-timeout 3 -s -d '\
+                + '"ping" %s://%s:%d/tegu/api | grep -q -i pong 2>/dev/null')\
+                % (TEGU_PROTO, host, TEGU_PORT)
     try:
         subprocess.check_call(curl_str, shell=True)
         return True
@@ -147,8 +220,8 @@ def deactivate_tegu(host=''):
         return False
 
 def activate_tegu(host=''):
-    ''' Deactivate tegu on a given host. If host is omitted, local
-        tegu is stopped. Returns True if successful, False on error.'''
+    ''' Activate tegu on a given host. If host is omitted, local
+        tegu is started. Returns True if successful, False on error.'''
     if host != '':
         host = SSH_CMD % (TEGU_USER, host)
     try:
@@ -171,6 +244,10 @@ def main_loop(standby_list, this_node, priority):
         i_am_active = is_active()
         any_active = i_am_active
 
+        # If I'm not active, then remove orphaned standby files
+        if not i_am_active:
+            deactivate_tegu()
+
         # Check for active tegus
         for host in standby_list:
             if host == this_node:
@@ -180,19 +257,23 @@ def main_loop(standby_list, this_node, priority):
 
             # Check for split brain: 2 tegus active
             if i_am_active and host_active:
+                logit("checking for split")
                 host_active = should_be_active(host)
                 if host_active:
+                    logit("deactivate myself, " + host + " already running")
                     deactivate_tegu()      # Deactivate myself
                     i_am_active = False
                 else:
+                    logit("deactivate " + host + " already running here")
                     deactivate_tegu(host)  # Deactivate other tegu
 
             # Track that at-least one tegu is active
             any_active = any_active or host_active
 
-        # If no active tegu, then we must try
+        # If no active tegu, then we must try to start one
         if not any_active:
             if priority_wait or priority == 0:
+                logit("no running tegu found, starting here")
                 priority_wait = False
                 activate_tegu()            # Start local tegu
             else:
@@ -202,19 +283,21 @@ def main_loop(standby_list, this_node, priority):
 def main():
     '''Main function'''
 
+    logit("tegu_ha v1.0 started")
+
     # Ready list of standby tegu nodes and find us
-    standby_list = [l.strip() for l in open(STDBY_FILE, 'r')]
+    standby_list = [l.strip() for l in open(STDBY_LIST, 'r')]
     this_node = socket.getfqdn()
     try:
         priority = standby_list.index(this_node)
         standby_list.remove(this_node)
     except ValueError:
-        sys.stderr.write("Could not find host "+this_node+" in standby list")
+        crit("Could not find host "+this_node+" in standby list: %s" % STDBY_LIST)
         sys.exit(1)
 
     # Loop forever listening to heartbeats
     main_loop(standby_list, this_node, priority)
 
 
-if __name__ == 'main':
+if __name__ == '__main__'  or  __name__ == "main":
     main()

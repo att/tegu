@@ -19,6 +19,7 @@
 #				10 Nov 2014 - Added connect timeout to ssh calls
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
+#				28 Jan 2014 - To allow agent with ssh-broker to execute on a remote host.
 # ----------------------------------------------------------------------------------------------------------
 #
 
@@ -57,10 +58,15 @@ while [[ $1 == -* ]]
 do
 	case $1 in 
 		-a)		purge_all=1;;
-		-h)		ssh_host="ssh $ssh_opts $2"; 
-				rhost="$2"
+		-h)		
+				if [[ $2 != $(thost) && $2 != "localhost" ]]
+				then
+					ssh_host="ssh $ssh_opts $2"; 
+					rhost="$2"
+				fi
 				shift
 				;;
+
 		-l)		limit+="$2 "; shift;;
 		-n)	 	forreal=0;;
 		-v)		verbose=1;;

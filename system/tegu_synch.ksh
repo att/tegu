@@ -1,4 +1,5 @@
 #!/usr/bin/env ksh
+
 #
 #	Mnemonic:	tegu_synch
 #	Abstract:	Simple script to take a snapshot of the checkpoint environment and push it off to 
@@ -133,11 +134,12 @@ then
 		exit 2
 	fi
 	
-	cap_config tegu.cfg					# we need to snarf several of the current config files too
-	ls $etcd/*.json | while read jfile
-	do
-		cap_config ${jfile##*/}
-	done
+	# chef gets pissy if we restore things into etc, so we don't any more.
+	#cap_config tegu.cfg					# we need to snarf several of the current config files too
+	#ls $etcd/*.json | while read jfile
+	#do
+	#	cap_config ${jfile##*/}
+	#done
 
 	m=$( date +%M )						# current minutes
 	n=$(( (m/5) * 5 ))					# round current minutes to previous 5 min boundary
@@ -173,11 +175,12 @@ else
 	gzip -dc $synch_file | tar -xf - 		# unload the synch file into the directory
 	echo "synch file ($synch_file) was restored into $PWD/chkpt    [OK]"
 
-	restore_config chkpt/tegu.cfg					# restore the config files 
-	ls chkpt/*.json | while read jfile
-	do
-		restore_config $jfile
-	done
+	# chef gets pissy if we do this, so we don't any more.
+	#restore_config chkpt/tegu.cfg					# restore the config files 
+	#ls chkpt/*.json | while read jfile
+	#do
+	#	restore_config $jfile
+	#done
 fi
 
 exit 0

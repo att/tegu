@@ -14,6 +14,7 @@
 #				10 Nov 2014 - Added connect timeout to ssh calls
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
+#				28 Jan 2015 - Prevent an ssh call if -h indicates local host.
 # -----------------------------------------------------------------------------------------------------------------
 
 function logit
@@ -128,7 +129,7 @@ argv0="${0##*/}"
 ssh_opts="-o ConnectTimeout=2 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
 
 ssh=""									# if -h given, these get populated with needed remote host information
-rhost="localhost"						# remote host name for messages
+rhost="$(hostname)"						# remote host name for messages
 rhost_parm=""							# remote host parameter (-h xxx) for commands that need it
 
 forreal=""
@@ -143,9 +144,13 @@ while [[ $1 == "-"* ]]
 do
 	case $1 in 
 		-D)	delete=1;;
-		-h)	rhost="$2"
-			rhost_parm="-h $2"
-			ssh="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+		-h)	
+			if [[ $2 != $rhost  &&  $2 != "localhost" ]]
+			then
+				rhost="$2"
+				rhost_parm="-h $2"
+				ssh="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
+			fi
 			shift
 			;;
 

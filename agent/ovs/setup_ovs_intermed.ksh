@@ -159,7 +159,7 @@ function setup_iptables
 	timeout 15 $ssh_host "ip netns list" >$nslist 2>$err_file
 	if (( $? != 0 ))
 	then
-		echo "CRI: unable to get network name space list from target-host: ${rhost#* }  [FAIL] [QOSSOM007]"
+		echo "CRI: unable to get network name space list from target-host: ${thost#* }  [FAIL] [QOSSOM007]"
 		sed 's/^/setup_iptables:/' $err_file >&2
 	fi
 
@@ -212,10 +212,10 @@ function setup_iptables
 		$forreal timeout 15 $ssh_cmd <$cmd_file >$err_file 2>&1
 		if (( $? != 0 ))
 		then
-			echo "CRI: unable to set iptables on target-host: ${rhost#* }  [FAIL] [QOSSOM006]"
+			echo "CRI: unable to set iptables on target-host: ${thost#* }  [FAIL] [QOSSOM006]"
 			sed 's/^/setup_iptables:/' $err_file >&2
 		else
-			echo "iptables set up for mangle rules on target-host: ${rhosts#* }"
+			echo "iptables set up for mangle rules on target-host: ${thosts#* }"
 			if [[ -n $no_exec_str ]] || (( verbose ))					# if no exec string, then cat out the captured command
 			then
 				sed 's/^/setup_iptables:/' $err_file >&2
@@ -285,7 +285,7 @@ do
 		-D)	allow_reset=0;;						# do not write the dscp reset flowmods
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-h)	
-			if [[ $2 != "localhost"  && $2 != "127.0.0.1" ]]
+			if [[ $2 != "localhost"  && $2 != "localhost" && $2 != "127.0.0.1" ]]
 			then
 				thost=$2; 							# override target host
 				rhost="-h $2"; 						# set option for any ovs_sp2uuid calls etc
@@ -453,13 +453,13 @@ then
 
 		if (( irl_rc != 0 ))
 		then
-			logit "CRI: unable to set one or more ingress rate limiting flow-mods. target-host: ${rhost#* } [FAIL]	[QLTSOM000]"
+			logit "CRI: unable to set one or more ingress rate limiting flow-mods. target-host: ${thost#* } [FAIL]	[QLTSOM000]"
 		fi
 	else
-		logit "WRN: no rl_port or patch-tun port information was found; br-rl related flow-mods not set for target-host: ${rhost#* } [QLTSOM001]" 	# these are warnings because it might be OK not to have br-rl active
+		logit "WRN: no rl_port or patch-tun port information was found; br-rl related flow-mods not set for target-host: ${thost#* } [QLTSOM001]" 	# these are warnings because it might be OK not to have br-rl active
 	fi
 else
-	logit "WRN: ingress rate limiting flow mods not set -- OVS data missing from target-host: ${rhost#* }    [QLTSOM002]"
+	logit "WRN: ingress rate limiting flow mods not set -- OVS data missing from target-host: ${thost#* }    [QLTSOM002]"
 fi
 
 if (( verbose ))
@@ -492,7 +492,7 @@ then
 	do
 		if ! create_ovs_queues $kflag $vflag -l "$br" $noexec $rhost $queue_data >/tmp/PID$$.coq		# kflag (-k) keeps unreferenced queues; delete them only on first call
 		then
-			logit "CRI: unable to set one or more ovs queues on target-host: ${rhost#* }   [FAIL] [QLTSOM003]"
+			logit "CRI: unable to set one or more ovs queues on target-host: ${thost#* }   [FAIL] [QLTSOM003]"
 			cat /tmp/PID$$.coq >&2
 			rm -f /tmp/PID$$.*
 			exit 1
@@ -527,9 +527,9 @@ do
 
 		if (( lrc == 0  ))
 		then
-			logit "${no_exec_str}intermediate flow-mods were set on ${rhost% } dscp=$dscp bridge=$b	[OK]"
+			logit "${no_exec_str}intermediate flow-mods were set on ${thost% } dscp=$dscp bridge=$b	[OK]"
 		else
-			logit "CRI: unable to set flow-mod for bridge=$b  dscp=$dscp on target-host: ${rhost#* }   [FAIL]  [QLTSOM004]"
+			logit "CRI: unable to set flow-mod for bridge=$b  dscp=$dscp on target-host: ${thost#* }   [FAIL]  [QLTSOM004]"
 			rc=1
 		fi
 	done
@@ -579,7 +579,7 @@ then
 	then
 		if ! $ssh_host $cmd
 		then
-			logit "CRI: unable to set tos inheritence. target-host: ${rhost#* }    [FAIL]  [QLTSOM005]"
+			logit "CRI: unable to set tos inheritence. target-host: ${thost#* }    [FAIL]  [QLTSOM005]"
 			rc=1
 		fi
 	else
@@ -601,7 +601,7 @@ then
 		# CAUTION:  the meta value match is a _hard_ value of zero, not a mask match so we don't turn off any packet that matched a reservation fmod or inbound traffic
 		if ! send_ovs_fmod $rhost $noexec -t 0 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N add 0xfeed br-int  # turn off dscp, submit for meta mark, then resubmit to 0 
 		then
-			logit "CRI: unable to set dscp reset rule for ${rhost#* }   [FAIL] [QOSSOM006]"
+			logit "CRI: unable to set dscp reset rule for ${thost#* }   [FAIL] [QOSSOM006]"
 			rc=1
 		fi
 	else

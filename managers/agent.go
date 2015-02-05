@@ -51,6 +51,7 @@ type action struct {			// specific action
 	Hosts	[]string			// list of hosts to apply the action to
 	Dscps	string				// space separated list of dscp values
 	Data	map[string]string	// specific request data (parms likely)
+	Fdata	[]string			// flowmod command data
 }
 
 type agent_cmd struct {			// overall command

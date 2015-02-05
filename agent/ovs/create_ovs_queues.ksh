@@ -80,6 +80,8 @@
 #				05 Dec 2014 - Corrected bug with picking up uuid for switch id rather than MAC.
 #				16 Dec 2014 - Corrected bug caused because we must use uuids when doing intermediate queues
 #					but tegu doesn't know anything but mac addresses.
+#				28 Jan 2014 - Checks to see that -h isn't the current host or 'localhost'; sets ssh exec 
+#					only if different.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -191,9 +193,12 @@ do
 		-d)	delete_data=1;;
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-h)	
-			thost=$2; 					# override target host
-			rhost="-h $2"; 				# set option for any ovs_sp2uuid calls etc
-			ssh_host="ssh $ssh_opts $2";  		# ssh command for any ovs-* command bundles
+			if [[ $2 != $thost && $2 != "localhost" ]]			# set for ssh if -h is a differnt host
+			then
+				thost=$2; 						# override target host
+				rhost="-h $2"; 					# set option for any ovs_sp2uuid calls etc
+				ssh_host="ssh $ssh_opts $2";  	# ssh command for any ovs-* command bundles
+			fi
 			shift
 			;;
 

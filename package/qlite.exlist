@@ -5,7 +5,7 @@
 # each line below: source-file target-dir/[file]
 # if the source is foo, but the real source file is foo.ksh, it 
 # will be found and foo will be used if only the directory name
-# is given as the target.  (.ksh, .sh, and .bsh are the only 
+# is given as the target.  (.ksh, .sh, .bsh and .py are the only 
 # supported extensions treated specially.)
 
 
@@ -22,15 +22,12 @@
 ../system/tegu_standby	usr/bin/
 ../system/tegu_synch	usr/bin/
 ../system/start_tegu_qlite usr/bin/start_tegu
+../system/start_tegu_ha	usr/bin/
+../system/tegu_ha	usr/bin/
 
 ../main/rjprt usr/bin/
 ../main/tegu usr/bin/
 ../main/tegu_agent usr/bin/
 
 ../system/tegu_rc etc/init.d/tegu
-../system/crontab.qlite etc/tegu/crontab
-
-# skipped for now
-#???/phys_net_static.json etc/tegu/phys_net_sample.json
-#../README.deb 
-
+../system/crontab.qlite etc/tegu/crontab 664

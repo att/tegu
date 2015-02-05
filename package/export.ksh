@@ -5,6 +5,10 @@
 #				package (.deb) file. 
 #	Date: 		May 2014
 #	Author:		E. Scott Daniels
+#
+#	Mods:		30 Jan 2015 - Added support for python
+#				01 Feb 2015 - Ensure that binaries are chmod'd correctly.
+# -------------------------------------------------------------------------------------------
 
 function usage
 {
@@ -92,7 +96,7 @@ typeset -A seen
 # copy things from the list into the export directory
 trap "echo something failed!!!!" EXIT
 set -e
-while read src target junk
+while read src target mode junk
 do
 	if [[ -z ${seen[${target%/*}]} ]]			# ensure that the directory exists
 	then
@@ -101,9 +105,9 @@ do
 		seen[${target%/*}]="true"
 	fi
 
-	if [[ ! -f $src ]]							# possibly foo given for foo.ksh
+	if [[ ! -f $src ]]							# possibly foo given for foo.ksh, foo.bsh or foo.py
 	then
-		for x in .ksh .sh .bsh					# assume all other files must retain extension for their interpreter to work
+		for x in .ksh .sh .bsh .py				# assume all other files must retain extension for their interpreter to work
 		do
 			if [[ -f "$src$x" ]]
 			then
@@ -117,7 +121,20 @@ do
 		done
 	fi
 	verbose "$src -> $dir/${target}"
-	cp $src $dir/$target
+	if cp $src $dir/$target
+	then
+		if [[ -z $mode ]]
+		then
+			mode="775"
+		fi
+		if [[ $target == *"/" ]]
+		then
+			ctarget=$dir/$target/${src##*/}
+		else
+			ctarget=$dir/$target
+		fi
+		chmod $mode $ctarget
+	fi
 done </tmp/PID$$.data
 verbose ""
 

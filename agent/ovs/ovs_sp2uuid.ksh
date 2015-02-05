@@ -39,6 +39,7 @@
 #				05 Dec 2014 - Default to dropping interfaces marked as internal
 #				10 Dec 2014 - Reert the default to dropping interfaces marked as internal as some 
 #					gateways (router) are marked by quantum as internal.
+#				28 Dec 2015 - Prevent actually using ssh if the host given with -h is the localhost.
 # -----------------------------------------------------------------------------------------------
 
 # echos out the ovs commands that are needed to run in an ssh on the remote system
@@ -67,8 +68,12 @@ do
 	case $1 in 
 		-a)	show_adtl=1;;
 		-d)	data=$2; shift;;
-		-h)	ssh_host="ssh $ssh_opts $2"; 		# host where we'll run the ssh commands
-			rhost=$2
+		-h)	
+			if [[ $2 != $(hostname) && $2 != "localhost" ]]
+			then
+				ssh_host="ssh $ssh_opts $2"; 		# host where we'll run the ssh commands
+				rhost=$2
+			fi
 			shift
 			;;		
 		-k)	keep=$2; shift;;
