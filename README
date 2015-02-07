@@ -5,7 +5,14 @@ provides a request interface that yields a complete network graph (as described
 by floodlight), and the ability to map an IP address, VM name or VM ID to a 
 switch port combination. 
 
+There is also an agent compoent which is a standalone process that provides a direct
+interface to the various real and virtual switches.  The underlying agent scripts are 
+contained in the agent directory and the agent binary is in the main directory. 
+
 The tegu src is divided into two packages and the main:
+	agent	--	Directories containing various direct interfaces to things like
+				OVS, Arista switches, floodlight (skoogie), etc.
+
 	managers -- functions that are driven as goroutines and thus implement
 				major components of the application (reservation manager,
 				fq manager, etc.).  
@@ -14,13 +21,11 @@ The tegu src is divided into two packages and the main:
 				functions that operate directly on them (link, host, switch, 
 				pledge, etc.).
 
-	main	--  The main 
+	main	--  Entry point functions (tegu and tegu_agent)
+	
+	package --	Scripts and metadata templates used to build a package files (.deb)
 
-		
-
-Build tegu by:
-	1) cd main
-	2) go build tegu.go
+	system	--	Scripts used to start/stop/manage tegu in a q-lite environment.
 
 
 Gizmos:
@@ -57,23 +62,52 @@ Gizmos:
 	tools.go		some generic tools but not generic enough to prompte to the forge packages
 
 Managers:
+	globals.go  	Globals needed by all manager functions and init function
+	agent.go   		Manages sessions with agents
 	http_api.go		provides the http "rest-ish" interface
 	network.go		manages the network graph
+	net_req.go   	Network manager request struct and related functions
 	res_mgr.go		provides the resevation management logic
 	osif.go			openstack interface manager.
 	fqmgr.go		flowmod/queue manager
+	fq_req.go   	Fqmgr request structure and related functions
+
+
+
 
 
 Testing
 	tegu_test.go	run 'go -v test'  to run the tests
 
 
-The tegu source depends on a set of Go packages that were developed along side Tegu, 
+The tegu source depends on a set of Go packages that were developed along with Tegu, 
 but are general enough to warrent their not being included here.  They are all a part
-of the forge.research.att.com/gopkgs/* package library.  To use them, clone the git 
-project and put it in the go source tree under  forge.research.att.com/gopkgs/. Unfortunately, 
-the Research forge Git isn't organised such that using Go's nice clone feature works 
-cleanly, so make the upper directory, and clone the gopkgs project into it. 
+of the gopkgs/* package library.  To use them, clone the git project as described below. 
+They will be referenced as needed during the build process (unlike C, there is no need
+to build a library to link against).
 
+		
+Go Environment:
+The GOPATH variable must be set to the top level directory in your source 
+tree. Within that directory there should be src, bin, and pkg directories. 
+Under source there should be a codecloud.web.att.com directory which will 
+hold all of your Go related repos that are checked out of code-cloud. 
 
+For example:
+	export GOPATH=$HOME/godev
+	cd $GOPATH
+	mkdir codecloud.web.att.com
+	cd codecloud.web.att.com
 
+	# fork a copy of the tegu and gopkgs first!!!
+	# replace XXXXX with your user id, then clone your forks 
+	git clone https://XXXXXX@codecloud.web.att.com/scm/~XXXXXX/tegu.git
+	git clone https://XXXXXX@codecloud.web.att.com/scm/~XXXXXX/gopkgs.git
+
+	cd tegu
+	git checkout lite			# ready to build in lite branch
+
+Build tegu by:
+	1) cd main
+	2) go build tegu.go   		# generates tegu binary
+	3) go build tegu_agent.go	# builds agent

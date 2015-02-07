@@ -40,6 +40,17 @@
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
 				09 Oct 2014 : Added all_sys_up, and prevent checkpointing until all_sys_up is true.
 				29 Oct 2014 : Corrected bug -- setting vlan id when VMs are on same switch.
+				03 Nov 2014 : Removed straggling comments from the bidirectional fix.
+						General cleanup to merge with steering code.
+				17 Nov 2014 : Updated to support lazy data collection from openstack -- must update host
+						information and push to network as we load from a checkpoint file.
+				19 Nov 2014 : correct bug in loading reservation path.
+				16 Jan 2014 : Allow mask on a tcp/udp port specification and to set priority a bit higher
+						when a transport port is specified.
+						Changed when meta table flow-mods are pushed (now with queues and only to hosts in 
+						the queue list).
+				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files 
+						written only when there are updates.
 */
 
 package managers
@@ -200,17 +211,46 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 	to set the 00000010 bit as an and operation.
 	Cookie is the cookie value used on the f-mod.
 */
-func table9x_fmods( rname *string, table int, meta string, cookie int ) {
+func table9x_fmods( rname *string, host string, table int, meta string, cookie int ) {
 		fq_data := Mk_fqreq( rname )							// f-mod request with defaults (output==none)
 		fq_data.Table = table
 		fq_data.Cookie = cookie	
-		fq_data.Espq = gizmos.Mk_spq( "br-int", -1, -1 )		// these only need to go on br-int
 		fq_data.Expiry = 0										// never expire
+
+		// CAUTION: fq_mgr generic fmod needs to be changed and when it does these next three lines will need to change too
+		fq_data.Espq = gizmos.Mk_spq( host, -1, -1 )			// send to specific host
+		dup_str := "br-int"										// these go to br-int only
+		fq_data.Swid = &dup_str
 
 		fq_data.Action.Meta = &meta								// sole purpose is to set metadata
 		
 		msg := ipc.Mk_chmsg()
 		msg.Send_req( fq_ch, nil, REQ_GEN_FMOD, fq_data, nil )			// no response right now -- eventually we want an asynch error
+}
+
+
+/*
+	Causes all alternate table flow-mods to be sent for the hosts in the given queue list
+	It can be expensive (1-2 seconds/flow mod), so we assume this is being driven only
+	when there are queue changes. Phsuffix is the host suffix that is added to any host
+	name (e.g. -ops).
+*/
+func send_meta_fmods( qlist []string, alt_table int ) {
+	target_hosts := make( map[string]bool )							// hosts that are actually affected by the queue list
+
+	for i := range qlist {											// make a list of hosts we need to send fmods to
+		toks := strings.SplitN( qlist[i], "/", 2 )					// split host from front 
+		if len( toks ) == 2 {										// should always be, but don't choke if not
+			target_hosts[toks[0]] = true							// fq-mgr will add suffix if needed
+		}
+	}
+
+	for h := range target_hosts {
+		rm_sheep.Baa( 2, "sending metadata flow-mods to %s alt-table base %d", h, alt_table )
+		id := "meta_" + h
+		table9x_fmods( &id, h, alt_table, "0x01/0x01", 0xe5d )
+		table9x_fmods( &id, h, alt_table+1, "0x02/0x02", 0xe5d )
+	}
 }
 
 /*
@@ -242,16 +282,22 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 		pushed_count int = 0
 	)
 
-	//rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
+	//rm_sheep.Baa( 3, "pushing reservations, %d in cache", len( i.cache ) )
 	//set_alt := false
-	//for rname, p := range i.cache {							// run all pledges that are in the cache
-		//if p != nil  &&  ! p.Is_pushed() {
-		//	if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-				//if ! set_alt {
-					//table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
-					//table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
-					//set_alt = true
-				//}
+	/*
+	these are commented out in steering since it doesn't run the whole list, a generic function does that.
+	for rname, p := range i.cache {							// run all pledges that are in the cache
+		if p != nil  &&  ! p.Is_pushed() {
+			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
+	*/
+
+				/*
+				if ! set_alt {
+					table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
+					table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
+					set_alt = true
+				}
+				*/
 
 				h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
 
@@ -271,7 +317,11 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 					for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
 						fmod := Mk_fqreq( rname )						// default flow mod request with empty match/actions
 
-						fmod.Pri =	400									// override the defaults
+						if *p1 != "0" || *p2 != "0" {					// port oriented flow-mods get a slightly higher priority
+							fmod.Pri =	405								// override the defaults
+						} else {
+							fmod.Pri =	400								// no port specification, higher than most, but allow a match on port first
+						}
 						fmod.Cookie =	0xdead
 						fmod.Single_switch = false						// path involves multiple switches by default
 						fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
@@ -295,7 +345,7 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 
 														//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
 						tptype_list := "none"							// default to no specific protocol 
-						if p1 > 0 || p2 > 0 {							// if either port is specified, then we need to generate for both udp and tcp
+						if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
 							tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
 						}
 						tptype_toks := strings.Split( tptype_list, " " )
@@ -347,13 +397,15 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 
 					p.Set_pushed()				// safe to mark the pledge as having been pushed.
 				}
-			//} else {
-				//pend_count++
-			//}
-		//} else {
-			//pushed_count++
-		//}
-	//}
+	/*
+			} else {
+				pend_count++
+			}
+		} else {
+			pushed_count++
+		}
+	}
+	*/
 
 	if push_count > 0 || rm_sheep.Would_baa( 2 ) {			// bleat if we pushed something, or if higher level is set in the sheep
 		rm_sheep.Baa( 1, "push_bw_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
@@ -373,17 +425,19 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 		push_count	int = 0
 		pend_count	int = 0
 		pushed_count int = 0
-		set_alt bool = true;
 	)
 
 	rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
+			/*
+			table 9x fmods are sent with queues to avoid blasting to every host 
 			if ! set_alt {
 				table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
 				table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
 				set_alt = true
 			}
+			*/
 
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 				if push_count <= 0 {
@@ -393,10 +447,10 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
-							push_bw_reservations( p, &rname, ch, set_vlan ) 
+						push_bw_reservations( p, &rname, ch, set_vlan ) 
 
 					case gizmos.PT_STEERING:
-							push_st_reservation( p, rname, ch )
+						push_st_reservation( p, rname, ch )
 				}
 			} else {
 				pend_count++
@@ -408,8 +462,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 		set_alt = false;
 	}
 
-	if push_count > 0 || rm_sheep.Would_baa( 2 ) {			// bleat if we pushed something, or if higher level is set in the sheep
-		rm_sheep.Baa( 1, "push_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
+	if push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
+		rm_sheep.Baa( 1, "push_bw_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
 	}
 
 	return pushed_count
@@ -496,9 +550,10 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
-		nrecs++
 		rec, err = br.ReadString( '\n' )
 		if err == nil  {
+			nrecs++
+
 			switch rec[0:5] {
 				case "ucap:":
 					toks := strings.Split( rec, " " )
@@ -513,15 +568,20 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 					if  p.Is_expired() {
 						rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", p.To_str() )
 					} else {
-		
-						req = ipc.Mk_chmsg( )
+						h1, h2 := p.Get_hosts( )							// get the host names, fetch ostack data and update graph
+						update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
+						update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
+
+						req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
 						req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
-						req = <- my_ch									// should be OK, but the underlying network could have changed
+						req = <- my_ch										// should be OK, but the underlying network could have changed
 		
-						if req.State == nil {						// reservation accepted, add to inventory
+						if req.Response_data != nil {
+							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+							p.Set_path_list( path_list )
+							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", p.Get_id, *h1, *h2, len( path_list ) )
 							err = i.Add_res( p )
 						} else {
-		
 							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
 						}
 					}
@@ -610,6 +670,7 @@ func (inv *Inventory) Add_res( p *gizmos.Pledge ) (state error) {
 	state = nil
 	id := p.Get_id()
 	if inv.cache[*id] != nil {
+		rm_sheep.Baa( 2, "reservation not added to inventory, already exists: %s", *id )
 		state = fmt.Errorf( "reservation already exists: %s", *id )
 		return
 	}
@@ -819,6 +880,12 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		if p != nil {
 			set_vlan = *p == "true"
 		}
+
+		p = cfg_data["resmgr"]["super_cookie"]
+		if p != nil {
+			super_cookie = p
+			rm_sheep.Baa( 1, "super-cookie was set from config file" )
+		}
 	}
 
 	rm_sheep.Baa( 1, "ovs table number %d used for metadata marking", alt_table )
@@ -845,7 +912,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
 				all_sys_up = true
-				tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
+				// periodic checkpointing turned off with the introduction of tegu_ha
+				//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
 			case REQ_CHKPT:
 				if all_sys_up {
@@ -918,6 +986,10 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_GEN_EPQMAP:
 				rm_sheep.Baa( 1, "received queue map from network manager" )
+
+				qlist := msg.Response_data.( []string )							// get the qulist map for our use first
+				send_meta_fmods( qlist, alt_table )								// push meta rules
+
 				msg.Response_ch = nil											// immediately disable to prevent loop
 				fq_data := make( []interface{}, 1 )
 				fq_data[FQ_QLIST] = msg.Response_data

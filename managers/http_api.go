@@ -53,6 +53,11 @@
 				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
 				24 Sep 2014 : Added support for ITONS traffic class demands. 
 				09 Oct 2014 : Allow verbose even if network not initialised correctly.
+				18 Nov 2014 : Changes to support lazy osif data fetching
+				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
+					an ip2mac map to be forced out to fqmgr.
+				16 Jan 2014 : Support port masks in flow-mods.
+				27 Jan 2014 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
 */
 
 package managers
@@ -98,12 +103,12 @@ func mk_resname( ) ( string ) {
 	If the resulting host names match (project/host[:port]) then we return an error
 	as this isn't allowed. 
 */
-func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2 int, err error ) {
+func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, err error ) {
 	
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
-	p1 = 0
-	p2 = 0
+	p1 = &zero_string
+	p2 = &zero_string
 	
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host
@@ -118,7 +123,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2
 	tokens := strings.Split( h1x, ":" )
 	if len( tokens ) > 1 {
 		h1x = tokens[0]
-		p1 = clike.Atoi( tokens[1] )
+		p1 = &tokens[1]
 	}
 	
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
@@ -139,7 +144,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 int, p2
 	tokens = strings.Split( h2x, ":" )
 	if len( tokens ) > 1 {
 		h2x = tokens[0]
-		p2 = clike.Atoi( tokens[1] )
+		p2 = &tokens[1]
 	}
 
 	return
@@ -307,7 +312,7 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 
 		if res_paused {
 			rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
-			res.Pause( false )				// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+			res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
 			res.Set_pushed( )
 		}
 	} else {
@@ -316,6 +321,47 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 	}
 
 	return
+}
+
+
+/*
+	Gathers information about the host from openstack, and if known inserts the information into 
+	the network graph. If block is true, then we will block on a repl from network manager. 
+	If update_fqmgr is true, then we will also send osif a request to update the fqmgr with 
+	data that might ahve changed as a result of lazy gathering of info by the get_hostinfo
+	request.  If block is set, then we block until osif acks the request. This ensures
+	that the request has been given to fq-mgr which is single threaded and thus will process
+	the update before attempting to process any flow-mods that result from a later reservation.
+*/
+func update_graph( hname *string, update_fqmgr bool, block bool ) {
+
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, hname, nil )				// request data
+	req = <- my_ch
+	if req.Response_data != nil {												// if returned send to network for insertion
+		if ! block {
+			my_ch = nil															// turn off if not blocking
+		}
+
+		req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )			// add information to the graph
+		if block {
+			_ = <- my_ch															// wait for response -- at the moment we ignore
+		}
+	} else {
+		if req.State != nil {
+			http_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname, but we'll log it anyway
+		}
+	}
+
+	if update_fqmgr {
+		req := ipc.Mk_chmsg( )
+		req.Send_req( osif_ch, my_ch, REQ_IP2MACMAP, hname, nil )				// cause osif to push changes into fq-mgr (caution: we give osif fq-mgr's channel for response)
+		if block {
+			_ = <- my_ch
+		}	
+	} 
 }
 
 
@@ -355,8 +401,6 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		bandw_in	int64
 		bandw_out	int64
 		req_count	int = 0;				// number of requests attempted
-		h1			string
-		h2			string
 		sep			string = ""				// json object separator
 		req			*ipc.Chmsg
 		my_ch		chan *ipc.Chmsg
@@ -543,6 +587,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 										req = <- my_ch
 
 										if req.State == nil {	
+											h1, h2 := plist[i].Get_hosts( ) 							// get the pldege hosts so we can update the graph
+											update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
+											update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+
 											plist[i].Reset_pushed()													// it's not pushed at this point
 											reason, jreason, ecount = finalise_reservation( plist[i], res_paused )	// allocate in network and add to res manager inventory
 											if ecount == 0 {
@@ -588,20 +636,24 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
 							subtokens := strings.Split( *tmap["bandw"], "," )
-							bandw_in = clike.Atoll( subtokens[0] )
-							bandw_out = clike.Atoll( subtokens[1] )
+							bandw_in = int64( clike.Atof( subtokens[0] ) )
+							bandw_out = int64( clike.Atof( subtokens[1] ) )
 						} else {
-							bandw_in = clike.Atoll( *tmap["bandw"] )				// no comma, so single value applied to each
+							bandw_in = int64( clike.Atof( *tmap["bandw"] ) )		// no comma, so single value applied to each
 							bandw_out = bandw_in
 						}
 
 
 						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
-						h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+						h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
 						res = nil 
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+
 						if err == nil {
+							update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
+							update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+
 							dscp := tclass2dscp["voice"]							// default to using voice traffic class
 							dscp_koe := false										// we do not keep it as the packet exits the environment
 
@@ -631,6 +683,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								nerrors += ecount - 1 												// number of errors added to the pile by the call
 							}
 						} else {
+							if err == nil {
+								err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
+							}
 							reason = fmt.Sprintf( "reservation rejected: %s", err )
 						}
 

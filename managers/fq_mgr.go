@@ -33,6 +33,13 @@
 				23 Sep 2014 - Added suport for multiple tables in order to keep local traffic off of the rate limit bridge.
 				24 Sep 2014 - Added vlan_id support. Added support ITONS dscp demands.
 				14 Oct 2014 - Added check to prevent ip2mac table from being overlaid if new table is empty.
+				11 Nov 2014 - Added ability to append a suffix string to hostnames returned by openstack.
+				13 Nov 2014 - Corrected out of bounds range exception in add_phost_suffix (when given a string with a single blank)
+				16 Jan 2015 - Changes to allow transport port to cary a mask in addition to the port value.
+				19 Jan 2015 - Limit the queue list to run only on hosts listed.
+				26 Jan 2015 - Corrected table number problem -- outbound data should resub through the base+1 table, but inbound
+					packets should resub through the base table, not base+1.
+				01 Feb 2015 - Corrected bug itroduced when host name removed from fmod parmss (agent w/ ssh-broker changes).
 */
 
 package managers
@@ -40,6 +47,7 @@ package managers
 import (
 	//"bufio"
 	//"errors"
+	"encoding/json"
 	"fmt"
 	//"io"
 	"math/rand"
@@ -56,6 +64,40 @@ import (
 
 // --- Private --------------------------------------------------------------------------
 
+/*
+	Ostack returns a list of hostnames which might map to the wrong network (management
+	rather than ops), so if a phost suffix is defined in the config file, this function 
+	will augment each host in the list and add the suffix. Returns the new list, or 
+	the same list if phost_suffix is nil.
+*/
+func add_phost_suffix( old_list *string, suffix *string ) ( *string ) {
+	if suffix == nil  || old_list == nil || *old_list == "" {
+		return old_list
+	}
+
+	nlist := ""
+	sep := ""
+
+	htoks := strings.Split( *old_list, " " )
+	for i := range htoks {
+		if htoks[i] != "" {
+			if (htoks[i])[0:1] >= "0" && (htoks[i])[0:1] <= "9" {
+				nlist += sep + htoks[i]										// assume ip address, put on as is
+			} else {
+				if strings.Index( htoks[i], "." ) >= 0 {					// fully qualified name
+					dtoks := strings.SplitN( htoks[i], ".", 2 )				// add suffix after first node in the name
+					nlist += sep + dtoks[0] + *suffix  + "." + dtoks[1]		
+				} else {
+					nlist += sep + htoks[i] + *suffix
+				}
+			}
+	
+			sep = " "
+		}
+	}
+
+	return &nlist
+}
 
 /*
 	We depend on an external script to actually set the queues so this is pretty simple.
@@ -118,13 +160,42 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	multiple agents attached, the individual messages will be fanned out across the 
 	available agents, otherwise the agent will just process them sequentially which
 	would be the case if we put all hosts into the same message.
+
+	This now augments the switch name with the suffix; needs to be fixed for q-full
+	so that it handles intermediate names properly.
 */
-func adjust_queues_agent( qlist []string, hlist *string ) {
+func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	var (
-		qjson	string			// final full json blob
-		qjson_pfx	string		// static prefix
+		qjson	string						// final full json blob
+		qjson_pfx	string					// static prefix
 		sep = ""
 	)
+
+	target_hosts := make( map[string]bool )					// hosts that are actually affected by the queue list
+	if phsuffix != nil {									// need to convert the host names in the list to have suffix
+		nql := make( []string, len( qlist ) )
+
+		for i := range qlist {
+			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
+			if len( toks ) == 2 {
+				nh := add_phost_suffix( &toks[0],  phsuffix )		// add the suffix
+				nql[i] = *nh + "/" +  toks[1]
+				target_hosts[*nh] = true
+			} else {
+				nql[i] = qlist[i]
+				fq_sheep.Baa( 1, "target host not snarfed: %s", qlist[i] )
+			}
+		}
+
+		qlist = nql
+	} else {												// just snarf the list of hosts affected
+		for i := range qlist {
+			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
+			if len( toks ) == 2 {
+				target_hosts[toks[0]] = true
+			}
+		}
+	}
 
 	fq_sheep.Baa( 1, "adjusting queues:  sending %d queue setting items to agents",  len( qlist ) );
 
@@ -138,14 +209,14 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 
 	qjson_pfx+= ` ], "hosts": [ `
 
-	hosts := strings.Split( *hlist, " " )
 	sep = ""
-	for i := range hosts {			// build one request per host and send to agents -- multiple ageents then these will fan out
-		qjson = qjson_pfx			// seed the next request with the constant prefix
-		qjson += fmt.Sprintf( "%s%q", sep, hosts[i] )
+	for h := range target_hosts {			// build one request per host and send to agents -- multiple ageents then these will fan out
+		qjson = qjson_pfx					// seed the next request with the constant prefix
+		qjson += fmt.Sprintf( "%s%q", sep, h )
 
 		qjson += ` ] } ] }`
 	
+		fq_sheep.Baa( 2, "queue update: host=%s %s", h, qjson )
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, qjson, nil )		// send this as a short request to one agent
 	}
@@ -173,11 +244,13 @@ func adjust_queues_agent( qlist []string, hlist *string ) {
 					of the port based on the mac address of the mbox.
 		Pri		- Fmod priority
 
+	phsuffix is the physical host suffix that must be added to each host endpoint name. 
+
 	TODO: this needs to be expanded to be generic and handle all possible match/action parms
 		not just the ones that are specific to res and/or steering.  It will probably need 
 		an on-all flag in the main request struct rather than deducing it from parms. 
 */
-func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) {
+func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, phsuffix *string ) {
 
 	if data == nil {
 		return
@@ -227,6 +300,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 			smac = ip2mac[*data.Match.Ip1]
 			if smac == nil {
 				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Ip1 )
+				fq_sheep.Baa( 1, "ip2mac has %d entries", len( ip2mac ) )
 				return
 			}
 		}
@@ -249,12 +323,12 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 		match_opts += " -d " + *dmac
 	}
 
-	if data.Match.Tpsport > 0 {
-		match_opts += fmt.Sprintf( " -p %s:%d", *data.Tptype, data.Match.Tpsport )
+	if *data.Match.Tpsport != "0" {
+		match_opts += fmt.Sprintf( " -p %s:%s", *data.Tptype, *data.Match.Tpsport )
 	}
 
-	if data.Match.Tpdport > 0 {
-		match_opts += fmt.Sprintf( " -P %s:%d", *data.Tptype, data.Match.Tpdport )
+	if *data.Match.Tpdport != "0" {
+		match_opts += fmt.Sprintf( " -P %s:%s", *data.Tptype, *data.Match.Tpdport )
 	}
 
 	if data.Extip != nil  &&   *data.Extip != "" {					// an external IP address must be matched in addition to gw mac
@@ -324,28 +398,54 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) 
 
 	action_opts = fmt.Sprintf( "%s %s", action_opts, output )		// set up actions
 
-	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+	// ---- end building the fmod parms, now build an agent message and send it to agent manager to send -------------
+	//base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-	if data.Swid == nil {											// blast the fmod to all named hosts if a single target is not named
+	//FIX-ME:  This check _should_ be based on Espq.Switch and not swid but need to confirm that nothing is sending 
+	//			with nil swid and something like br-int in Espq.Switch first.
+	// 			When this is changed, res_mgr will be affected in table_9x_fmods().
+	if data.Swid == nil {											// blast the fmod to all known hosts if a single target is not named
 		hosts := strings.Split( *hlist, " " )
 		for i := range hosts {
 			tmsg := ipc.Mk_chmsg( )									// must have one per since we dont wait for an ack
 
-			json := base_json
-			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0x%x %s"`, hosts[i], table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
-			json += ` ] } ] }`
-			fq_sheep.Baa( 2, "json: %s", json )
-			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+			msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
+			msg.Actions = make( []action, 1 )
+			msg.Actions[0].Atype = "flowmod"
+			msg.Actions[0].Hosts = make( []string, 1 )
+			msg.Actions[0].Hosts[0] = hosts[i]
+			msg.Actions[0].Fdata = make( []string, 1 )
+			msg.Actions[0].Fdata[0] = fmt.Sprintf( `%s -t %d -p %d %s %s add 0x%x %s`, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, data.Espq.Switch )
+
+			json, err := json.Marshal( msg )			// bundle into a json string
+			if err != nil {
+				fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+			} else {
+				fq_sheep.Baa( 2, "json: %s", json )
+				tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+			}
 		}
 	} else {															// fmod goes only to the named switch
-		json := base_json
-		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s add 0x%x %s"`, 
-			data.Espq.Switch, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	// Espq.Switch has real name (host) of switch
-		json += ` ] } ] }`
-		fq_sheep.Baa( 2, "json: %s", json )
-
-		tmsg := ipc.Mk_chmsg( )
-		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
+		sw_name := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
+		if phsuffix != nil {											// we need to add the physical host suffix
+			sw_name = add_phost_suffix( sw_name, phsuffix ) 			// TODO: this needs to handle intermediate switches properly; ok for Q-lite, but not full
+		}
+	
+		msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
+		msg.Actions = make( []action, 1 )
+		msg.Actions[0].Atype = "flowmod"
+		msg.Actions[0].Hosts = make( []string, 1 )
+		msg.Actions[0].Hosts[0] = *sw_name
+		msg.Actions[0].Fdata = make( []string, 1 )
+		msg.Actions[0].Fdata[0] = fmt.Sprintf( `%s -t %d -p %d %s %s add 0x%x %s`, table, timeout, data.Pri, match_opts, action_opts, data.Cookie, *data.Swid )	
+		json, err := json.Marshal( msg )						// bundle into a json string
+		if err != nil {
+			fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+		} else {
+			fq_sheep.Baa( 2, "json: %s", json )
+			tmsg := ipc.Mk_chmsg( )
+			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+		}
 	}
 }
 
@@ -371,6 +471,8 @@ func req_hosts(  rch chan *ipc.Chmsg ) {
 /*
 	Send a request to openstack interface for an ip to mac map. We will _not_ wait on it 
 	and will handle the response in the main loop. 
+
+	Deprecated with lazy update -- a push on our behalf is requested at reservation time
 */
 func req_ip2mac(  rch chan *ipc.Chmsg ) {
 	fq_sheep.Baa( 2, "requesting host list from osif" )
@@ -409,6 +511,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
 		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
 		alt_table	int = DEF_ALT_TABLE		// meta data marking table
+		phost_suffix *string = nil			// physical host suffix added to each host name in the list from openstack (config)
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
 	)
@@ -468,6 +571,13 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		if p := cfg_data["fqmgr"]["verbose"]; p != nil {
 			fq_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
+
+		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {		// suffix added to physical host strings for agent commands
+			if *p != "" {
+				phost_suffix = p
+				fq_sheep.Baa( 1, "physical host names will be suffixed with: %s", *phost_suffix )
+			}
+		}
 	}
 	// ----- end config file munging ---------------------------------------------------
 
@@ -496,7 +606,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			case REQ_GEN_FMOD:							// generic fmod; just pass it along w/o any special handling
 				if msg.Req_data != nil {
 					fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of our expected goodies
-					send_gfmod_agent( fdata,  ip2mac, host_list )
+					send_gfmod_agent( fdata,  ip2mac, host_list, phost_suffix )
 				}
 
 			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod
@@ -524,10 +634,10 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 						resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
-						if cdata.Single_switch {
+						if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
 							resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
 						} else {
-							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for traffic going through the rate limiting bridge
+							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
 						}
 						cdata.Resub = &resub_list
 				
@@ -537,22 +647,22 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						if fdata.Dir_in  {						// inbound to this switch we need to revert dscp from our settings to the 'origianal' settings
 							if cdata.Single_switch {
 								cdata.Match.Dscp =  -1				// there is no match if both on same switch
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
 							} else {
 								cdata.Match.Dscp = cdata.Dscp						// match the dscp that was added on ingress
 								if ! cdata.Dscp_koe {								// dropping the value on exit
 									cdata.Action.Dscp = 0							// set action to turn it off, otherwise we let it ride (no overt action)
 								}
 
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
 							}
 						} else {													// outbound from this switch set the dscp value specified on the reservation
 							cdata.Match.Dscp =  -1									// on outbound there is no dscp match, ensure this is off
 							if cdata.Single_switch {
-								send_gfmod_agent( cdata,  ip2mac, host_list )		// in single switch mode there is no dscp value needed
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )		// in single switch mode there is no dscp value needed
 							} else {
 								cdata.Action.Dscp = cdata.Dscp						// otherwise set the value and send
-								send_gfmod_agent( cdata,  ip2mac, host_list )
+								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
 							}
 						}
 					}
@@ -585,9 +695,9 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			case REQ_SETQUEUES:								// request from reservation manager which indicates something changed and queues need to be reset
 				qlist := msg.Req_data.( []interface{} )[0].( []string )
 				if ssq_cmd != nil {
-					adjust_queues( qlist, ssq_cmd, host_list ) 	// if writing to a file and driving a local script
+					adjust_queues( qlist, ssq_cmd, host_list ) 					// if writing to a file and driving a local script
 				} else {
-					adjust_queues_agent( qlist, host_list )		// if sending json to an agent
+					adjust_queues_agent( qlist, host_list, phost_suffix )		// if sending json to an agent
 				}
 
 			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
@@ -595,38 +705,45 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
 					if  msg.Response_data.( *string ) != nil {
-						host_list = msg.Response_data.( *string )
-						send_hlist_agent( host_list )							// send to agent_manager
-						fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
+						hls := strings.TrimLeft( *(msg.Response_data.( *string )), " \t" )		// ditch leading whitespace
+						hl := &hls
+						if *hl != ""  {
+							host_list = hl										// ok to use it
+							if phost_suffix != nil {
+								fq_sheep.Baa( 2, "host list from osif before suffix added: %s", *host_list )
+								host_list = add_phost_suffix( host_list, phost_suffix )		// in some cases ostack sends foo, but we really need to use foo-suffix (sigh)
+							}
+							send_hlist_agent( host_list )							// send to agent_manager
+							fq_sheep.Baa( 2, "host list received from osif: %s", *host_list )
+						} else {
+							fq_sheep.Baa( 1, "host list received from osif was discarded: ()" )
+						}
 					} else {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
 					}
 				} else {
 					fq_sheep.Baa( 2, "requesting lists from osif" )
 					req_hosts( my_chan )					// send requests to osif for data
-					req_ip2mac( my_chan )
+					//req_ip2mac( my_chan )
 				}
 
-			case REQ_IP2MACMAP:								// caution: this  comes as a response; the request is generated by chostlist processing so we need 1 tickle
-				msg.Response_ch = nil;						// regardless of source, we should not reply to this request
-
-				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
-					if  msg.Response_data != nil {
-						newmap := msg.Response_data.( map[string]*string )
-						if len( newmap ) > 0  {
-							ip2mac = newmap										// safe to replace
-							fq_sheep.Baa( 2, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
-						}else {
-							if ip2mac != nil {
-								fq_sheep.Baa( 2, "ip2mac translation received from osif: 0 elements -- kept old table with %d elements", len( ip2mac ) )
-							} else {
-								fq_sheep.Baa( 2, "ip2mac translation received from osif: 0 elements -- no existing table to keep" )
-							}
+			case REQ_IP2MACMAP:								// a new map from osif
+				if  msg.Req_data != nil {
+					newmap := msg.Req_data.( map[string]*string )
+					if len( newmap ) > 0  {
+						ip2mac = newmap										// safe to replace
+						fq_sheep.Baa( 2, "ip2mac translation received from osif: %d elements", len( ip2mac ) )
+					}else {
+						if ip2mac != nil {
+							fq_sheep.Baa( 2, "ip2mac translation received from osif: 0 elements -- kept old table with %d elements", len( ip2mac ) )
+						} else {
+							fq_sheep.Baa( 2, "ip2mac translation received from osif: 0 elements -- no existing table to keep" )
 						}
-					} else {
-						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected ip2mac translation map  [TGUFQM010]" )
 					}
+				} else {
+					fq_sheep.Baa( 0, "WRN: no  data from osif (nil map); expected ip2mac translation map  [TGUFQM010]" )
 				}
+				msg.State = nil								// state is always good
 
 			default:
 				fq_sheep.Baa( 1, "unknown request: %d", msg.Msg_type )

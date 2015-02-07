@@ -16,6 +16,7 @@
 							to be accepted. 
 				07 Jul 2014 - Added clone function.
 				24 Sep 2014 - Support for keep/delete toggle for dscp values
+				16 Jan 2014 - Conversion of transport port information to string to allow for mask.
 */
 
 package gizmos
@@ -32,15 +33,15 @@ import (
 	"strings"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/clike"
 )
 
 type Pledge struct {
 	host1		*string
 	host2		*string
-	tpport1		int			// transport port number or 0 if not defined
-	tpport2		int			// thee match h1/h2 respectively
 	protocol	*string		// tcp/udp:port (for steering)
+	tpport1		*string		// transport port number or 0 if not defined
+	tpport2		*string		// thee match h1/h2 respectively
 	commence	int64
 	expiry		int64
 	bandw_in	int64		// bandwidth to reserve inbound to host1
@@ -117,8 +118,7 @@ func adjust_window( commence int64, conclude int64 ) ( adj_start int64, err erro
 	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward 
 	(to the current time) if it is less than the current time.
 */
-func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int, dscp_koe bool ) ( p *Pledge, err error ) {
-
+func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int, dscp_koe bool ) ( p *Pledge, err error ) {
 	err = nil
 	p = nil
 
@@ -177,7 +177,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 int, p2 int, commence int64, ex
 
 	TODO: eventually steering needs to match on protocol.
 */
-func Mk_steer_pledge( ep1 *string, ep2 *string, p1 int, p2 int, commence int64, expiry int64, id *string, usrkey *string, proto *string ) ( p *Pledge, err error ) {
+func Mk_steer_pledge( ep1 *string, ep2 *string, p1 *string, p2 *string, commence int64, expiry int64, id *string, usrkey *string, proto *string ) ( p *Pledge, err error ) {
 	err = nil
 	p = nil
 
@@ -267,17 +267,23 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	tokens := strings.Split( *jp.Host1, ":" )
 	p.host1 = &tokens[0]
 	if len( tokens ) > 1 {
-		p.tpport1 = clike.Atoi( tokens[1] )
+		//p.tpport1 = clike.Atoi( tokens[1] )
+		p.tpport1 =  &tokens[1]
 	} else {
-		p.tpport1 = 0
+		dup_str := "0"
+		p.tpport1 = &dup_str
+		//p.tpport1 = 0
 	}
 
 	tokens = strings.Split( *jp.Host2, ":" )
 	p.host2 = &tokens[0]
 	if len( tokens ) > 1 {
-		p.tpport2 = clike.Atoi( tokens[1] )
+		//p.tpport2 = clike.Atoi( tokens[1] )
+		p.tpport2 = &tokens[1] 
 	} else {
-		p.tpport2 = 0
+		//p.tpport2 = 0
+		dup_str := "0"
+		p.tpport2 = &dup_str
 	}
 
 	p.protocol = jp.Protocol
@@ -486,15 +492,15 @@ func (p *Pledge) To_json( ) ( json string ) {
 	
 	switch p.ptype {
 		case PT_BANDWIDTH:
-				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "bandwidth", "dscp_koe": %v }`, 
-							state, diff, p.bandw_in,  p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid, p.dscp_koe )
+				json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v, "ptype": "bandwidth" }`, 
+					state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.id, *p.qid, p.dscp, p.dscp_koe )
 
 		case PT_STEERING:
 				if p.protocol != nil {
-					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "protocol": %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
 							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.protocol, *p.id, *p.qid )
 				} else {
-					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%d", "host2": "%s:%d", "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
 							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
 				}
 				sep := ""
@@ -529,7 +535,7 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 	
 	switch p.ptype {
 		case PT_BANDWIDTH:
-				chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
+				chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
 						*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, p.ptype )
 
 		case PT_STEERING:
@@ -778,16 +784,16 @@ func (p *Pledge) Get_hosts( ) ( *string, *string ) {
 	Returns the set of values that are needed to create a pledge in the network:
 		pointer to host1 name,
 		pointer to host2 name,
-		the h1 transport port number or 0
-		the h2 transport port number or 0
+		the h1 transport port number and mask or ""
+		the h2 transport port number and mask or ""
 		the commence time,
 		the expiry time,
 		the inbound bandwidth,
 		the outbound bandwidth
 */
-func (p *Pledge) Get_values( ) ( *string, *string, int, int, int64, int64, int64, int64 ) {
+func (p *Pledge) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *string, commence int64, expiry int64, bw_in int64, bw_out int64 ) {
 	if p == nil {
-		return &empty_str, &empty_str, 0, 0, 0, 0, 0, 0
+		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
 	}
 
 	return p.host1, p.host2, p.tpport1, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out 

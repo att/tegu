@@ -67,7 +67,37 @@
 				29 Oct 2014 : Corrected issue where vlan id was being set when both VMs are on the same switch (bug 242)
 				30 Oct 2014 : Corrected bug with setting the source/dest flag for external IP addresses in flowmod req (bug 243)
 				03 Nov 2014 : Merged steering and lite branches into steering branch; version bump to 3.2.
+				04 Nov 2014 : Build to pick up ostack library change.
+				10 Nov 2014 : Build to pick up ostack library change (small tokens).
+				11 Nov 2014 : Change to support host name suffix in fqmgr.
+				12 Nov 2014 : Change to strip phys host suffix from phys map.
+				13 Nov 2014 : Correct out of bounds excpetion in fq-manager.
+				17 Nov 2014 : Converted the openstack interface to a lazy update method rather than attempting to 
+							prefetch all of the various translation maps and then to keep them up to date.
+				19 Nov 2014 : Correct bug in checkpoint path attachment to reservation.
+				24 Nov 2014 : Floating IP address requirement for cross tenant reservations, and reservations between VM and an
+							 external host has been modified.
+				04 Dec 2014 : Uses enabled host list from ostack inteface.
+				05 Dec 2014 : Added work round for keystone/privs token investigation issue in AIC once they started using LDAP.
+				07 Dec 2014 : Corrected default tickler time for set intermediate queues.
+				16 Dec 2014 : Corrected bugs in lazy update translation of VM ID to ip.
+				08 Jan 2015 : Corrected a bug that was causing the wrong gateway to be slected as the endpoint for an
+							external reservation.
+				09 Jan 2015 : Augmented the 1/8 fix to not assume the subnet list is limited by project in the creds.
+							Changes to allow for finding all IP addresses assigned to a VM, not just the first.
+				16 Jan 2015 : Added support for mask on the transport port specification.
+							Changed meta table flow-mod generation to happen with queue changes and to push only to nodes
+							in the queue list rather than to all nodes.
+				26 Jan 2015 : Corrected bug in fq_mgr that was causing inbound data to use meta marking in base+1 rather than base table.
+				27 Jan 2015 : Allow bandwidth to be specified as a decimal (e.g 10.2M) on a reservation command.
+				29 Jan 2015 : Changes to send fmod requests to the ssh-broker enabled agent.
+				01 Feb 2015 - Corrected bug introduced when host name removed from fmod command (agents with ssh-broker change).
 
+	Version number "logic":
+				3.0		- QoS-Lite version of Tegu
+				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
+				3.1		- QoS-Lite with steering added
+				3.2		- QoS-Lite with steering and WACC support added
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
 
@@ -96,7 +126,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.2/1b034"
+		version		string = "v3.1.2/1b034"		// 3.1.x == steering branch version
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -116,7 +146,7 @@ func main() {
 	)
 
 	sheep = bleater.Mk_bleater( 1, os.Stderr )
-	sheep.Set_prefix( "main/3.0b" )
+	sheep.Set_prefix( "main/3.0" )
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
@@ -167,25 +197,27 @@ func main() {
 	my_chan := make( chan *ipc.Chmsg )								// channel and request block to ping net, and then to send all sys up
 	req := ipc.Mk_chmsg( )
 
-	// if there is a checkpoint file, then we need to block until we have a full network topology which includes:
-	// openstack data, json data, and physical data from the agent(s).  Once that's in place, then we can 
-	// load the checkpoint file.  Once the checkpoint is loaded then we can open the api for real work. 
-	// 
-	if *chkpt_file != "" {
-	
-		for {
-			req.Response_data = 0
-			req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
-			req = <- my_chan													// block until we have a response back
+	/*
+		Block until the network is initialised. We need to do this so that when the checkpoint file is read reservations
+		can be added without missing network pieces.  Even if there is no checkpoint file, or it's empty, blocking 
+		prevents reservation rejections because the network graph isn't in working order.  At the moment, with lazy
+		udpating, the block is until we have a physical host map back from the agent world.  This can sometimes take
+		a minute or two.
+	*/
+	for {																	// hard block to wait on network readyness
+		req.Response_data = 0
+		req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
+		req = <- my_chan													// block until we have a response back
 
-			if req.Response_data.(int) == 2 {									// wait until we have everything in the network
-				break
-			}
-
-			sheep.Baa( 2, "waiting for network to initialise before processing checkpoint file: %d", req.Response_data.(int)  )
-			time.Sleep( 5 * time.Second )
+		if req.Response_data.(int) == 2 {									// wait until we have everything that the network needs to build a reservation
+			break
 		}
 
+		sheep.Baa( 2, "waiting for network to initialise: need state 2, current state = %d", req.Response_data.(int)  )
+		time.Sleep( 5 * time.Second )
+	}
+
+	if *chkpt_file != "" {
 		sheep.Baa( 1, "network initialised, sending chkpt load request" )
 		req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, chkpt_file, nil )
 		req = <- my_chan												// block until the file is loaded
@@ -194,6 +226,8 @@ func main() {
 			sheep.Baa( 0, "ERR: unable to load checkpoint file: %s: %s\n", *chkpt_file, req.State )
 			os.Exit( 1 )
 		}
+	} else {
+		sheep.Baa( 1, "network initialised, opening up system for all requests" )
 	}
 
 	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know

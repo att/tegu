@@ -44,6 +44,12 @@
 				10 Oct 2014 - Correct bi-directional link bug (228)
 				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly 
 					setting the -S or -D flag for an external IP (#243).
+				12 Nov 2014 - Change to strip suffix on phost map.
+				17 Nov 2014 - Changes for lazy mapping.
+				24 Nov 2014 - Changes to drop the requirement for both VMs to have a floating IP address 
+					if a cross tenant reservation is being made. Also drops the requirement that the VM 
+					have a floating IP if the reservation is being made with a host using an external
+					IP address.
 */
 
 package managers
@@ -85,6 +91,7 @@ type Network struct {
 	ip2mac		map[string]*string			// IP to mac	Tegu-lite
 	ip2vmid		map[string]*string			// ip to vm-id translation	Tegu-lite
 	vmid2phost	map[string]*string			// vmid to physical host name	Tegu-lite
+	vmip2gw		map[string]*string			// vmid to it's gateway
 	vmid2ip		map[string]*string			// vmid to ip address	Tegu-lite
 	mac2phost	map[string]*string			// mac to phost map generated from OVS agent data (needed to include gateways in graph)
 	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
@@ -122,8 +129,8 @@ func mk_network( mk_links bool ) ( n *Network ) {
 	return
 }
 
+// -------------- map management (mostly tegu-lite) -----------------------------------------------------------
 /*
-	Tegu-lite
 	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
 */
 func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
@@ -138,10 +145,14 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 		for ip, mac := range n.ip2mac {				// add in regular VMs
 			vmid := n.ip2vmid[ip]
-			if vmid != nil {						// skip if we don't find a vmid
-				net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
-				hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
-				i++
+			if vmid != nil && mac != nil {						// skip if we don't find a vmid
+				if n.vmid2phost[*vmid] != nil {
+					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
+					i++
+				} else {
+					net_sheep.Baa( 1, "did NOT add host: mac=%s ip=%s phost=NIL", *mac, ip )
+				}
 			}
 		}
 
@@ -174,6 +185,88 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 	return
 }
+
+/*
+	Using a net_vm struct update the various maps. Allows for lazy discovery of 
+	VM information rather than needing to request everything all at the same time.
+*/
+func (net *Network) insert_vm( vm *Net_vm ) {
+	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
+	if vname == nil {								// shouldn't happen, but be safe
+		return
+	}
+
+	if net.vm2ip == nil {							// ensure everything exists
+		net.vm2ip = make( map[string]*string )
+	}
+	if net.ip2vm == nil {
+		net.ip2vm = make( map[string]*string )
+	}
+
+	if net.vmid2ip == nil {
+		net.vmid2ip = make( map[string]*string )
+	}
+	if net.ip2vmid == nil {
+		net.ip2vmid = make( map[string]*string )
+	}
+
+	if net.vmid2phost == nil {
+		net.vmid2phost = make( map[string]*string )
+	}
+	if net.mac2phost == nil {
+		net.mac2phost = make( map[string]*string )
+	}
+
+	if net.ip2mac == nil {
+		net.ip2mac = make( map[string]*string )
+	}
+
+	if net.fip2ip == nil {
+		net.fip2ip = make( map[string]*string )
+	}
+	if net.ip2fip == nil {
+		net.ip2fip = make( map[string]*string )
+	}
+
+	if net.gwmap == nil {
+		net.gwmap = make( map[string]*string )
+	}
+
+	if net.vmip2gw == nil {
+		net.vmip2gw = make( map[string]*string )
+	}
+	
+
+
+	if vname != nil {
+		net.vm2ip[*vname] = vip4
+	}
+	
+	if vid != nil {
+		net.vmid2ip[*vid] = vip4
+		net.vmid2phost[*vid] = vphost
+	}
+
+	if vip4 != nil {
+		net.ip2vmid[*vip4] = vid
+		net.ip2vm[*vip4] = vname
+		net.ip2mac[*vip4] = vmac
+		net.ip2fip[*vip4] = vfip
+		net.vmip2gw[*vip4] = gw
+	}
+
+	if vfip != nil {
+		net.fip2ip[*vfip] = vip4
+	}
+
+	vgwmap := vm.Get_gwmap()					// don't assume that all gateways are present in every map
+	if vgwmap != nil {							// as it may be just related to the VM and not every gateway
+		for k, v := range vgwmap {
+			net.gwmap[k] = v
+		}	
+	}
+}
+
 
 /*
 	Given a user name find a fence in the table, or copy the defaults and 
@@ -212,7 +305,7 @@ func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
 	This is needed to map gateway hosts to physical hosts since openstack does not return the gateways
 	with the same info as it does VMs
 */
-func (n *Network) update_mac2phost( list []string ) {
+func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 	if n.mac2phost == nil {
 		n.mac2phost = make( map[string]*string )
 	}
@@ -220,6 +313,10 @@ func (n *Network) update_mac2phost( list []string ) {
 	for i := range list {
 		toks := strings.Split( list[i], " " )
 		dup_str := toks[0]
+		if phost_suffix != nil {								// if we added a suffix to the host, we must strip it away
+			stoks := strings.Split( toks[0], *phost_suffix )
+			dup_str = stoks[0]
+		} 
 		n.mac2phost[toks[1]] = &dup_str
 	}
 
@@ -608,6 +705,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 }
 
 /*
+	DEPRECATED
 	Given a tenant id, find the associated gateway.  Returns the whole tenant/ip string. 
 
 	TODO: return list if multiple gateways
@@ -674,6 +772,13 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
 	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
 	shortcut and thus not needing to supply the same authorisation token twice on the request. 
+
+	We now allow a VM to make a reservation with an external address without a floating point IP
+	since the VM's floating point IP is only needed on a reservation that would be made from 
+	the "other side".   If the VM doesn't have a floating IP, then it WILL be a problem if the reservation
+	is being made between two tennants, but if for some odd reason a truely external IP address is 
+	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
+	the VM doesn't have a floating IP. 
 */
 func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair ) {
 	var (
@@ -738,18 +843,24 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		}
 	}
 
+	zip := "0.0.0.0"										// dummy which allows vm-name,!//ipaddress without requiring vm to have a floating point ip
 	if f1 == nil {
-		net_sheep.Baa( 1, "find_endpoints: unable to map host to floating ip: %s", *h1ip )
-		return
+		f1 = &zip											// possible VM-name without fip -> !//IPaddr
 	}
 
 	if f2 == nil {
-		net_sheep.Baa( 1, "find_endpoints: unable to map host to floating ip: %s", *h2ip )
+		f2 = &zip											// possible !//IPaddr -> vm-name without fip
+	}
+
+	if f1 == f2 {											// one of the two must have had some kind of external address (floating IP or real IP)
+		net_sheep.Baa( 1, "find_endpoints: neither host had an external or floating IP: %s %s", *h1ip, *h2ip )
 		return
 	}
 
-	g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
-	g2 := n.gateway4tid( t2 )
+	//g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
+	//g2 := n.gateway4tid( t2 )
+	g1 := n.vmip2gw[*h1ip]							// pick up the gateway for each of the VMs
+	g2 := n.vmip2gw[*h2ip]
 
 	h2i := nalloc - 1								// insertion point for h2 into pair list
 	pair_list = make( []host_pair, nalloc )			// build the list based on number of validated
@@ -1229,6 +1340,25 @@ func (n *Network) to_json( ) ( jstr string ) {
 	return
 }
 
+/*
+	Transfer maps from an old network grah to this one
+*/
+func (net *Network) xfer_maps( old_net *Network ) {
+	net.vm2ip = old_net.vm2ip
+	net.ip2vm = old_net.ip2vm
+	net.vmid2ip = old_net.vmid2ip
+	net.ip2vmid = old_net.ip2vmid
+	net.vmid2phost = old_net.vmid2phost	
+	net.vmip2gw = old_net.vmip2gw
+	net.ip2mac = old_net.ip2mac
+	net.mac2phost = old_net.mac2phost
+	net.gwmap = old_net.gwmap
+	net.fip2ip = old_net.fip2ip
+	net.ip2fip = old_net.ip2fip
+	net.limits = old_net.limits
+}
+
+
 // --------- public -------------------------------------------------------------------------------------------
 
 /*
@@ -1248,6 +1378,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		link_headroom int = 0				// percentage that each link capacity is reduced by
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence			// user link capacity boundaries
+		phost_suffix *string = nil
 
 		ip2		*string
 	)
@@ -1270,6 +1401,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	tegu_sheep.Add_child( net_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 	limits = make( map[string]*gizmos.Fence )
+	if cfg_data["fqmgr"] != nil {								// we need to know if fqmgr is adding a suffix to physical host names so we can strip
+		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {
+			phost_suffix = p
+			net_sheep.Baa( 1, "will strip suffix from mac2phost map: %s", *phost_suffix )
+		}	
+	}
+
 														// suss out config settings from our section
 	if cfg_data["network"] != nil {
 		if p := cfg_data["network"]["refresh"]; p != nil {
@@ -1355,36 +1493,16 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 				switch req.Msg_type {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
-					case REQ_STATE:			// return state of data: 1 == vm xlation (orig), 2 == all ostack data for q-lite
-							state := 0
-							if act_net.vm2ip != nil  && act_net.ip2vm != nil { 		// non q-lite oriented things 
-								state = 1
-							}
-							if act_net.vmid2ip != nil  && 							// check for q-lite tables and ensure they have size
-									act_net.ip2vmid != nil  && 
-									act_net.vmid2phost	 != nil  && 
-									act_net.ip2mac != nil  && 
-									act_net.mac2phost != nil  && 
-									act_net.gwmap != nil  && 
-									act_net.fip2ip != nil  && 
-									act_net.ip2fip != nil  {
-								if len( act_net.vmid2ip ) > 0   && 						
-										len( act_net.ip2vmid ) > 0   && 
-										len( act_net.vmid2phost	 ) > 0   && 
-										len( act_net.ip2mac ) > 0   && 
-										len( act_net.mac2phost ) > 0   && 
-										len( act_net.gwmap ) > 0   && 
-										len( act_net.fip2ip ) > 0   && 
-										len( act_net.ip2fip ) > 0   {
-									if act_net.hupdate {							// tables there, but only good if host table updated after gwmap had data
-										state = 2
-									}
-								}
-							}
+					case REQ_STATE:			// return state with respect to whether we have enough data to allow reservation requests 
+						state := 0			// value reflects ability 2 == have all we need; 1 == have partial, but must block, 0 == have nothing
+						mlen := 0
+						if act_net.mac2phost != nil  && len( act_net.mac2phost ) > 0 {	// in lazy update world, we need only the agent supplied data
+							mlen =  len( act_net.mac2phost )
+							state = 2													// once we have it we are golden
+						}
+						net_sheep.Baa( 1, "net-state: m2pho=%v/%d state=%d", act_net.mac2phost == nil, mlen, state )
 
-							net_sheep.Baa( 1, "net-state: v2ip=%v  ip2v=%v v2pho=%v ip2m=%v m2pho=%v gwm=%v/%v fip2ip=%v  state=%d", act_net.vmid2ip != nil, act_net.ip2vmid != nil, 
-									act_net.vmid2phost	 != nil, act_net.ip2mac != nil, act_net.mac2phost != nil, act_net.gwmap != nil, act_net.hupdate, act_net.fip2ip != nil, state  )
-							req.Response_data = state
+						req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
 						p := req.Req_data.( *gizmos.Pledge )
@@ -1499,6 +1617,17 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
 						}
 
+					case REQ_ADD:							// insert new information into the various vm maps
+						if req.Req_data != nil {
+							vm := req.Req_data.( *Net_vm )
+							act_net.insert_vm( vm )
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
+							if new_net != nil {
+								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
+								act_net = new_net							// and finally use it
+							}
+						}
+						
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 
 						if req.Req_data != nil {
 							act_net.vm2ip = req.Req_data.( map[string]*string )
@@ -1533,8 +1662,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_IP2MAC:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.ip2mac = req.Req_data.( map[string]*string )
-							for k, v := range act_net.ip2mac {
-								net_sheep.Baa( 3, "ip2mac: %s --> %s", k, *v )
+							if net_sheep.Would_baa( 3 ) {
+								for k, v := range act_net.ip2mac {
+									net_sheep.Baa( 3, "ip2mac: %s --> %s", k, *v )
+								}
 							}
 						} else {
 							net_sheep.Baa( 1, "ip2mac map was nil; not changed" )
@@ -1543,9 +1674,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_GWMAP:									// Tegu-lite
 						if req.Req_data != nil {
 							act_net.gwmap = req.Req_data.( map[string]*string )
-							net_sheep.Baa( 1, "gw map received, contains %d items", len( act_net.gwmap ) )
-							for k, v := range act_net.gwmap {
-								net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
+							if net_sheep.Would_baa( 3 ) {
+								for k, v := range act_net.gwmap {
+									net_sheep.Baa( 3, "gwmap: %s --> %s", k, *v )
+								}
 							}
 						} else {
 							net_sheep.Baa( 1, "gw map was nil; not changed" )
@@ -1561,8 +1693,10 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_FIP2IP:
 						if req.Req_data != nil {
 							act_net.fip2ip = req.Req_data.( map[string]*string )
-							for k, v := range act_net.fip2ip {
-								net_sheep.Baa( 3, "fip2ip: %s --> %s", k, *v )
+							if net_sheep.Would_baa( 3 ) {
+								for k, v := range act_net.fip2ip {
+									net_sheep.Baa( 3, "fip2ip: %s --> %s", k, *v )
+								}
 							}
 						} else {
 							net_sheep.Baa( 1, "fip2ip map was nil; not changed" )
@@ -1625,35 +1759,12 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.Response_data = nil;
 						req.State = nil;
 
-					case REQ_NETUPDATE:								// build a new network graph
-						net_sheep.Baa( 2, "rebuilding network graph" )
+					case REQ_NETUPDATE:											// build a new network graph
+						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
 						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
 						if new_net != nil {
-							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back 
-							ip2vm_map := act_net.ip2vm
-							vmid2ip_map := act_net.vmid2ip
-							ip2vmid_map := act_net.ip2vmid
-							vmid2phost_map := act_net.vmid2phost	
-							ip2mac_map := act_net.ip2mac
-							mac2phost := act_net.mac2phost
-							gwmap := act_net.gwmap
-							fip2ip := act_net.fip2ip
-							ip2fip := act_net.ip2fip
-							limits := act_net.limits
-
+							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
 							act_net = new_net
-
-							act_net.vm2ip = vm2ip_map					// and put them back into the new one
-							act_net.ip2vm = ip2vm_map
-							act_net.vmid2ip = vmid2ip_map 
-							act_net.ip2vmid = ip2vmid_map 
-							act_net.vmid2phost	 = vmid2phost_map
-							act_net.ip2mac = ip2mac_map
-							act_net.mac2phost = mac2phost
-							act_net.gwmap = gwmap
-							act_net.fip2ip = fip2ip
-							act_net.ip2fip = ip2fip
-							act_net.limits = limits
 
 							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
 						} else {
@@ -1697,7 +1808,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							if hname == nil || *hname == "" {
 								net_sheep.Baa( 2, "unable to find name in vm2ip table" )
 
-								if net_sheep.Get_level() > 2 {
+								if net_sheep.Would_baa( 3 ) {
 									for k, v := range act_net.vm2ip {
 										net_sheep.Baa( 3, "vm2ip[%s] = %s", k, *v );
 									}
@@ -1717,7 +1828,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					// --------------------- agent things -------------------------------------------------------------
 					case REQ_MAC2PHOST:
 						req.Response_ch = nil			// we don't respond to these
-						act_net.update_mac2phost( req.Req_data.( []string ) )
+						act_net.update_mac2phost( req.Req_data.( []string ), phost_suffix )
 
 					default:
 						net_sheep.Baa( 1,  "unknown request received on channel: %d", req.Msg_type )
