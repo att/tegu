@@ -124,12 +124,12 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		match_opts += " -d " + *dmac
 	}
 
-	if data.Match.Tpsport >= 0 && data.Protocol != nil {						// we allow 0 as that means match all of this protocol
-        match_opts += fmt.Sprintf( " -p %s:%d", *data.Protocol, data.Match.Tpsport )
+	if *data.Match.Tpsport >= "0" && data.Protocol != nil {						// we allow 0 as that means match all of this protocol
+        match_opts += fmt.Sprintf( " -p %s:%s", *data.Protocol, data.Match.Tpsport )
     }
 
-    if data.Match.Tpdport >= 0 && data.Protocol != nil {
-        match_opts += fmt.Sprintf( " -P %s:%d", *data.Protocol, data.Match.Tpdport )
+    if *data.Match.Tpdport >= "0" && data.Protocol != nil {
+        match_opts += fmt.Sprintf( " -P %s:%s", *data.Protocol, data.Match.Tpdport )
     }
 
 	action_opts := ""

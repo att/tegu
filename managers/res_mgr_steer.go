@@ -22,7 +22,7 @@ import (
 	"time"
 
 	//"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/ipc"
 	"codecloud.web.att.com/tegu/gizmos"
 )
@@ -63,10 +63,20 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 	}
 
 	for i :=  nmb -1; i >= 0;  i-- {					// backward direction ep2->ep1
-		resub := "90 0"									// we resubmit to table 10 to set our meta data and then resub to 0 to catch openstack rules
+		resub := "90 0"									// we resubmit to table 90 to set our meta data and then resub to 0 to catch openstack rules
 
 		if i == nmb - 1 {								// for last mb we need a rule that causes steering to be skipped based on mb mac
+			fq_data = Mk_fqreq( rname )					// get a block and initialise to sane values
+			fq_match = fq_data.Match
+			fq_action = fq_data.Action
+
+			fq_data.Pri = 300
+			fq_data.Expiry = expiry
+
 			mb = mblist[i]
+			fq_match.Ip1 = ep1
+			fq_match.Meta = &mstr
+			/*
 			fq_match = &Fq_parms{						// new structs for each since they sit in fq manages quwue
 				Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 				Meta:	&mstr,
@@ -74,11 +84,16 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Tpdport: -1,
 				Tpsport: -1,
 			}
+			*/
 
+			fq_action.Resub = &resub
+			/*
 			fq_action = &Fq_parms{
 				Resub: &resub,							// resubmit to table 90 to set meta info, then to 0 to get tunnel matches
 			}
+			*/
 
+			/*
 			fq_data = &Fq_req {							// generate data with just what needs to be there
 				Pri:	300,
 				Id:		rname,
@@ -86,14 +101,15 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				Match:	fq_match,
 				Action:	fq_action,
 			}
+			*/
 
 			if proto != nil {								// set the protocol match port dest in forward direction, src in reverse
 				toks := strings.Split( *proto, ":" );
 				fq_data.Protocol = &toks[0]
 				if forward {
-					fq_data.Match.Tpdport = clike.Atoi( toks[1] )
+					fq_data.Match.Tpdport = &toks[1]
 				} else {
-					fq_data.Match.Tpsport = clike.Atoi( toks[1] )
+					fq_data.Match.Tpsport = &toks[1]
 				}
 			}
 
@@ -115,15 +131,28 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			msg.Send_req( fq_ch, nil, REQ_ST_RESERVE, fq_data, nil )			// final flow-mod from the last middlebox out
 		}
 
+
+		fq_data = Mk_fqreq( rname )					// get a block and initialise to sane values
+		fq_match = fq_data.Match
+		fq_action = fq_data.Action
+
+		fq_match.Meta = &mstr
+
+		/*
 		fq_match = &Fq_parms{
 			Swport:	-1,								// port 0 is valid, so we need something that is ignored if not set later
 			Meta:	&mstr,
 		}
+		*/
 
+		fq_action.Resub = &resub
+		/*
 		fq_action = &Fq_parms{
 			Resub: &resub,							// resubmit to table 10 to set meta info, then to 0 to get tunnel matches
 		}
+		*/
 
+		/*
 		fq_data = &Fq_req {						// fq-mgr request data
 			Id:		rname,
 			Expiry:	expiry,
@@ -131,6 +160,10 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			Action: fq_action,
 			Protocol: proto,
 		}
+		*/
+
+		fq_data.Expiry = expiry
+		fq_data.Protocol = proto
 		fq_data.Match.Ip1 = ep1
 		fq_data.Match.Ip2 = ep2
 
@@ -138,9 +171,9 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			toks := strings.Split( *proto, ":" );
 			fq_data.Protocol = &toks[0]
 			if forward {
-				fq_data.Match.Tpdport = clike.Atoi( toks[1] )
+				fq_data.Match.Tpdport = &toks[1]
 			} else {
-				fq_data.Match.Tpsport = clike.Atoi( toks[1] )
+				fq_data.Match.Tpsport = &toks[1]
 			}
 		}
 	
@@ -153,7 +186,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			} else {
 				fq_data.Swid = nil								// if ep1 is undefined (all), then we need a f-mod on all switches to handle ingress case
 			}
-			fq_data.Action.Tpsport = -1							// invalid port when writing to all too
+			fq_data.Action.Tpsport = &zero_string				// no speicifc match here
 			fq_data.Nxt_mac = mb.Get_mac( )
 			jstr, _ := fq_data.To_json( ) 
 			rm_sheep.Baa( 2, "write ingress fmod: %s", jstr )

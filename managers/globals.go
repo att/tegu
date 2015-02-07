@@ -191,7 +191,7 @@ var (
 type Fq_parms struct {
 	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
 	Ip2		*string
-	Tpsport	*string				// transport layer source port
+	Tpsport	*string				// transport layer source port (strings to allow mask)
 	Tpdport *string				// transport layer dest port
 	Swport	int					// the switch port 
 	Smac	*string				// source mac

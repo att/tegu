@@ -383,12 +383,13 @@ func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 /*
+	Get openstack host information.
 	Given a project-id/host as input, dig out all of the host's information and build a struct
 	that can be passed into the network manager as an add host to graph request. This
 	expects to run as a go routine and to write the response directly back on the channel
 	givn in the message block.
 */
-func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
+func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
 	if msg == nil {
 		return															// prevent accidents
 	}
