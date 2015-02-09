@@ -697,7 +697,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 				n.hosts[ip6] = h
 			}
 		} else {
-			net_sheep.Baa( 2, "skipping host in list (i=%d) attachement points=%d", len( hlist[i].Mac ) )
+			net_sheep.Baa( 2, "skipping host in list (i=%d) attachment points=%d", i, len( hlist[i].Mac ) )
 		}
 	}
 
