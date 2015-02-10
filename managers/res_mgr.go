@@ -51,6 +51,7 @@
 				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files 
 						written only when there are updates.
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
+				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
 */
 
 package managers
@@ -541,7 +542,7 @@ func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error )
 	plist := make( []*gizmos.Pledge, len( inv.cache ) )
 	i := 0
 	for _, p := range inv.cache {
-		if p.Has_host( vmname ) {
+		if p.Has_host( vmname ) && ! p.Is_expired()  && ! p.Is_paused() {
 			plist[i] = p
 			i++
 		}

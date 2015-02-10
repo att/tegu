@@ -90,6 +90,7 @@
 				29 Jan 2015 : Changes to send fmod requests to the ssh-broker enabled agent.
 				01 Feb 2015 : Corrected bug introduced when host name removed from fmod command (agents with ssh-broker change).
 				09 Feb 2015 : Added work round to deal with OVS/openflow small hard timeout limit.
+				10 Feb 2015 : Corrected bug with refresh. 
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -124,7 +125,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0.2/12095/a"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0.2/12105"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
