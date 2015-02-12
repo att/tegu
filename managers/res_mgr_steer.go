@@ -217,7 +217,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 /*
 	Push the fmod requests to fq-mgr for a steering resrvation. 
 */
-func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg, hto_limit int64 ) {
 
 	ep1, ep2, _, _, _, conclude, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
 	now := time.Now().Unix()
@@ -235,6 +235,11 @@ func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
 	nmb--
 	for i := range mblist {											// build middlebox list in reverse
 		mblist[nmb-i] = p.Get_mbox( i )
+	}
+
+	duration := conclude - now
+	if hto_limit > 0  && duration > hto_limit {			// ovs might have int32 timeout values -- resmgr will refresh to achieve full duration
+		duration = hto_limit
 	}
 	steer_fmods( ep2, ep1, mblist, conclude - now, &rname, p.Get_proto(), false )			// set backward fmods
 

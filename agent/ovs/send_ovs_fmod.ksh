@@ -53,7 +53,8 @@
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
 #				04 Feb 2014 - Set initial value of rhost to "" to prevent ssh to localhost
-# ---------------------------------------------------------------------------------------------
+#				09 Feb 2014 - Cap the hard timout to 18 hours to prevent ovs rejecting the flow-mod
+# ---------------------------------------------------------------------------------------------------------
 
 function logit
 {
@@ -340,7 +341,12 @@ do
 				-t)	
 					if(( $2 > 0 ))
 					then
-						hto="hard_timeout=$2,"
+						if (( $2 > 3600 * 18 ))						# ovs has a limit of about 18h12m, so limit at 18
+						then
+							hto="hard_timeout=$(( 3600 * 18 )),"
+						else
+							hto="hard_timeout=$2,"
+						fi
 					else
 						hto=""
 					fi

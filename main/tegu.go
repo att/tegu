@@ -91,7 +91,9 @@
 				26 Jan 2015 : Corrected bug in fq_mgr that was causing inbound data to use meta marking in base+1 rather than base table.
 				27 Jan 2015 : Allow bandwidth to be specified as a decimal (e.g 10.2M) on a reservation command.
 				29 Jan 2015 : Changes to send fmod requests to the ssh-broker enabled agent.
-				01 Feb 2015 - Corrected bug introduced when host name removed from fmod command (agents with ssh-broker change).
+				01 Feb 2015 : Corrected bug introduced when host name removed from fmod command (agents with ssh-broker change).
+				09 Feb 2015 : Added work round to deal with OVS/openflow small hard timeout limit.
+				10 Feb 2015 : Corrected bug with refresh. 
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu

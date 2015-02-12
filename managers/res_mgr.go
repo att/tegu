@@ -51,6 +51,8 @@
 						the queue list).
 				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files 
 						written only when there are updates.
+				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
+				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
 */
 
 package managers
@@ -268,11 +270,16 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	we will send the src mac address on the flow-mod at ingress so that the vlan is properly set
 	(suports br-rl in a GRE environment).
 
+	To_limit is a cap to the expiration time sent when creating a flow-mod.  OVS (and others we assume)
+	use an unsigned int32 as a hard timeout value, and thus have an upper limit of just over 18 hours. If
+	to_limit is > 0, we'll ensure that the timeout passed on the request to fq-mgr won't exceed  the limit,
+ 	and we assume that this function is called periodically to update long running reservations.
+
 	Returns the number of reservations that were pushed.
 
 	TODO: break this into res_mgr_bw.go
 */
-func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool  ) ( npushed int ) {
+func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, to_limit int64 ) ( npushed int ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -329,9 +336,15 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 						if p.Is_paused( ) {
 							fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
 						} else {
-							fmod.Expiry = expiry
+							if to_limit > 0 && expiry > now + to_limit {
+								fmod.Expiry = now + to_limit			// expiry must be capped so as not to overflow virtual switch variable size
+							} else {
+								fmod.Expiry = expiry
+							}
 						}
-						fmod.Id = rname
+						//fmod.Id = rname
+						fmod.Id = &rname
+//rm_sheep.Baa( 1, ">>>>>> exp=%d fmod->exp=%d now=%d to_lim=%d now+to_li=%d", expiry, fmod.Expiry, now, to_limit, now+to_limit )
 
 						nlinks := plist[i].Get_nlinks() 				// if only one link, then we DONT set vlan later
 						extip := plist[i].Get_extip()					// if an external IP address is necessary on the fmod get it
@@ -359,8 +372,8 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 							fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
 							fmod.Exttyp = plist[i].Get_extflag()
 
-							rm_sheep.Baa( 1, "res_mgr/push_reg: sending i/e flow-mods for path %d: %s flag=%s tptyp=%s h1=%s --> h2=%s ip1= %s ip2=%s ext=%s exp=%d",
-								i, *rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Extip, expiry )
+							rm_sheep.Baa( 1, "res_mgr/push_reg: sending i/e flow-mods for path %d: %s flag=%s tptyp=%s h1=%s --> h2=%s ip1= %s ip2=%s ext=%s exp/fm_exp=%d/%d",
+								i, rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Extip, expiry, fmod.Expiry )
 
 		
 							// ---- push flow-mods in the h1->h2 direction -----------
@@ -420,7 +433,7 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, hto_limit int64 ) ( npushed int ) {
 	var (
 		push_count	int = 0
 		pend_count	int = 0
@@ -447,10 +460,10 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
-						push_bw_reservations( p, &rname, ch, set_vlan ) 
+						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit ) 
 
 					case gizmos.PT_STEERING:
-						push_st_reservation( p, rname, ch )
+						push_st_reservation( p, rname, ch, hto_limit )
 				}
 			} else {
 				pend_count++
@@ -484,6 +497,16 @@ func (i *Inventory) pause_on( ) {
 func (i *Inventory) pause_off( ) {
 	for _, p := range i.cache {
 		p.Resume( true )					// also reset the push flag		
+	}
+}
+
+/*
+	Resets the pushed flag for all reservations so that we can periodically send them
+	when needing to avoid timeout limits in virtual switches.
+*/
+func (i *Inventory) reset_push() {
+	for _, p := range i.cache {
+		p.Reset_pushed( )	
 	}
 }
 
@@ -610,7 +633,7 @@ func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error )
 	plist := make( []*gizmos.Pledge, len( inv.cache ) )
 	i := 0
 	for _, p := range inv.cache {
-		if p.Has_host( vmname ) {
+		if p.Has_host( vmname ) && ! p.Is_expired()  && ! p.Is_paused() {
 			plist[i] = p
 			i++
 		}
@@ -841,6 +864,9 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		queue_gen_type = REQ_GEN_EPQMAP
 		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
 		all_sys_up	bool = false;		// set when we receive the all_up message; some functions (chkpt) must wait for this
+		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
+		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
+		rr_rate		int = 3600			// refresh rate (1 hour)
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -886,15 +912,34 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			super_cookie = p
 			rm_sheep.Baa( 1, "super-cookie was set from config file" )
 		}
+
+		p = cfg_data["resmgr"]["hto_limit"]					// if OVS or whatever has a max timeout we can ensure it's not surpassed
+		if p != nil {
+			hto_limit = clike.Atoi( *p )
+		}
+
+		p = cfg_data["resmgr"]["res_refresh"]				// rate that reservations are refreshed if hto_limit is non-zero
+		if p != nil {
+			rr_rate = clike.Atoi( *p )
+			if rr_rate < 900 {
+				if rr_rate < 120 {
+					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is insanely low (%ds) and was changed to 1800s", rr_rate )
+					rr_rate = 1800
+				} else {
+					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is too low: %ds", rr_rate )
+				}
+			}
+		}
 	}
 
 	rm_sheep.Baa( 1, "ovs table number %d used for metadata marking", alt_table )
 
+	res_refresh = time.Now().Unix() + int64( rr_rate )				// set first refresh in an hour (ignored if hto_limit not set
 	inv = Mk_inventory( )
 	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )
 
 	last_qcheck = time.Now().Unix()
-	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )		// push reservations to skoogi just before they go live
+	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )			// push reservations to agent just before they go live
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
@@ -966,7 +1011,16 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				last_qcheck = now
 
 			case REQ_PUSH:								// driven every few seconds to push new reservations
-				inv.push_reservations( my_chan, alt_table, set_vlan )
+				if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
+					now := time.Now().Unix()
+					if now > res_refresh {
+						rm_sheep.Baa( 2, "refreshing all reservations" )	
+						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
+						res_refresh = now + int64( rr_rate )		// push everything again in an hour
+					}
+				}
+
+				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit)  )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
