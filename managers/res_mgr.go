@@ -279,7 +279,7 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 
 	TODO: break this into res_mgr_bw.go
 */
-func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, to_limit int64 ) ( npushed int ) {
+func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64 ) ( npushed int ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -288,6 +288,8 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 		pend_count	int = 0
 		pushed_count int = 0
 	)
+
+	now := time.Now().Unix()
 
 	//rm_sheep.Baa( 3, "pushing reservations, %d in cache", len( i.cache ) )
 	//set_alt := false
@@ -342,8 +344,7 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 								fmod.Expiry = expiry
 							}
 						}
-						//fmod.Id = rname
-						fmod.Id = &rname
+						fmod.Id = rname								// merging -- yest this is a pointer now so it just goes
 //rm_sheep.Baa( 1, ">>>>>> exp=%d fmod->exp=%d now=%d to_lim=%d now+to_li=%d", expiry, fmod.Expiry, now, to_limit, now+to_limit )
 
 						nlinks := plist[i].Get_nlinks() 				// if only one link, then we DONT set vlan later
@@ -471,8 +472,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 		} else {
 			pushed_count++
 		}
-
-		set_alt = false;
 	}
 
 	if push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
