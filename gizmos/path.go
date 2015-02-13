@@ -705,7 +705,7 @@ func (p *Path) To_json( ) (json string) {
 		sep string = ""
 	)
 
-	json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", p.h1.To_str(), "h2", p.h2.To_str(), "links" )
+	json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", *p.h1.Get_mac(), "h2", *p.h2.Get_mac(), "links" )
 	for i := 0; i < p.lidx; i++ {
 		json += fmt.Sprintf( "%s%s ", sep, p.links[i].To_json() )
 		sep = ","

@@ -89,6 +89,7 @@
 #				04 Dec 2014 - Added a constant string to identify the target host in failure messages.
 #				16 Dec 2014 - Added new iptables configuration support, disabled support for br-ex.
 #				17 Dec 2014 - Added iptables config support for all named network spaces
+#				12 Feb 2014 - Corrected issues with iptables function when running on a local host (ssh-broker)
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -156,7 +157,7 @@ function setup_iptables
 	typeset nslist="/tmp/PID$$.nslist"		# list of name spaces from the remote host
 	typeset err_file="/tmp/PID$$.ipterr"
 
-	timeout 15 $ssh_host "ip netns list" >$nslist 2>$err_file
+	timeout 15 $ssh_host ip netns list >$nslist 2>$err_file
 	if (( $? != 0 ))
 	then
 		echo "CRI: unable to get network name space list from target-host: ${thost#* }  [FAIL] [QOSSOM007]"
@@ -202,14 +203,14 @@ function setup_iptables
 
 	if [[ -z $ssh_host ]]							# local host -- just pump into ksh
 	then
-		ssh_host="ksh"
+		cmd_string="ksh"
 	else
-		typeset ssh_cmd="ssh -T $ssh_opts $thost" 	# different than what we usually use NO -n supplied!!
+		typeset cmd_string="ssh -T $ssh_opts $thost" 	# different than what we usually use NO -n supplied!!
 	fi
 
 	if [[ -z $no_exec_str ]]								# empty string means we're live
 	then
-		$forreal timeout 15 $ssh_cmd <$cmd_file >$err_file 2>&1
+		$forreal timeout 15 $cmd_string <$cmd_file >$err_file 2>&1
 		if (( $? != 0 ))
 		then
 			echo "CRI: unable to set iptables on target-host: ${thost#* }  [FAIL] [QOSSOM006]"
