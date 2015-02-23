@@ -285,15 +285,31 @@ def main():
 
     logit("tegu_ha v1.0 started")
 
-    # Ready list of standby tegu nodes and find us
-    standby_list = [l.strip() for l in open(STDBY_LIST, 'r')]
     this_node = socket.getfqdn()
-    try:
-        priority = standby_list.index(this_node)
-        standby_list.remove(this_node)
-    except ValueError:
-        crit("Could not find host "+this_node+" in standby list: %s" % STDBY_LIST)
-        sys.exit(1)
+
+    ok = False
+    mcount = 0                  # critical error after an hour of waiting
+    while not ok:               # loop until we find us
+        ok = True
+        # Ready list of standby tegu nodes and find us
+        standby_list = [l.strip() for l in open(STDBY_LIST, 'r')]
+
+        try:
+            priority = standby_list.index(this_node)
+            standby_list.remove(this_node)
+        except ValueError:
+            if mcount == 0:         # dont flood the log
+                logit("Could not find host "+this_node+" in standby list: %s (waiting)" % STDBY_LIST)
+            else:
+                if mcount == 60:
+                    crit("Could not find host "+this_node+" in standby list: %s" % STDBY_LIST)
+                    mcount = 0      # another message in about an hour
+            mcount += 1
+            ok = False
+            time.sleep( 60 )
+
+    if mcount > 0:
+        logit( "finally found host "+this_node+" in standby list: %s" % STDBY_LIST)
 
     # Loop forever listening to heartbeats
     main_loop(standby_list, this_node, priority)
