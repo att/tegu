@@ -151,6 +151,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 			rerr = err
 			creds.Expire()					// force re-auth next go round
 		} else {
+
 			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d vmip2vm=%d", 
 					*p.name, len( vmid2ip ), len( ip2vmid ), len( vm2ip ), len( vmid2host ), len( vmip2vm ) )
 			if len( vmip2vm ) > 0 && len( vmid2ip ) > 0 &&  len( ip2vmid ) > 0 &&  len( vm2ip ) > 0 &&  len( vmid2host ) > 0  {		// don't refresh unless all are good

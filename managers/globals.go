@@ -4,9 +4,9 @@
 				might be important and note where new cosntant blocks are started as the reason is likely
 				that iota needs to be reset!
 
-				There is also one initialisation function that is managed here. We cannot make use of the 
+				There is also one initialisation function that is managed here. We cannot make use of the
 				automatic package initialisation mechanism because the inititalisation requires specific
-				information from the main which is passed into the init function.  
+				information from the main which is passed into the init function.
 
 	Date:		02 December 2013
 	Author:		E. Scott Daniels
@@ -18,7 +18,8 @@
 				27 Aug 2014 - Added Fq_req support.
 				03 Sep 2014 - Added transport type field to fq_req struct.
 				05 Sep 2014 - Allow version, used in ping, to be set by main.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2014 - Support port masks in flow-mods.
+				22 Feb 2014 - Added REQ_GET_MIRRORS
 */
 
 package managers
@@ -84,7 +85,7 @@ const (
 	REQ_GENCREDS				// generate crdentials
 	REQ_VALIDATE_ADMIN			// validate an admin token
 	REQ_PROJNAME2ID				// translate project name to ID
-	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port 
+	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port
 	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
 	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
 	REQ_SETULCAP				// set a user link capacity
@@ -96,7 +97,7 @@ const (
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
-	
+	REQ_GET_MIRRORS				// get a list of mirrors from res mgr
 )
 
 const (
@@ -113,7 +114,7 @@ const (
 				// offsets into the array of data passed to fq_mgr on requests
 	FQ_IP1		int = iota		// ip address of host 1					(ie proactive reservation request)
 	FQ_IP2						// ip address of host 2
-	FQ_EXPIRY					// reservation expiry time 
+	FQ_EXPIRY					// reservation expiry time
 	FQ_SPQ						// queue to map traffic to
 	FQ_ID						// id used if reporting error asynch
 	FQ_DIR_IN					// bool flag that indicates whether the flowmod direction is into switch or out of switch
@@ -146,11 +147,11 @@ var (
 
 	cfg_data	map[string]map[string]*string			// things read from the configuration file
 
-	/* 
+	/*
 		Channels that various goroutines listen to. Global so that all goroutines have access to them.
 	*/
-	nw_ch		chan	*ipc.Chmsg		// network 
-	rmgr_ch		chan	*ipc.Chmsg		// reservation manager 
+	nw_ch		chan	*ipc.Chmsg		// network
+	rmgr_ch		chan	*ipc.Chmsg		// reservation manager
 	osif_ch		chan	*ipc.Chmsg		// openstack interface
 	fq_ch		chan	*ipc.Chmsg		// flow and queue manager
 	am_ch		chan	*ipc.Chmsg		// agent manager channel
@@ -184,20 +185,20 @@ var (
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------
 
 /*
-	Paramters that may need to be passed to fq-mgr for either matching or setting in the action. All 
-	fields are public for easier access and eventual conversion to json as a means to pass to the 
-	agent. 
+	Paramters that may need to be passed to fq-mgr for either matching or setting in the action. All
+	fields are public for easier access and eventual conversion to json as a means to pass to the
+	agent.
 */
 type Fq_parms struct {
 	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
 	Ip2		*string
 	Tpsport	*string				// transport layer source port (strings to allow mask)
 	Tpdport *string				// transport layer dest port
-	Swport	int					// the switch port 
+	Swport	int					// the switch port
 	Smac	*string				// source mac
 	Dmac	*string				// dest mac
 	Dscp	int					// dscp mask to match if non-zero
-	Meta	*string				// meta 
+	Meta	*string				// meta
 	Resub	*string				// list of tables to resubmit to
 	Vlan_id	*string				// probably a mac address for late binding, but could be a number
 }
@@ -237,11 +238,11 @@ type Fq_req struct {
 //--------------------------------------------------------------------------------------------------------------------------
 
 /*
-	Sets up the global variables needed by the whole package. This should be invoked by the 
+	Sets up the global variables needed by the whole package. This should be invoked by the
 	main tegu function (main/tegu.go).
 
-	CAUTION:  this is not implemented as an init() function as we must pass information from the 
-			main to here.  
+	CAUTION:  this is not implemented as an init() function as we must pass information from the
+			main to here.
 */
 func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
 	err = nil
@@ -269,7 +270,7 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 	tklr.Add_spot( 2, rmgr_ch, REQ_NOOP, nil, 1 )	// a quick burst tickle to prevent a long block if the first goroutine to schedule a tickle schedules a long wait
 
 	if cfg_fname != nil {
-		cfg_data, err = config.Parse2strs( nil, *cfg_fname )		// capture config data as strings -- referenced as cfg_data["sect"]["key"] 
+		cfg_data, err = config.Parse2strs( nil, *cfg_fname )		// capture config data as strings -- referenced as cfg_data["sect"]["key"]
 		if err != nil {
 			err = fmt.Errorf( "unable to parse config file %s: %s", *cfg_fname, err )
 			return

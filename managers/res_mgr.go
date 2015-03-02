@@ -37,7 +37,7 @@
 				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
 				03 Sep 2014 : Corrected bug introduced with fq_req changes (ignored protocol and port)
 				08 Sep 2014 : Fixed bugs with tcp oriented proto steering.
-				24 Sep 2014 : Added support for ITONS traffic class demands. 
+				24 Sep 2014 : Added support for ITONS traffic class demands.
 				09 Oct 2014 : Added all_sys_up, and prevent checkpointing until all_sys_up is true.
 				29 Oct 2014 : Corrected bug -- setting vlan id when VMs are on same switch.
 				03 Nov 2014 : Removed straggling comments from the bidirectional fix.
@@ -47,18 +47,20 @@
 				19 Nov 2014 : correct bug in loading reservation path.
 				16 Jan 2014 : Allow mask on a tcp/udp port specification and to set priority a bit higher
 						when a transport port is specified.
-						Changed when meta table flow-mods are pushed (now with queues and only to hosts in 
+						Changed when meta table flow-mods are pushed (now with queues and only to hosts in
 						the queue list).
-				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files 
+				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files
 						written only when there are updates.
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
 				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
+				24 Feb 2015 : Added mirroring
 */
 
 package managers
 
 import (
 	"bufio"
+	"bytes"
 	//"errors"
 	"fmt"
 	"io"
@@ -241,7 +243,7 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	target_hosts := make( map[string]bool )							// hosts that are actually affected by the queue list
 
 	for i := range qlist {											// make a list of hosts we need to send fmods to
-		toks := strings.SplitN( qlist[i], "/", 2 )					// split host from front 
+		toks := strings.SplitN( qlist[i], "/", 2 )					// split host from front
 		if len( toks ) == 2 {										// should always be, but don't choke if not
 			target_hosts[toks[0]] = true							// fq-mgr will add suffix if needed
 		}
@@ -256,8 +258,8 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 }
 
 /*
-	Runs the list of reservations in the cache and pushes out any that are about to become active (in the 
-	next 15 seconds).  
+	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
+	next 15 seconds).  Also handles undoing any mirror reservations that have expired.
 
 	Returns the number of reservations that were pushed.
 */
@@ -272,7 +274,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
 			/*
-			table 9x fmods are sent with queues to avoid blasting to every host 
+			table 9x fmods are sent with queues to avoid blasting to every host
 			if ! set_alt {
 				table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
 				table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
@@ -280,7 +282,10 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 			}
 			*/
 
-			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
+			if p.Is_mirroring() && p.Is_expired() {
+				// mirror requests need to be undone when they become inactive
+				undo_mirror_reservation( p, rname, ch )
+			} else if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 				if push_count <= 0 {
 					rm_sheep.Baa( 1, "pushing proactive reservations" )
 				}
@@ -288,10 +293,13 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
-						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit ) 
+						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit )
 
 					case gizmos.PT_STEERING:
 						push_st_reservation( p, rname, ch, hto_limit )
+
+					case gizmos.PT_MIRRORING:
+						push_mirror_reservation( p, rname, ch )
 				}
 			} else {
 				pend_count++
@@ -337,7 +345,7 @@ func (i *Inventory) reset_push() {
 }
 
 /*
-	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file. 
+	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.
 	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
 	seconds).
 */
@@ -556,6 +564,18 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 	return
 }
 
+func (inv *Inventory) Get_mirrorlist() ( string ) {
+	sep := ""
+	bs := bytes.NewBufferString("")
+	for _, p := range inv.cache {
+		if p.Is_mirroring() {
+			bs.WriteString(fmt.Sprintf("%s%s", sep, *p.Get_id()))
+			sep = " "
+		}
+	}
+	return bs.String()
+}
+
 /*
 	Looks for the named reservation and deletes it if found. The cookie must be either the
 	supper cookie, or the cookie that the user supplied when the reservation was created.
@@ -576,14 +596,18 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", p.To_str() )
 		state = nil
 
-		ch := make( chan *ipc.Chmsg )	
-		defer close( ch )										// close it on return
-		req := ipc.Mk_chmsg( )
-		req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
-		req = <- ch											// wait for response from network
-		state = req.State
-
-		p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
+		if p.Is_mirroring() {
+			p.Set_expiry( time.Now().Unix() )					// expire the mirror NOW
+		} else {
+			// don't do this for mirroring pledges
+			ch := make( chan *ipc.Chmsg )	
+			defer close( ch )									// close it on return
+			req := ipc.Mk_chmsg( )
+			req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
+			req = <- ch											// wait for response from network
+			state = req.State
+			p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
+		}
 		p.Reset_pushed()									// force push of flow-mods that reset the expiry
 	} else {
 		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
@@ -880,6 +904,10 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
 				}
+
+			case REQ_GET_MIRRORS:									// user initiated get list of mirrors
+				t := inv.Get_mirrorlist()
+				msg.Response_data = &t;
 
 			default:
 				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )

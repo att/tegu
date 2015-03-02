@@ -3,13 +3,13 @@
 #
 #	Mnemonic:	tegu_req.ksh
 #	Abstract: 	Request interface to tegu. This is a convenience and scripts can just use
-#				a direct curl if need be.  This script uses rjprt to make the request and 
+#				a direct curl if need be.  This script uses rjprt to make the request and
 #				then to print the resulting json in a more human friendly manner.  Using the
-#				-j optin causes the raw json returned by Tegu to be spilled to standard 
+#				-j optin causes the raw json returned by Tegu to be spilled to standard
 #				out.
 #
 #				Looking at the code and wondering what `rjprt` is?  Well it's short for
-#				request and json print. It acts (somewhat) like curl in as much as it 
+#				request and json print. It acts (somewhat) like curl in as much as it
 #				makes a GET/PUT/POST/DELETE request supplying the body of data to be worked
 #				on. Then, unlike curl, formats the resulting json output before writing it
 #				to the tty device. The -j and -d options control the format of the output.
@@ -18,20 +18,21 @@
 #	Author:		E. Scott Daniels
 #
 #	Mods:		05 Jan 2014 - Added listres and cancel support.
-#				08 Jan 2014 - Changed the order of parms on the reservation command so 
-#					that they match the order on the HTTP interface. This was purely 
+#				08 Jan 2014 - Changed the order of parms on the reservation command so
+#					that they match the order on the HTTP interface. This was purely
 #					to avoid confusion.  Added a bit better error checking to reserve
-#					and consistenly routing error messages to stderr.  
-#				03 Mar 2014 - Added error checking based on host pair syntax. 
+#					and consistenly routing error messages to stderr.
+#				03 Mar 2014 - Added error checking based on host pair syntax.
 #				31 Mar 2014 - Allows for queue dump/list command.
-#				13 may 2014 - Added support to provide dscp value on a reservation req. 
+#				13 May 2014 - Added support to provide dscp value on a reservation req.
 #				09 Jun 2014 - Added https proto support.
 #				17 Jun 2014 - Added token authorisation support for privileged commands.
 #				22 Jul 2014 - Added support for listulcap request.
 #				09 Nov 2014 - change <<- here doc command to << -- seems some flavours of
-#					kshell don't handle this?  Also removed support for keystone cli 
+#					kshell don't handle this?  Also removed support for keystone cli
 #					and substituted a curl command since it seems keystone isn't installed
 #					everyplace (sigh).
+#				25 Feb 2015 - Added mirror commands
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -40,7 +41,7 @@ function usage {
 	usage: $argv0 [-d] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-r rname] [-s] [-t token|-T] command parms
 
 	  -d causes json output from tegu to be formatted in a dotted hierarch style
-	  -f force propting for user and password if -T is used even if a user name or password is 
+	  -f force propting for user and password if -T is used even if a user name or password is
 	     currrently set in the environment.
 	  -h is needed when tegu is running on a different host than is being used to run tegu_req
 	     and/or when tegu is listening on a port that isn't the default
@@ -51,17 +52,21 @@ function usage {
          (ignored unless -T is used)
 	  -r allows a 'root' name to be supplied for the json output when humanised
 	  -s enables secure TLS (https://) protocol for requests to Tegu.
-	  -t allows a keystone token to be supplied for privileged commands; -T causes a token to 
-	     be generated using the various OS_ environment variables. If a needed variable is 
+	  -t allows a keystone token to be supplied for privileged commands; -T causes a token to
+	     be generated using the various OS_ environment variables. If a needed variable is
 	     not in the environment, then a prompt will be issued. When either -t or -T is given
-	     a %t can be used on the commandline in place of the token and the toekn will 
+	     a %t can be used on the commandline in place of the token and the toekn will
 	     substituted. For example: %t/cloudqos/daniels8  would substitute the generated
-	     token into the host name specification. 
+	     token into the host name specification.
 
 	commands and parms are one of the following:
 	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie [dscp]
 	  $argv0 cancel reservation-id [cookie]
 	  $argv0 listconns {name[ name]... | <file}
+	  $argv0 add-mirror [start-]end port1[,port2...] output [cookie] [vlan]
+	  $argv0 del-mirror name [cookie]
+	  $argv0 list-mirrors
+	  $argv0 show-mirror name [cookie]
 
 	Privledged commands (admin token must be supplied)
 	  $argv0 graph
@@ -75,36 +80,36 @@ function usage {
 	  $argv0 verbose level [subsystem]
 
 	  If only bandwidth_out is supplied, then that amount of bandwidth is reserved
-	  in each direction. Otherwise, the bandwidth out value is used to reserve 
-	  bandwidth from host1 (out) to host2 and the bandwidth in is used to reserve 
+	  in each direction. Otherwise, the bandwidth out value is used to reserve
+	  bandwidth from host1 (out) to host2 and the bandwidth in is used to reserve
 	  bandwidth from host2 (in) to host1. Both values may be specified with trailing
-	  G/M/K suffixes (e.g. 10M,20M). 
+	  G/M/K suffixes (e.g. 10M,20M).
 
 	  The dscp value is the desired value that should be left tagging the data as it
 	  reaches the egress point.  This allows applications to have their data tagged
-	  in cases when the applicaton does not, or cannot, tag it's own data. 
+	  in cases when the applicaton does not, or cannot, tag it's own data.
 
 	  For the listconns command, "name" may be a VM name, VM ID, or IP address. If
 	  a file is supplied on stdin, then it is assumed to consist of one name per
-	  line. 
+	  line.
 
 	  For the cancel command the reservation ID is the ID returned when the reservation
 	  was accepted.  The cookie must be the same cookie used to create the reservation
-	  or must be omitted if the reservation was not created with a cookie. 
+	  or must be omitted if the reservation was not created with a cookie.
 
 	  For verbose, this controls the amount of information that is written to the log
 	  (stderr) by Tegu.  Values may range from 0 to 9. Supplying the subsystem causes
 	  the verbosity level to be applied just to the named subsystem.  Subsystems are:
 	  net, resmgr, fqmgr, http, agent, fqmgr, or tegu
-	
+
 	Admin Token
-	  The admin token can be supplied using the -t parameter and is required for all 
+	  The admin token can be supplied using the -t parameter and is required for all
 	  privileged commands. The token can be generated by invoking the keystone token-get
-	  command for the user that is defined as the admin in the Tegu configuration file. 
-	  The admin token is NOT the token that is defined in the Openstack configuration. 
+	  command for the user that is defined as the admin in the Tegu configuration file.
+	  The admin token is NOT the token that is defined in the Openstack configuration.
 	  If the -T option is used, $argv0 will prompt for username and password and then
 	  will generate the admin token to use.   Tokens may be needed on host names
-	  and those must be generated independently. 
+	  and those must be generated independently.
 
 endKat
 }
@@ -125,7 +130,7 @@ function str2expiry
 
 		expiry=$1
 	fi
-	
+
 	echo $expiry
 }
 
@@ -152,11 +157,11 @@ function gen_token
 		printf "\tEnter password for $OS_USERNAME: " >/dev/tty
 		stty -echo
 		read xOS_PASSWORD
-		stty echo	
+		stty echo
 		printf "\n" >/dev/tty
 
 		OS_PASSWORD=${xOS_PASSWORD:-nonegiven999}
-	fi 
+	fi
 	trap - 1 2 3 15
 
 	if [[ -z $OS_TENANT_NAME ]]
@@ -181,7 +186,7 @@ function gen_token
 		keystone token-get | awk -F \| '{gsub( "[ \t]", "", $2 ) } $2 == "id" {print $3 }' | read token_value
 	else
 		url="$OS_AUTH_URL/tokens"
-		content_type="Content-type: application/json" 
+		content_type="Content-type: application/json"
 		curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | awk '{ print $0 "},"} ' RS="," | awk '1' RS="{" | awk '
 
 		/"access":/ { snarf = 1; next }				# we want the id that is a part of the access struct
@@ -189,7 +194,7 @@ function gen_token
 			gsub( "\"", "", $0 );					# drop annoying bits of json
 			gsub( "}", "", $0 );
 			gsub( ",", "", $0 );
-			print $NF								
+			print $NF
 			exit ( 0 );								# stop short; only need one
 		}
 		'  | read token_value
@@ -198,7 +203,7 @@ function gen_token
 	if [[ -z $token_value ]]
 	then
 		echo "unable to generate a token for $OS_USERNAME    [FAIL]" >&2
-		return 1 
+		return 1
 	fi
 
 	echo ${token_value%% *}					# ensure any trailing junk is gone
@@ -219,7 +224,7 @@ use_keystone=0
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-d)		opts+=" -d";;
 		-f)		force=1;;
 		-h) 	host=$2; shift;;
@@ -262,7 +267,7 @@ then
 fi
 
 
-case $1 in 
+case $1 in
 	ping)
 		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token ping"
 		;;
@@ -351,7 +356,7 @@ case $1 in
 			expiry=$2
 		fi
 		if [[ $3 != *"-"* ]] && [[ $3 != *","* ]]
-		then	
+		then
 			echo "host pair must be specified as host1-host2 OR host1,host2   [FAIL]" >&2
 			exit 1
 		fi
@@ -381,18 +386,92 @@ case $1 in
 		;;
 
 	verbose)
-		case $2 in 
+		case $2 in
 			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto://$host/tegu/api";;		# assume tegu way: level subsystem
 			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto://$host/tegu/api";;		# assume entered backwards: subsystem level
 		esac
 		;;
 
-	*)	
+	add-mirror)
+		shift
+		if (( $# < 3 ))
+		then
+			echo "bad number of positional parms for add-mirror  [FAIL]" >&2
+			usage >&2
+			exit 1
+		fi
+		json="{"
+		if [[ $1 == *"-"* ]]
+		then
+			s=$( echo $1 | sed 's/-.*//' )
+			e=$( echo $1 | sed 's/.*-//' )
+			json="$json \"start_time\": \"$s\", \"end_time\": \"$e\","
+		else
+			e=$1
+			json="$json \"end_time\": \"$e\","
+		fi
+		json="$json \"output\": \"$3\", \"port\": [ "
+		sep=""
+		for p in $( echo $2 | tr , ' ' )
+		do
+			json="$json$sep\"$p\""
+			sep=", "
+		done
+		json="$json ]"
+		if (( $# >= 4 ))
+		then
+			json="$json, \"cookie\": \"$4\""
+		fi
+		if (( $# >= 5 ))
+		then
+			json="$json, \"vlan\": \"$5\""
+		fi
+		json="$json }"
+		rjprt $opts -m POST -D "$json" -t "$proto://$host/tegu/mirrors/"
+		;;
+
+	del-mirror)
+		shift
+		case $# in
+			1)
+				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/"
+				;;
+			2)
+				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/?cookie=$2"
+				;;
+			*)
+				echo "bad number of positional parameters for del-mirror [FAIL]" >&2
+				usage >&2
+				exit 1
+				;;
+		esac
+		;;
+
+	list-mirrors)
+		rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/"
+		;;
+
+	show-mirror)
+		shift
+		case $# in
+			1)
+				rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/$1/"
+				;;
+			2)
+				rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/$1/?cookie=$2"
+				;;
+			*)
+				echo "bad number of positional parameters for show-mirror [FAIL]" >&2
+				usage >&2
+				exit 1
+				;;
+		esac
+		;;
+
+	*)
 		echo ""
 		echo "unrecognised action: $1  [FAIL]" >&2
 		echo ""
 		usage >&2
 		;;
 esac
-
-

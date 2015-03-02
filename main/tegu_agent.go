@@ -5,6 +5,19 @@
 	Mnemonic:	tegu_agent
 	Abstract:	An agent that connects to tegu and receives requests to act on.
 
+				Command line flags:
+					-h host:port -- tegu host an port (default localhost:29055)
+					-i id	     -- ID number for this agent
+					-k key	     -- ssh key file for the ssh broker
+					-l directory -- logfile directory
+					-p n		 -- number of parallel ssh to run (default 10)
+					-no-rsync    -- turn off rsync feature
+					-rdir dir    -- rsync remote directory
+					-rlist list  -- list of files to sync to remote hosts
+					-u user      -- ssh username to use
+					-v			 -- verbose mode
+					-V level     -- verbosity level
+
 	Date:		30 April 2014
 	Author:		E. Scott Daniels
 
@@ -15,6 +28,7 @@
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
 				14 Jan 2014 : Added ssh-broker support. (bump to 2.0)
+				25 Feb 2015 : Added mirroring (version => 2.1), command line flags comment, and "mirrirwiz" handling.
 */
 
 package main
@@ -41,7 +55,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.0/12015/a"
+	version		string = "v2.1/12255"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -56,7 +70,7 @@ var (
 */
 type json_action struct {
 	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
-	Qdata	[]string			// queue parms 
+	Qdata	[]string			// queue parms
 	Fdata	[]string			// flow-mod parms
 	Hosts	[]string			// hosts to execute on if a multihost command
 	Dscps	string				// space separated list of dscp values
@@ -75,7 +89,7 @@ type agent_msg struct {
 	Rtype	string			// type of response (e.g. map_mac2phost, or specific id for ack/nack)
 	Rdata	[]string		// response stdout data
 	Edata	[]string		// response error data
-	State	int				// if an ack/nack some state information 
+	State	int				// if an ack/nack some state information
 	Vinfo	string			// agent version info for debugging
 }
 //----------------------------------------------------------------------------------------------------
@@ -121,7 +135,7 @@ func dump_stderr( stderr bytes.Buffer, prefix string ) {
 }
 
 /*
-	Accept an array and a bytes buffer; save the newline separated records in buf into the array starting at 
+	Accept an array and a bytes buffer; save the newline separated records in buf into the array starting at
 	the index (sidx). Returns the index
 */
 func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
@@ -142,16 +156,16 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 // --------------- request support (command execution) ----------------------------------------------------------
 
 /*
-	Generate a map that lists physical host and mac addresses. Timeout is the max number of 
-	seconds that we will wait for all responses.  If timeout seconds passes before all 
+	Generate a map that lists physical host and mac addresses. Timeout is the max number of
+	seconds that we will wait for all responses.  If timeout seconds passes before all
 	responses are received we will return what we have. The map command is executed on all
-	hosts, so we send a non-blocking command to the broker for each host and wait for the 
+	hosts, so we send a non-blocking command to the broker for each host and wait for the
 	responses to come back on the channel.  This allows them to run in parallel across
 	the cluster.
 */
 func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
     var (
-		cmd_str string  
+		cmd_str string
     )
 
 	startt := time.Now().Unix()
@@ -160,7 +174,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	//defer ssh_rch.Close()
 	wait4 := 0											// number of responses to wait for
 	for k, v := range req.Hosts {						// submit them all out non-blocking
-		cmd_str = fmt.Sprintf( "PATH=%s:$PATH map_mac2phost -p %s localhost", *path, v )		
+		cmd_str = fmt.Sprintf( "PATH=%s:$PATH map_mac2phost -p %s localhost", *path, v )
 		err := broker.NBRun_cmd( req.Hosts[k], cmd_str, wait4, ssh_rch )
 		if err != nil {
 			sheep.Baa( 1, "WRN: error submitting map_mac2phost command on %s", v )
@@ -213,9 +227,9 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 }
 
 /*
-	Executes the setup_ovs_intermed script on each host listed. This command can take 
-	a significant amount of time on each host (10s of seconds) and so we submit the 
-	command to the broker for each host in non-blocking mode to allow them to 
+	Executes the setup_ovs_intermed script on each host listed. This command can take
+	a significant amount of time on each host (10s of seconds) and so we submit the
+	command to the broker for each host in non-blocking mode to allow them to
 	run concurrently. Once submitted, we collect the results (reporting errors)
 	as the broker writes the response back on the channel.
 */
@@ -256,7 +270,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 				if err != nil {
 					sheep.Baa( 1, "WRN: error running setup-intermed queue command on %s", host )
 					errcount++
-				} 
+				}
 				if err != nil || sheep.Would_baa( 2 ) {
 					dump_stderr( stderr, "setup-intermed" + host )			// always dump on error, or if chatty
 				}
@@ -277,7 +291,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 			data passed to us
 		endKat
 
-	We'll use the brokers 'send script for execution' feature rather to execute our script. 
+	We'll use the brokers 'send script for execution' feature rather to execute our script.
 */
 func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
     var (
@@ -354,12 +368,12 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 	} else {
 		sheep.Baa( 1, "create-q: %d errors, generated script file kept: %s", fname )
 	}
-	
+
 }
 
 /*
 	Extracts the information from the action passed in and causes the fmod command
-	to be executed.   
+	to be executed.
 */
 func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err error ){
 
@@ -394,12 +408,42 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err e
 }
 
 /*
+ *  Invoke the tegu_add_mirror or tegu_del_mirror command on a remote host in order to add/remove a mirror.
+ */
+func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) {
+	startt := time.Now().UnixNano()
+
+	cstr := ""
+	switch (req.Qdata[0]) {
+		case "add":
+		 // TODO - handle VLAN, once we figure out where in the pledge to put it
+			cstr = fmt.Sprintf( `PATH=%s:$PATH tegu_add_mirror %s %s %s`, *path, req.Qdata[1], req.Qdata[2], req.Qdata[3] )
+
+		case "del":
+			cstr = fmt.Sprintf( `PATH=%s:$PATH tegu_del_mirror %s`, *path, req.Qdata[1] )
+	}
+	if cstr != "" {
+    	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
+		_, _, err := broker.Run_cmd( req.Hosts[0], cstr )
+		if err != nil {
+			sheep.Baa( 0, "ERR: send mirror cmd failed host=%s: %s	[TGUAGN005]", req.Hosts[0], err )
+		} else {
+        	sheep.Baa( 2, "mirror cmd succesfully sent: %s", cstr )
+		}
+	} else {
+		sheep.Baa( 0, "Unrecognized mirror command: " + req.Qdata[0] )
+	}
+	endt := time.Now().UnixNano()
+	sheep.Baa( 1, "do_mirrorwiz: %d ms elapsed", (endt - startt) / 1000 )
+}
+
+/*
 	Unpacks the json blob into the generic json request structure and validates that the ctype
 	is one of the epected types.  The only supported ctype at the moment is action_list; this
-	function will then split out the actions and invoke the proper do_* function to 
+	function will then split out the actions and invoke the proper do_* function to
 	exeute the action.
 
-	Returns a list of responses that should be written back to tegu, or nil if none of the 
+	Returns a list of responses that should be written back to tegu, or nil if none of the
 	requests produced responses.
 */
 func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp [][]byte ) {
@@ -410,7 +454,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 	resp = make( [][]byte, 128 )
 
-    err := json.Unmarshal( jblob, &req )           // unpack the json 
+    err := json.Unmarshal( jblob, &req )           // unpack the json
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to unpack request: %s	[TGUAGN006]", err )
 		sheep.Baa( 0, "got: %s", jblob )
@@ -430,7 +474,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 			case "flowmod":									// set a flow mod
 					do_fmod( req.Actions[i], broker, path )
 
-			case "map_mac2phost":							// run script to generate mac to physical host mappings 
+			case "map_mac2phost":							// run script to generate mac to physical host mappings
 					p, err := do_map_mac2phost( req.Actions[i], broker, path, 15 )
 					if err == nil {
 						resp[ridx] = p
@@ -443,6 +487,9 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					} else {
 						sheep.Baa( 1, "handle blob: setqueues still running, not restarted" )
 					}
+
+			case "mirrorwiz":
+					do_mirrorwiz(req.Actions[i], broker, path)
 
 			default:
 				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
@@ -461,7 +508,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 func usage( version string ) {
 	fmt.Fprintf( os.Stdout, "tegu_agent %s\n", version )
-	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-l log-dir] [-p tegu-port] [-v | -V level]\n" )
+	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-h host:port] [-l log-dir] [-p n] [-v | -V level] [-k key] [-no-rsync] [-rdir dir] [-rlist list] [-u user]\n" )
 }
 
 func main() {
@@ -476,7 +523,9 @@ func main() {
 			"/usr/bin/purge_ovs_queues " +
 			"/usr/bin/ql_setup_irl " +
 			"/usr/bin/send_ovs_fmod " +
-			"/usr/bin/setup_ovs_intermed "
+			"/usr/bin/setup_ovs_intermed " +
+			"/usr/bin/tegu_add_mirror " +
+			"/usr/bin/tegu_del_mirror "
 
 	if home == "" {
 		home = "/home/tegu"					// probably bogus, but we'll have something
@@ -536,8 +585,8 @@ func main() {
 	jc := jsontools.Mk_jsoncache( )							// create json cache to buffer tegu datagram input
 	sess_mgr := make( chan *connman.Sess_data, 1024 )		// session management to create tegu connections with and drive the session listener(s)
 	smgr := connman.NewManager( "", sess_mgr );				// get a manager, but no listen port opened
-	
-	connect2tegu( smgr, tegu_host, sess_mgr )				// establish initial connection 
+
+	connect2tegu( smgr, tegu_host, sess_mgr )				// establish initial connection
 
 	ntoks, key_toks := token.Tokenise_populated( *key_files, " ," )		// allow space or , seps and drop nil tokens
 	if ntoks <= 0 {
@@ -569,11 +618,11 @@ func main() {
 						sheep.Baa( 1, "WRN: this shouldn't happen; accepted session????" );
 
 					case connman.ST_NEW:			// new connection; nothing to process here
-				
+
 					case connman.ST_DISC:
 						sheep.Baa( 1, "WRN: session to tegu was lost" )
 						connect2tegu( smgr, tegu_host, sess_mgr )
-						
+
 					case connman.ST_DATA:
 						sheep.Baa( 3, "data: [%s]  %d bytes received", sreq.Id, len( sreq.Buf ) )
 						jc.Add_bytes( sreq.Buf )
@@ -592,4 +641,3 @@ func main() {
 		}			// end select
 	}
 }
-
