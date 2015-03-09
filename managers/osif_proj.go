@@ -15,7 +15,8 @@
 				09 Jan 2015 - No longer assume that the gateway list is limited by the project
 					that is valid in the creds.  At least some versions of Openstack were
 					throwing all gateways into the subnet list.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2014 - Support port masks in flow-mods.
+				26 Feb 2014 - Added support to dig out the default gateway for a project.
 */
 
 package managers
@@ -39,10 +40,10 @@ type osif_project struct {
 	vmid2ip		map[string]*string			// translation maps for the project
 	ip2vmid		map[string]*string
 	ip2vm		map[string]*string
-	vm2ip		map[string]*string
+	vm2ip		map[string]*string			// vm name to ip; gateway IPs are used as names
 	vmid2host	map[string]*string
 	ip2mac		map[string]*string
-	gwmap		map[string]*string
+	gwmap		map[string]*string			// mac to ip translation
 	ip2fip		map[string]*string
 	fip2ip		map[string]*string
 	gw2cidr		map[string]*string
@@ -188,7 +189,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 		}
 	
 
-		gwmap, _, _, _, _, _, err := creds.Mk_gwmaps( nil, nil, nil, nil, nil, nil, true, false )		
+		gwmap, _, gwmac2id, _, _, gwip2phost, err := creds.Mk_gwmaps( nil, nil, nil, nil, nil, nil, true, false )		// gwmap is mac2ip
 		if err != nil {
 			osif_sheep.Baa( 2, "WRN: unable to map gateway info: %s; %s   [TGUOSI006]", creds.To_str( ), err )
 			creds.Expire()					// force re-auth next go round
@@ -196,6 +197,14 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 			osif_sheep.Baa( 2, "%s map sizes: gwmap=%d", *p.name, len( gwmap ) )
 			if len( gwmap ) > 0 {
 				p.gwmap = gwmap
+			}
+
+			for mac, id := range gwmac2id {			// run the gateway info and insert as though they were first class VMs
+				ip := gwmap[mac]
+				p.vmid2ip[*id] = ip
+				p.ip2vmid[*ip] = id
+				p.vmid2host[*id] = gwip2phost[*ip]
+				p.vm2ip[*ip] = ip				// gw is nameless, so use the ip address
 			}
 		}
 
@@ -249,6 +258,29 @@ func (p *osif_project) ip2gw( ip4 *string ) ( *string ) {
 	}
 
 	osif_sheep.Baa( 1, "osif-ip2gw: unable to map ip to gateway for: %s", *ip4 )
+	return nil
+}
+
+/* Suss out the first gateway (router) for the project. Needed for E* steering case.
+	Assume input (proj_stuff) is either project, project/, or project/<stuff>.
+*/
+func (p *osif_project) suss_default_gw( proj_stuff *string ) ( *string ) {
+	if p == nil || proj_stuff == nil {
+		return nil
+	}
+
+	proj_toks := strings.Split( *proj_stuff, "/" )			// could be project/<stuff>; ditch stuff
+	project := proj_toks[0]
+		
+	for k, _ := range p.gw2cidr {												// key is the project/ip of the gate, value is the cidr
+		k_toks := strings.Split( k, "/" )										// need to match on project too
+		if len( k_toks ) == 1  ||  k_toks[0] ==  project || project == "" {		// found the first, return it
+			osif_sheep.Baa( 1, "found default gateway for: %s  %s", project, k )
+			return &k
+		}
+	}
+
+	osif_sheep.Baa( 1, "osif-ip2gw: unable to find default gateway for: %s", project )
 	return nil
 }
 
@@ -362,6 +394,39 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 	return
 }
 
+/* Public interface to get the default gateway (router) for a project. Causes data to 
+	be loaded if stale.  Search is the project name or ID and can be of the form 
+	project/<stuff> where stuff will be ignored. New data (return) is true if the data
+	had to be loaded.
+*/
+func (p *osif_project) Get_default_gw( search *string, creds *ostack.Ostack, inc_project bool ) ( gw *string, new_data bool, err error ) {
+
+	new_data = false
+	err = nil
+	gw = nil
+
+	if creds == nil {
+		err = fmt.Errorf( "creds were nil" )
+		osif_sheep.Baa( 1, "lazy gw update: unable to get, nil creds" )
+		return
+	}
+
+	if time.Now().Unix() - p.lastfetch < 90 {					// if fresh, try to avoid reload
+		gw = p.suss_default_gw( search )
+	}
+
+	if gw == nil {											// not found or not fresh, force reload
+		osif_sheep.Baa( 2, "lazy gw update: data reload for: %s", *p.name )
+		new_data = true		
+		err = p.refresh_maps( creds )
+		if err == nil {
+			gw = p.suss_default_gw( search )
+		}
+	}
+
+	return
+}
+
 /*
 	Fill in the ip2mac map that is passed in with ours. Must grab the read lock to make this
 	safe.
@@ -390,7 +455,7 @@ func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
 	givn in the message block.
 */
 func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
-	if msg == nil {
+	if msg == nil || msg.Response_ch == nil {
 		return															// prevent accidents
 	}
 
@@ -398,12 +463,14 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 
 	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
 	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
-		msg.State = fmt.Errorf( "invalid project/hostname string" )
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s bad tokens",  *(msg.Req_data.( *string )) )
+		msg.State = fmt.Errorf( "invalid project/hostname string: %s", *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
 		return
 	}
 
 	if tokens[0] == "!" { 					// !//ipaddress was given; we've got nothing, so bail now
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s lone bang",  *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
 		return
 	}
@@ -451,6 +518,72 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 	}
 	
 	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, fip4, gwmap )		// build the vm data block for network manager
+	msg.Response_ch <- msg																// and send it on its merry way
+
+	return
+}
+
+
+/* Get the default gateway for a project. Returns the string directly to the channel 
+	that send the osif the message. Expects to be executed as  a go routine. 
+go get_os_defgw( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+*/
+func get_os_defgw( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
+	if msg == nil || msg.Response_ch == nil {
+		return															// prevent accidents
+	}
+
+	msg.Response_data = nil
+
+	if msg.Req_data != nil {
+		tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// split off /junk if it's tehre
+		if tokens[0] == "!" || tokens[0] == "" { 							// nothing to work with; bail now
+			osif_sheep.Baa( 1, "get_defgw: unable to map to a project -- bad token[0] --: %s",  *(msg.Req_data.( *string )) )
+			msg.Response_ch <- msg
+			return
+		}
+
+		if tokens[0][0:1] == "!" {				// first character is a bang, but there is a name/id that follows
+			tokens[0] = tokens[0][1:]			// ditch the bang and go on
+		}
+
+		pid := &tokens[0]
+		pname := id2pname[*pid]
+		if pname == nil {						// it should be an id, but allow for a name/host to be sent in
+			osif_sheep.Baa( 1, "get_defgw: unable to map to a project -- no pname --: %s",  *(msg.Req_data.( *string )) )
+			pname = &tokens[0]
+			pid = pname2id[*pname]
+		}
+
+		if pid == nil {
+			osif_sheep.Baa( 1, "get_defgw: unable to map to a project: %s",  *(msg.Req_data.( *string )) )
+			msg.State = fmt.Errorf( "%s could not be mapped to a osif_project", *(msg.Req_data.( *string )) )
+			msg.Response_ch <- msg
+			return
+		}
+
+		p := os_projs[*pid]						// finally we can find the data associated with the project; maybe
+		if p == nil {
+			osif_sheep.Baa( 1, "get_defgw: unable to map project to data: %s", *pid )
+			msg.State = fmt.Errorf( "%s could not be mapped to a osif_project", *(msg.Req_data.( *string )) )
+			msg.Response_ch <- msg
+			return
+		}
+
+		creds := os_refs[*pname]
+		if creds == nil {
+			msg.State = fmt.Errorf( "defgw: %s could not be mapped to openstack creds ", *pname )
+			msg.Response_ch <- msg
+			return
+		}
+
+		msg.Response_data, _, msg.State = p.Get_default_gw( pid, creds, true )
+		msg.Response_ch <- msg
+		return
+	}
+	
+	osif_sheep.Baa( 1, "get_defgw:  missing data (nil) in request" )
+	msg.State = fmt.Errorf( "defgw: missing data in request" )
 	msg.Response_ch <- msg																// and send it on its merry way
 
 	return

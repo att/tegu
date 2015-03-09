@@ -14,7 +14,8 @@
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
-				14 Jan 2014 : Added ssh-broker support. (bump to 2.0)
+				14 Jan 2015 : Added ssh-broker support. (bump to 2.0)
+				27 Feb 2015 : Allow fmod to be sent to multiple hosts (steering).
 */
 
 package main
@@ -41,7 +42,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.0/12015/a"
+	version		string = "v2.0/12275"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -361,18 +362,21 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 	Extracts the information from the action passed in and causes the fmod command
 	to be executed.   
 */
-func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err error ){
+func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( err error ){
 
 	startt := time.Now().Unix()
 
 	errcount := 0
+/*
 	for i := range req.Fdata {
+	for hi := range req.Hosts {			//TODO:  send them in parallel
+
 		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[i] )
     	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
 
-		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )				// there is at most only one host when sending fmods
+		_, stderr, err := broker.Run_cmd( req.Hosts[hi], cstr )				// there is at most only one host when sending fmods
 		if err != nil {
-			sheep.Baa( 0, "ERR: send fmod failed host=%s: %s	[TGUAGN005]", req.Hosts[0], err )
+			sheep.Baa( 0, "ERR: send fmod failed host=%s: %s	[TGUAGN005]", req.Hosts[hi], err )
 			errcount++
 		} else {
         	sheep.Baa( 2, "fmod succesfully sent: %s", cstr )
@@ -383,6 +387,50 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string ) ( err e
 				sheep.Baa( 0, "send_fmod stderr:  %s", bytes.TrimRight( line, "\n" ) )
 			} else {
 				break
+			}
+		}
+	}
+	}
+
+*/
+	for f := range req.Fdata {
+		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[f] )
+
+		ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
+		wait4 := 0												// number of responses to wait for
+		for i := range req.Hosts {
+			sheep.Baa( 1, "via broker on %s send fmod: %s", req.Hosts[i], cstr )
+
+			err := broker.NBRun_cmd( req.Hosts[i], cstr, wait4, ssh_rch )		// sends the file as input to be executed on the host
+			if err != nil {
+				sheep.Baa( 0, "ERR: unable to submit command: %s: %s	[TGUAGNXXX]", cstr, err )
+			} else {
+				wait4++
+			}
+		}
+
+		timer_pop := false
+		errcount := 0
+		for wait4 > 0 && !timer_pop {							// collect responses logging any errors
+			select {
+				case <- time.After( timeout * time.Second ):		// timeout
+					sheep.Baa( 1, "WRN: timeout waiting for send-fmod responses; %d replies not received   [TGUAGNXXX]", wait4 )
+					timer_pop = true
+
+				case resp := <- ssh_rch:							// response back from the broker
+					wait4--
+					_, stderr, elapsed, err := resp.Get_results()
+					host, _, _ := resp.Get_info()
+					sheep.Baa( 1, "send-fmod: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+					if err != nil {
+						sheep.Baa( 0, "ERR: unable to execute send-fmod command on %s: data=%s:  %s	[TGUAGN004]", host, cstr, err )
+						errcount++
+					}  else {
+						sheep.Baa( 1, "flow mod set on: %s", host )
+					}
+					if err != nil || sheep.Would_baa( 2 ) {
+						dump_stderr( stderr, "send-fmod" + host )			// always dump on error, or if chatty
+					}
 			}
 		}
 	}
@@ -428,7 +476,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					do_setqueues( req.Actions[i], broker, path, 30 )
 
 			case "flowmod":									// set a flow mod
-					do_fmod( req.Actions[i], broker, path )
+					do_fmod( req.Actions[i], broker, path, 30 )
 
 			case "map_mac2phost":							// run script to generate mac to physical host mappings 
 					p, err := do_map_mac2phost( req.Actions[i], broker, path, 15 )

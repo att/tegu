@@ -128,7 +128,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.2/1b034"		// 3.1.x == steering branch version
+		version		string = "v3.1.2/13055a"		// 3.1.x == steering branch version
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

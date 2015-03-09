@@ -6,7 +6,7 @@
 	Date:		16 November 2014
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		27 Feb 2015 - Changes to make steering work with lazy update.
 */
 
 package managers
@@ -29,12 +29,16 @@ type Net_vm  struct {
 
 /*
 	Create a vm insertion structure. Not a good idea to create a nil named structure, but
-	we'll allow it and subs in unnamed.
+	we'll allow it and subs in the ip4 value as its name if provided, otherwise the string unnamed.
 */
 func Mk_netreq_vm( name *string, id *string, ip4 *string, ip6 *string, phost *string, mac *string, gw *string, fip *string, gwmap map[string]*string )  ( np *Net_vm ) {
 	if name == nil {
-		unv := "unnamed"
-		name = &unv
+		if ip4 != nil {				// no name, use ip4 if there
+			name = ip4
+		} else {
+			unv := "unnamed"
+			name = &unv
+		}
 	}
 
 	np = &Net_vm {

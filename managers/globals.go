@@ -18,7 +18,8 @@
 				27 Aug 2014 - Added Fq_req support.
 				03 Sep 2014 - Added transport type field to fq_req struct.
 				05 Sep 2014 - Allow version, used in ping, to be set by main.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2014 - Support port masks in flow-mods.
+				26 Feb 2015 - Added support for default gateway sussing.
 */
 
 package managers
@@ -96,6 +97,7 @@ const (
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
+	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
 	
 )
 
