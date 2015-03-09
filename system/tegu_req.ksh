@@ -434,10 +434,10 @@ case $1 in
 		shift
 		case $# in
 			1)
-				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/"
+				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/" </dev/null
 				;;
 			2)
-				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/?cookie=$2"
+				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/?cookie=$2" </dev/null
 				;;
 			*)
 				echo "bad number of positional parameters for del-mirror [FAIL]" >&2

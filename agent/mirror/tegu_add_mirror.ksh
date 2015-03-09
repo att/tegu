@@ -23,7 +23,7 @@
 #                  number for the output VLAN.
 #                  2. If <output> is an IPv4 address, then a port is created that acts as
 #                  one end of a GRE tunnel to the IP address.
-#                  3. If <output> is a UUID of an existing port on br-int, then output is
+#                  3. If <output> is a UUID (or MAC) of an existing port on br-int, then output is
 #                  directed to that port.
 #
 #                  If <vlan> (optional) is specified, and is a comma-separated list of VLAN
@@ -93,7 +93,7 @@ $echo $sudo ovs-vsctl --columns=ports list bridge $bridgename
 tmp=`$sudo ovs-vsctl --columns=ports list bridge $bridgename 2>/dev/null`
 if [ $? -ne 0 ]
 then
-	echo "tegu_add_mirror: br-int is missing on openvswitch." >&2
+	echo "tegu_add_mirror: $bridgename is missing on openvswitch." >&2
 	exit 2	
 fi
 brports=`echo $tmp | sed 's/.*://' | tr -d '[] ' | tr , ' '`
@@ -108,7 +108,7 @@ do
 		then
 			realports="$realports,$p"
 		else
-			echo "tegu_add_mirror: there is no port with UUID=$p on br-int." >&2
+			echo "tegu_add_mirror: there is no port with UUID=$p on $bridgename." >&2
 			exit 2
 		fi
 		;;
@@ -120,7 +120,7 @@ do
 		then
 			realports="$realports,$uuid"
 		else
-			echo "tegu_add_mirror: there is no port with MAC=$p on br-int." >&2
+			echo "tegu_add_mirror: there is no port with MAC=$p on $bridgename." >&2
 			exit 2
 		fi
 		;;
@@ -150,9 +150,32 @@ vlan:[0-9]+)
 		exit 2
 	fi
 	;;
+
+*-*-*-*-*)
+	# Output port specified by UUID
+	if valid_port "$output"
+	then
+		outputtype=port
+	else
+		echo "tegu_add_mirror: there is no port with UUID=$output on $bridgename." >&2
+		exit 2
+	fi
+	;;
+
+*:*:*:*:*:*)
+	# MAC addr
+	uuid=`translatemac $output`
+	if valid_port "$uuid"
+	then
+		outputtype=port
+		output="$uuid"
+	else
+		echo "tegu_add_mirror: there is no port with MAC=$output on $bridgename." >&2
+		exit 2
+	fi
+	;;
+
 *)
-	# TODO
-	outputtype=port
 	echo "tegu_add_mirror: $output is not a valid output destination." >&2
 	exit 2
 	;;

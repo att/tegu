@@ -216,7 +216,7 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 *string, p2 *string, commence
  *  This would allow these 3 types of Pledges to be implemented as needed, rather than all
  *  having to share the same structure.
  */
-func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string ) ( p *Pledge, err error ) {
+func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string, vlan *string ) ( p *Pledge, err error ) {
 	err = nil
 	p = nil
 
@@ -225,9 +225,12 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 		return
 	}
 
-// TODO where do we put vlan list?
-
 	t := strings.Join(in_ports, " ")
+	if vlan != nil && *vlan != "" {
+		// Since we have to cram this in the pre-existing Pledge struct,
+		// just glom it on the end of the port list
+		t = t + " vlan:" + *vlan
+	}
 	p = &Pledge{
 		host1:		&t,				// mirror input ports (space sep)
 		host2:		out_port,		// mirror output port

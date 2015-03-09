@@ -27,15 +27,19 @@ func push_mirror_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg
 	ports2 := strings.Replace(*ports, " ", ",", -1)	// ports must be comma separated
 	id := p.Get_id( )
 	host := p.Get_qid( )
-	vlan := ""		// Have not decided where to put this in the Pledge yet
 	rm_sheep.Baa( 1, "Adding mirror %s on host %s", *id, *host )
 	json := `{ "ctype": "action_list", "actions": [ { `
 	json += `"atype": "mirrorwiz", `
 	json += fmt.Sprintf(`"hosts": [ %q ], `,  *host)
-	if vlan == "" {
-		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q ] `, *id, ports2, *out)
-	} else {
+	if strings.Contains(ports2, ",vlan:") {
+		// Because we have to store the ports list and the vlans in the same field
+		// we split it out here
+		n := strings.Index(ports2, ",vlan:")
+		vlan := ports2[n+6:]
+		ports2 = ports2[:n]
 		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q, %q ] `, *id, ports2, *out, vlan)
+	} else {
+		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q ] `, *id, ports2, *out)
 	}
 	json += `} ] }`
 	rm_sheep.Baa( 2, " JSON -> %s", json )

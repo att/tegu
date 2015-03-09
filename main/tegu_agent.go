@@ -416,8 +416,11 @@ func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) {
 	cstr := ""
 	switch (req.Qdata[0]) {
 		case "add":
-		 // TODO - handle VLAN, once we figure out where in the pledge to put it
 			cstr = fmt.Sprintf( `PATH=%s:$PATH tegu_add_mirror %s %s %s`, *path, req.Qdata[1], req.Qdata[2], req.Qdata[3] )
+			if len(req.Qdata) > 4 {
+				// If VLAN list is in the arguments, tack that on the end
+				cstr += " " + req.Qdata[4]
+			}
 
 		case "del":
 			cstr = fmt.Sprintf( `PATH=%s:$PATH tegu_del_mirror %s`, *path, req.Qdata[1] )

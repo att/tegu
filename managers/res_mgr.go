@@ -568,7 +568,7 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 	sep := ""
 	bs := bytes.NewBufferString("")
 	for _, p := range inv.cache {
-		if p.Is_mirroring() {
+		if p.Is_mirroring() && !p.Is_expired() {
 			bs.WriteString(fmt.Sprintf("%s%s", sep, *p.Get_id()))
 			sep = " "
 		}

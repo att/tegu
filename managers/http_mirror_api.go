@@ -12,7 +12,7 @@
 					POST /tegu/mirrors/
 					DELETE /tegu/mirrors/<name>/[?cookie=cookie]
 					GET /tegu/mirrors/
-					GET /tegu/mirrors/name/[?cookie=cookie]
+					GET /tegu/mirrors/<name>/[?cookie=cookie]
 
 	Author:		Robert Eby
 
@@ -25,6 +25,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -186,17 +187,25 @@ func convertToJSON(mirror *gizmos.Pledge) (string) {
 //	}
 	bs.WriteString(fmt.Sprintf("  \"port\": [\n    "))
 	sep := ""
+	vlan := ""
 	for _, v := range strings.Split(*ports, " ") {
-		bs.WriteString(fmt.Sprintf(`%s"%s"`, sep, v))
-		sep = ", "
+		if strings.HasPrefix(v, "vlan:") {
+			vlan = v[5:]
+		} else {
+			bs.WriteString(fmt.Sprintf(`%s"%s"`, sep, v))
+			sep = ", "
+		}
 	}
 	bs.WriteString(fmt.Sprintf("\n  ],\n"))
 	bs.WriteString(fmt.Sprintf("  \"output\": \"%s\",\n", *outp))
-	// TODO - vlan, if any
+	if vlan != "" {
+		bs.WriteString(fmt.Sprintf("  \"vlan\": \"%s\",\n", vlan))
+	}
 	// Other, informational (non-API) fields
 	bs.WriteString(fmt.Sprintf("  \"pushed\": %t,\n", mirror.Is_pushed()))
 	bs.WriteString(fmt.Sprintf("  \"paused\": %t\n",  mirror.Is_paused()))
 	// TODO add URL
+	// bs.WriteString(fmt.Sprintf("  \"url\": \"%s\"\n", url))
 	bs.WriteString("}\n")
 	return bs.String()
 }
@@ -218,7 +227,6 @@ func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, e
 	plist = &namemap
 	ix := 0
 	for _, p := range ports {
-
 		vm, err := validatePort(&p)		// vm is a Net_vm
 		if err == nil && vm.phost != nil {
 			// get info for port set physhost
@@ -243,7 +251,7 @@ func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, e
 			}
 			valid = true
 		} else {
-			// TODO if invalid port add to a group by itself
+			// TODO if invalid port add to a group by itself, and report back somehow
 			http_sheep.Baa( 1, " invalid port? " +p)
 		}
 	}
@@ -294,15 +302,59 @@ http_sheep.Baa( 1, " err: "+err.Error() )
 	return
 }
 
+func cidrMatches(ip net.IP, cidr string) (bool) {
+	_, net, err := net.ParseCIDR(cidr)
+	if err != nil {
+		http_sheep.Baa( 1, "Invalid CIDR for allowed_gre_addr in the configuration file: %s", cidr )
+		return false
+	}
+	return net.Contains(ip)
+}
+
+func validateAllowedOutputIP(port *string) (err error) {
+	oklist := cfg_data["mirroring"]["allowed_gre_addr"]
+	if oklist != nil {
+		ip := net.ParseIP(*port)
+		if ip == nil {
+			err = fmt.Errorf("output GRE port %s is not a vlid IP address.", *port)
+			return
+		}
+		for _, cidr := range strings.Split(*oklist, ",") {
+			if cidrMatches(ip, cidr) {
+				return
+			}
+		}
+		err = fmt.Errorf("output GRE port %s does not match any allowed CIDR in the configuration.", *port)
+	}
+	return
+}
+
 func validateOutputPort(port *string) (vm *Net_vm,  err error) {
-	if strings.Index(*port, "/") < 0 {
-		// simple name or IP, assumed to be OK
-		// TODO - validate?
-		return
-	} else {
-		vm, err = validatePort(port)
+	if port == nil {
+		err = fmt.Errorf("no output port specified.")
 		return
 	}
+	if strings.HasPrefix(*port, "label:") {
+		label := (*port)[6:]
+		// check for a label with this name in the configuration
+		mirsect := cfg_data["mirroring"]
+		for k, v := range mirsect {
+			if k == label {
+				port = v
+				err = validateAllowedOutputIP(port)
+				return
+			}
+		}
+		err = fmt.Errorf("output port label %s does not exist in the configuration.", label)
+		return
+	}
+	if strings.Index(*port, "/") < 0 {
+		// simple name or IP, assumed to be OK
+		err = validateAllowedOutputIP(port)
+		return
+	}
+	vm, err = validatePort(port)
+	return
 }
 
 /*
@@ -415,7 +467,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 		mirror := (*plist)[key]
 
 		// Make a pledge
-		res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &mirror.name, &req.Cookie, &key )
+		res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &mirror.name, &req.Cookie, &key, &req.Vlan )
 		if res != nil {
 			req := ipc.Mk_chmsg( )
 			my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
@@ -481,7 +533,6 @@ func mirror_delete( in *http.Request, out http.ResponseWriter, data []byte ) (co
 		return
 	}
 
-	// TODO - delete mirror!
 	req := ipc.Mk_chmsg( )
 	my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
 	defer close( my_ch )								// close it on return
