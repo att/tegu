@@ -16,6 +16,10 @@
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
 				14 Jan 2015 : Added ssh-broker support. (bump to 2.0)
 				27 Feb 2015 : Allow fmod to be sent to multiple hosts (steering).
+
+	NOTE:		There are three types of generic error/warning messages which have 
+				the same message IDs (007, 008, 009) and thus are generated through
+				dedicated functions rather than direct calls to Baa().
 */
 
 package main
@@ -79,6 +83,24 @@ type agent_msg struct {
 	State	int				// if an ack/nack some state information 
 	Vinfo	string			// agent version info for debugging
 }
+//--- generic message functions ---------------------------------------------------------------------
+
+/* 
+	These message functions ensure that the message text is the same regardless of the function that
+	needs to generate a message with the given IDs.
+*/
+func msg_007( host string, cmd string, err error ) {
+	sheep.Baa( 0, "ERR: unable to submit command: on %s: %s: %s	[TGUAGN007]", host, cmd, err )
+}
+
+func msg_008( count int ) {
+	sheep.Baa( 1, "WRN: timeout waiting for mac2phost responses; %d replies not received   [TGUAGN008]", count )
+}
+
+func msg_009( cname string, host string ) {
+	sheep.Baa( 1, "WRN: error running %s command on %s  [TGUAGN009]", cname, host )
+}
+
 //----------------------------------------------------------------------------------------------------
 
 /*
@@ -158,13 +180,14 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	startt := time.Now().Unix()
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
-	//defer ssh_rch.Close()
+	defer close( ssh_rch )
+
 	wait4 := 0											// number of responses to wait for
 	for k, v := range req.Hosts {						// submit them all out non-blocking
 		cmd_str = fmt.Sprintf( "PATH=%s:$PATH map_mac2phost -p %s localhost", *path, v )		
 		err := broker.NBRun_cmd( req.Hosts[k], cmd_str, wait4, ssh_rch )
 		if err != nil {
-			sheep.Baa( 1, "WRN: error submitting map_mac2phost command on %s", v )
+			msg_007( req.Hosts[k], cmd_str, err )
 		} else {
 			wait4++
 		}
@@ -185,7 +208,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	for wait4 > 0 && !timer_pop {			// wait for responses back on the channel or the timer to pop
 		select {
 			case <- time.After( timeout * time.Second ):		// timeout after 15 seconds
-				sheep.Baa( 1, "WRN: timeout waiting for mac2phost responses; %d replies not received", wait4 )
+				msg_008( wait4 )
 				timer_pop = true
 
 			case resp := <- ssh_rch:					// response from broker
@@ -194,7 +217,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 				host, _, _ := resp.Get_info()
 				sheep.Baa( 1, "map_mac2phost: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
-					sheep.Baa( 1, "WRN: error running map_mac2phost command on %s", host )
+					msg_009( "map_mac2phost", host )
 					errcount++
 				} else {
 					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
@@ -235,7 +258,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 
 		err := broker.NBRun_cmd( req.Hosts[i], cmd_str, wait4, ssh_rch )
 		if err != nil {
-			sheep.Baa( 0, "ERR: unable to submit command: %s: %s	[TGUAGNXXX]", cmd_str, err )
+			msg_007( req.Hosts[i], cmd_str, err )
 		} else {
 			wait4++
 		}
@@ -246,7 +269,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 	for wait4 > 0 && !timer_pop {							// collect responses logging any errors
 		select {
 			case <- time.After( timeout * time.Second ):		// timeout
-				sheep.Baa( 1, "WRN: timeout waiting for setup-intermed responses; %d replies not received   [TGUAGNXXX]", wait4 )
+				msg_008( wait4 )
 				timer_pop = true
 
 			case resp := <- ssh_rch:							// response back from the broker
@@ -255,7 +278,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 				host, _, _ := resp.Get_info()
 				sheep.Baa( 1, "setup-intermed: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
-					sheep.Baa( 1, "WRN: error running setup-intermed queue command on %s", host )
+					msg_009( "setup_intermed", host )
 					errcount++
 				} 
 				if err != nil || sheep.Would_baa( 2 ) {
@@ -316,7 +339,7 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 
 		err := broker.NBRun_on_host( req.Hosts[i], fname, "", wait4, ssh_rch )		// sends the file as input to be executed on the host
 		if err != nil {
-			sheep.Baa( 0, "ERR: unable to submit command: %s: %s	[TGUAGNXXX]", fname, err )
+			msg_007( req.Hosts[i], "create_ovs_queues", err )
 		} else {
 			wait4++
 		}
@@ -327,7 +350,7 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 	for wait4 > 0 && !timer_pop {							// collect responses logging any errors
 		select {
 			case <- time.After( timeout * time.Second ):		// timeout
-				sheep.Baa( 1, "WRN: timeout waiting for create-q responses; %d replies not received   [TGUAGNXXX]", wait4 )
+				msg_008( wait4 )
 				timer_pop = true
 
 			case resp := <- ssh_rch:							// response back from the broker
@@ -403,7 +426,7 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 
 			err := broker.NBRun_cmd( req.Hosts[i], cstr, wait4, ssh_rch )		// sends the file as input to be executed on the host
 			if err != nil {
-				sheep.Baa( 0, "ERR: unable to submit command: %s: %s	[TGUAGNXXX]", cstr, err )
+				msg_007( req.Hosts[i], cstr, err )
 			} else {
 				wait4++
 			}
@@ -414,7 +437,7 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 		for wait4 > 0 && !timer_pop {							// collect responses logging any errors
 			select {
 				case <- time.After( timeout * time.Second ):		// timeout
-					sheep.Baa( 1, "WRN: timeout waiting for send-fmod responses; %d replies not received   [TGUAGNXXX]", wait4 )
+					msg_008( wait4 )
 					timer_pop = true
 
 				case resp := <- ssh_rch:							// response back from the broker
@@ -466,7 +489,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 	}
 
 	if req.Ctype != "action_list" {
-		sheep.Baa( 0, "WRN: unknown request type received from tegu: %s", req.Ctype )
+		sheep.Baa( 0, "unknown request type received from tegu: %s", req.Ctype )
 		return
 	}
 
@@ -493,7 +516,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					}
 
 			default:
-				sheep.Baa( 0, "WRN: unknown action type received from tegu: %s", req.Actions[i].Atype )
+				sheep.Baa( 0, "unknown action type received from tegu: %s", req.Actions[i].Atype )
 		}
 	}
 
@@ -614,12 +637,12 @@ func main() {
 			case sreq := <- sess_mgr:				// data from the network
 				switch( sreq.State ) {
 					case connman.ST_ACCEPTED:		// shouldn't happen
-						sheep.Baa( 1, "WRN: this shouldn't happen; accepted session????" );
+						sheep.Baa( 1, "this shouldn't happen; accepted session????" );
 
 					case connman.ST_NEW:			// new connection; nothing to process here
 				
 					case connman.ST_DISC:
-						sheep.Baa( 1, "WRN: session to tegu was lost" )
+						sheep.Baa( 1, "session to tegu was lost" )
 						connect2tegu( smgr, tegu_host, sess_mgr )
 						
 					case connman.ST_DATA:
