@@ -27,6 +27,7 @@
 #					if needed on this host. Added forceup option to allow tegu to be forced
 #					to start without the ha daemon. 
 #			20 Feb 2015 - Added -u option to killall to supress warnings from killall
+#			10 Mar 2015 - Corrected missing tegu_user on the ha start in standby.
 #----------------------------------------------------------------------------------------
 trap "" 15				# prevent killall from killing the script when run from service
 
@@ -93,7 +94,7 @@ case "$1" in
 	;;
 
   start)
-	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon; let it decided if Tegu should be running here
+	su -c "PATH=$PATH start_tegu_ha" $tegu_user			# start high avail daemon; let it decided if Tegu should be running here
 	;;
 
   stop)								# stop everything, including the ha process
@@ -115,7 +116,7 @@ case "$1" in
 		chown $tegu_user:$tegu_group /etc/tegu/standby	
 		su -c "PATH=$PATH start_tegu" tegu >/dev/null 2>&1		# this will fail, but we want to ensure environment (cron etc.) is setup
 	fi
-	su -c "PATH=$PATH start_tegu_ha"					# start high avail daemon 
+	su -c "PATH=$PATH start_tegu_ha" $tegu_user					# start high avail daemon 
 	;;
 
   reload)
