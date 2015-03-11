@@ -61,7 +61,18 @@
 #				script which are invoked by this script. 
 #
 #				Message prefix for this script is QLTSOM followed by three digits. 
+#
+#				As of 2015.03.11 setup on intermediate bridges has taken on new meaning. The
+#				queues and flow-mods will NOT be assigned to intermediate bridges (br-tun, 
+#				phy-br-floating, etc. If the -f (force bridges) option is set, or a list of
+#				bridges is given, then the queues and f-mods ARE setup.  The reason for this
+#				is that OVS sets up HTB queues when a queue is added and that seems to not 
+#				play nicely under load resulting in ops complaints about our efforts. 
 #	
+#				TODO:  This script really needs to be broken into three or four smaller, single
+#					purpose scripts. We've been adding band-aids and it's gotten way out of 
+#					control. 
+#
 #	Author:		E. Scott Daniels
 #	Date: 		02 May 2014
 #
@@ -90,6 +101,8 @@
 #				16 Dec 2014 - Added new iptables configuration support, disabled support for br-ex.
 #				17 Dec 2014 - Added iptables config support for all named network spaces
 #				12 Feb 2014 - Corrected issues with iptables function when running on a local host (ssh-broker)
+#				11 Mar 2015 - Allow intermdeiate queues not to be set, and to delete the flow-mods 
+#								associated with them if that option is taken.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -235,11 +248,13 @@ function usage
 
 
 	version 1.2/1c164
-	usage: $argv0 [-b bride(s)] [-d difserv] [-D] [-e max-tput] [-h host] [-I] [-l log-file] [-m min] [-n] [-T] [-v] [-x exclude-bridge-list]
+	usage: $argv0 [-B | -b bride(s)] [-d difserv] [-D] [-e max-tput] [-h host] [-I] [-l log-file] [-m min] [-n] [-T] [-v] [-x exclude-bridge-list]
 
 	  -b sets the bridge(s) to affect (default br-ex and br-tun). Space separated if there are more 
 	     than one.  Regardless of the bridges listed, this script _always_ sets the ineritence
 	     for tos on br-tun unless no execute (-n) is given.
+	  -B allows bridges to be updated with queues and flow-mods (same as -b) but generates the list
+	     for update automatically
 	  -D Do not write dropping flow-mods
 	  -I Do not setup irl bridge and queues
 	  -n no execute mode; just say what we'd do
@@ -278,10 +293,13 @@ max=$( expand 10G )
 bridges="" 					# default to all found in the ovs listing; -b will override if needed
 br_exclude="br-rl br-ex"	# bridges that we should never set up on
 
+allow_bridges=0			# must be set to allow intermediate bridges to be set with queues and f-mods
+
 while [[ $1 == -* ]]
 do
 	case $1 in 
-		-b)	bridges+="$2 "; shift;;
+		-b)	bridges+="$2 "; shift;;				# implies -B
+		-B)	allow_bridges=1;;					# allow bridges to be updated with an automatically generated list
 		-d)	diffserv="$2"; shift;;
 		-D)	allow_reset=0;;						# do not write the dscp reset flowmods
 		-e)	entry_max_rate=$( expand $2 ); shift;;
@@ -336,6 +354,11 @@ then
 	setup_iptables &			# do this asynch we'll wait at end
 fi
 
+if [[ -n $bridges ]]			# if user supplies bridges then we must set them up, so flag goes on
+then
+	allow_bridges=1
+fi
+
 if (( allow_irl ))				# do this first so that we can snag the assigned rate limit port from ovs_sp2uuid output
 then
 	logit "setting up ingress rate limiting bridge and flow-mods   [OK]"
@@ -351,7 +374,7 @@ rl_data=/tmp/PID$$.rdata
 queue_data=/tmp/PID$$.qdata
 >$fmod_data							# must exist and enusre it's empty
 
-# generate the data that will be given to create_ovs_queues
+# generate the data that will be given to create_ovs_queues and used to find br-rl ports
 ovs_sp2uuid -a $rhost any |	awk \
 	-v thost="${thost%%.*}" \
 	-v sudo="$sudo" \
@@ -472,7 +495,7 @@ then
 fi
 
 if [[ -z $bridges ]]					# build list of bridges to work on if not explicitly given
-then
+then									# if force is on, we'll set them up, otherwise we use them ensure flow-mods are off on the list
 	while read br 
 	do
 		#if [[ $br != "br-rl" ]]			# should be trapped later, but doesn't hurt to prevent inclusion here too
@@ -486,7 +509,7 @@ then
 fi
 logit "bridge list: $bridges"
 
-if [[ -s $queue_data ]]
+if [[ -s $queue_data ]] && (( allow_bridges ))		# must have queue data _and_ be  allowed to update bridges
 then
 	kflag=""
 	for br in $bridges
@@ -496,13 +519,13 @@ then
 			logit "CRI: unable to set one or more ovs queues on target-host: ${thost#* }   [FAIL] [QLTSOM003]"
 			cat /tmp/PID$$.coq >&2
 			rm -f /tmp/PID$$.*
-			exit 1
+			allow_bridges=0							# on error force flow-mods on the bridge to be removed later
 		fi
 
 		kflag="-k"
 	done
 else
-	logit "no queue setup data was generated  [WARN]" 
+	logit "did not create queues: bridge update not on (-b or -B missing) or no queue setup data was generated" 
 	logit "to verify: ovs_sp2uuid -a $rhost any"
 fi
 
@@ -514,27 +537,48 @@ fi
 #			each dscp value has any kind of 'send' (normal, output, enqueue) action. 
 #
 rc=0
-#while read b		# for each bridge listed set a flow mod to push marked packets onto the priority queue
-for b in $bridges
-do
-	logit "set DSCP pri/best-eff fmods on bridge: $b  dscp=$diffserv"
-	for dscp in ${diffserv//,/ }			# might be multiple values, space or comma separated
+if (( allow_bridges ))		# if allowed to update the queues/fmods on intermediate bridges
+then
+	for b in $bridges
 	do
-		send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  add 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
-		lrc=0
-		rc=$(( lrc + $? ))
-		send_ovs_fmod $noexec $rhost -T 91 -t 0  --match -T $dscp --action -m 1/1  -N  add 0xbeef $b				# cannot set meta before resub, so set in alternate table
-		rc=$(( lrc + $? ))
+		logit "set DSCP pri/best-eff fmods on bridge: $b  dscp=$diffserv"
+		for dscp in ${diffserv//,/ }			# might be multiple values, space or comma separated
+		do
+			send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  add 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
+			lrc=0
+			rc=$(( lrc + $? ))
+			send_ovs_fmod $noexec $rhost -T 91 -t 0  --match -T $dscp --action -m 1/1  -N  add 0xbeef $b				# cannot set meta before resub, so set in alternate table
+			rc=$(( lrc + $? ))
 
-		if (( lrc == 0  ))
-		then
-			logit "${no_exec_str}intermediate flow-mods were set on ${thost% } dscp=$dscp bridge=$b	[OK]"
-		else
-			logit "CRI: unable to set flow-mod for bridge=$b  dscp=$dscp on target-host: ${thost#* }   [FAIL]  [QLTSOM004]"
-			rc=1
-		fi
+			if (( lrc == 0  ))
+			then
+				logit "${no_exec_str}intermediate flow-mods were set on ${thost% } dscp=$dscp bridge=$b	[OK]"
+			else
+				logit "CRI: unable to set flow-mod for bridge=$b  dscp=$dscp on target-host: ${thost#* }   [FAIL]  [QLTSOM004]"
+				rc=1
+			fi
+		done
 	done
-done
+else
+	for b in $bridges			# allow_bridges is off, ensure that flow-mods matching priority traffic are removed
+	do
+		logit "delete DSCP pri/best-eff fmods on bridge: $b  dscp=$diffserv"
+		for dscp in ${diffserv//,/ }			# might be multiple values, space or comma separated
+		do
+			send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  del 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
+			lrc=0
+			rc=$(( lrc + $? ))
+
+			if (( lrc == 0  ))
+			then
+				logit "${no_exec_str}intermediate flow-mods were cleared from ${thost% } dscp=$dscp bridge=$b	[OK]"
+			else
+				logit "CRI: unable to clear flow-mod for bridge=$b  dscp=$dscp on target-host: ${thost#* }   [FAIL]  [QLTSOMXXX]"
+				rc=1
+			fi
+		done
+	done
+fi
 
 
 # Configure OVS to promote dscp value into gre header
@@ -584,7 +628,7 @@ then
 			rc=1
 		fi
 	else
-		$no_exec_str $ssh_host $cmd		# no exec mode; just echo things
+		$forreal $ssh_host $cmd		# no exec mode; just echo things
 	fi
 else
 	if (( verbose ))
