@@ -17,6 +17,7 @@
 #       Date:      4 February 2015
 #
 #       Mods:      4 Feb 2015 - created
+#                  11 Feb 2015 - remove temp file
 #
 
 function logit
@@ -75,4 +76,5 @@ $sudo ovs-vsctl list mirror "$mirrorname" > /tmp/m$$ && {
 }
 
 echo "tegu_del_mirror: mirror $mirrorname does not exist." >&2
+rm -f /tmp/m$$
 exit 3
