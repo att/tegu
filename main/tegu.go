@@ -92,6 +92,7 @@
 				09 Feb 2015 : Added work round to deal with OVS/openflow small hard timeout limit.
 				10 Feb 2015 : Corrected bug with refresh. 
 				18 Feb 2015 : Corrected bug with slice index and enabled both host name types on create queue list.
+				11 Mar 2015 : Corrected bug in network manager causing coredump when gateway info missing on bleat message.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -126,7 +127,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0.2/12195"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0.2/13125"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
