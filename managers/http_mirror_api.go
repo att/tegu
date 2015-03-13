@@ -173,7 +173,7 @@ func safe(s *string) ( string) {
  * Convert a pledge into the JSON form needed by the API, which is not the same as the JSON in pledge.go
  * since that reflects the underlying pledge structure.
  */
-func convertToJSON(mirror *gizmos.Pledge) (string) {
+func convertToJSON(mirror *gizmos.Pledge, scheme string, host string) (string) {
 	// Arrgh!
 	ports, outp, _, _, start, end, _, _ := mirror.Get_values()
 
@@ -202,10 +202,10 @@ func convertToJSON(mirror *gizmos.Pledge) (string) {
 		bs.WriteString(fmt.Sprintf("  \"vlan\": \"%s\",\n", vlan))
 	}
 	// Other, informational (non-API) fields
+	bs.WriteString(fmt.Sprintf("  \"physical_host\": \"%s\",\n", *mirror.Get_qid()))
 	bs.WriteString(fmt.Sprintf("  \"pushed\": %t,\n", mirror.Is_pushed()))
-	bs.WriteString(fmt.Sprintf("  \"paused\": %t\n",  mirror.Is_paused()))
-	// TODO add URL
-	// bs.WriteString(fmt.Sprintf("  \"url\": \"%s\"\n", url))
+	bs.WriteString(fmt.Sprintf("  \"paused\": %t,\n",  mirror.Is_paused()))
+	bs.WriteString(fmt.Sprintf("  \"url\": \"%s://%s/tegu/mirrors/%s/\"\n", scheme, host, *mirror.Get_id()))
 	bs.WriteString("}\n")
 	return bs.String()
 }
@@ -556,13 +556,13 @@ func mirror_delete( in *http.Request, out http.ResponseWriter, data []byte ) (co
  */
 func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code int, msg string) {
 	name, cookie := getNameAndCookie(in)
+	scheme := "http"
+	if (isSSL) {
+		scheme = "https"
+	}
 	if name == "" {
 		// List all mirrors
 		list := getMirrors()
-		scheme := "http"
-		if (isSSL) {
-			scheme = "https"
-		}
 		sep := "\n"
 		bs := bytes.NewBufferString("[")
 		for _, s := range list {
@@ -587,7 +587,7 @@ func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code 
 			return
 		}
 		code = http.StatusOK
-		msg = convertToJSON(mirror)
+		msg = convertToJSON(mirror, scheme, in.Host)
 	}
 	return
 }
