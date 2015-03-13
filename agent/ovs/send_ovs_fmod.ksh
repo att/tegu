@@ -54,6 +54,8 @@
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
 #				04 Feb 2014 - Set initial value of rhost to "" to prevent ssh to localhost
 #				09 Feb 2014 - Cap the hard timout to 18 hours to prevent ovs rejecting the flow-mod
+#				13 Mar 2014 - Changed last attempt to set fmod to drop prototype information as that 
+#								seems to get in the way with things like strip vlan.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -478,7 +480,10 @@ do
 					shift
 					;;
 
-				-V)	action+="strip_vlan ";;
+				-V)	action+="strip_vlan "
+					of_protoopt="OpenFlow10"			 # ovs won't acccept strip vlan if prototype options are supplied other than 1.0
+					;;
+
 				-X)	output="drop ";;	
 		
 				*)	echo "unrecognised action option: $1  [FAIL]"
@@ -556,8 +561,16 @@ case $1 in
 			timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist add-flow ${lbswitch:-$3} "$fmod"
 			rc=$?
 			(( tries-- ))
+
+			if (( tries == 1 ))				# last try without prototype options as we've seen ovs reject some things (strip vlan) with options set
+			then
+				logit "making last attempt to set flow-mod without any -O options to ovs"	
+				of_protolist=""
+				of_protoopt=""
+			fi
 			if (( rc ))
 			then
+				logit "set ovs flow-mod failed; pausing before retry"
 				sleep 1
 			fi
 		done
