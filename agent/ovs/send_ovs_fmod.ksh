@@ -481,7 +481,7 @@ do
 					;;
 
 				-V)	action+="strip_vlan "
-					of_protoopt="OpenFlow10"			 # ovs won't acccept strip vlan if prototype options are supplied other than 1.0
+					of_protolist="OpenFlow10"			 # ovs won't acccept strip vlan if prototype options are supplied other than 1.0
 					;;
 
 				-X)	output="drop ";;	
