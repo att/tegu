@@ -67,7 +67,8 @@
 						to use a list of active (up) hosts rather than every host known to 
 						openstack.
 				05 Dec 2014 - Added work round for AIC admin issue after they flipped to LDAP.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2014 - Support port masks in flow-mods.
+				27 Feb 2015 - To make steering work with lazy updates.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -655,16 +656,25 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					}
 				}
 				
+*/
 
 			case REQ_VALIDATE_TOKEN:						// given token/tenant validate it and translate tenant name to ID if given; returns just ID
 				if msg.Response_ch != nil {
 					s := msg.Req_data.( *string )
 					*s += "/"								// add trailing slant to simulate "data"
 					msg.Response_data, msg.State = validate_token( s, os_refs, pname2id, req_token )
-*/
+				}
+
+
 			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info from oepnstack and return in a network update struct
 				if msg.Response_ch != nil {
 					go get_os_hostinfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+					msg = nil							// prevent early response
+				}
+
+			case REQ_GET_DEFGW:							// dig out the default gateway for a project
+				if msg.Response_ch != nil {
+					go get_os_defgw( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
 					msg = nil							// prevent early response
 				}
 

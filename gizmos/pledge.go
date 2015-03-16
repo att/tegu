@@ -18,6 +18,7 @@
 				24 Sep 2014 - Support for keep/delete toggle for dscp values
 				16 Jan 2014 - Conversion of transport port information to string to allow for mask.
 				17 Feb 2015 - Added mirroring
+				24 Feb 2015 - Corrected to_json reference of tpport values (pointers, not strings)
 */
 
 package gizmos
@@ -540,11 +541,11 @@ func (p *Pledge) To_json( ) ( json string ) {
 
 		case PT_STEERING:
 				if p.protocol != nil {
-					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `,
-							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.protocol, *p.id, *p.qid )
+					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+							state, diff, p.bandw_in, p.bandw_out, *p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.protocol, *p.id, *p.qid )
 				} else {
-					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `,
-							state, diff, p.bandw_in, p.bandw_out, *p.host1, p.tpport1, *p.host2, p.tpport2, *p.id, *p.qid )
+					json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "ptype": "steering", "mbox_list": [ `, 
+							state, diff, p.bandw_in, p.bandw_out, *p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.id, *p.qid )
 				}
 				sep := ""
 				for i := 0; i < p.mbidx; i++ {
@@ -582,16 +583,16 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 	
 	switch p.ptype {
 		case PT_BANDWIDTH:
-				chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`,
-						*p.host1, p.tpport1, *p.host2, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, p.ptype )
+				chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
+						*p.host1, *p.tpport1, *p.host2, *p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, p.ptype )
 
 		case PT_STEERING:
 				if p.protocol != nil {
-					chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "protocol": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `,
-						*p.host1, p.tpport1, *p.host2, p.tpport2, *p.protocol, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+					chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
+						*p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.protocol, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
 				} else {
-					chkpt = fmt.Sprintf( `{ "host1": "%s:%d", "host2": "%s:%d", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `,
-						*p.host1, p.tpport1, *p.host2, p.tpport2,  p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
+					chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
+						*p.host1, *p.tpport1, *p.host2, *p.tpport2,  p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.ptype )
 				}
 				sep := ""
 				for i := 0; i < p.mbidx; i++ {

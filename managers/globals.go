@@ -20,6 +20,7 @@
 				05 Sep 2014 - Allow version, used in ping, to be set by main.
 				16 Jan 2014 - Support port masks in flow-mods.
 				22 Feb 2014 - Added REQ_GET_MIRRORS
+				26 Feb 2015 - Added support for default gateway sussing.
 */
 
 package managers
@@ -98,6 +99,7 @@ const (
 	REQ_ALLUP					// signal that all initialisation has been completed
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
 	REQ_GET_MIRRORS				// get a list of mirrors from res mgr
+	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
 )
 
 const (

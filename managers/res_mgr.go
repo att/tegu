@@ -54,6 +54,7 @@
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
 				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
 				24 Feb 2015 : Added mirroring
+				27 Feb 2015 : Steering changes to work with lazy update.
 */
 
 package managers
@@ -115,9 +116,15 @@ func ( i *Inventory ) res2json( ) (json string, err error) {
 
 /*
 	Given a name, send a request to the network manager to translate it to an IP address.
+	If the name is nil or empty, we return nil. This is legit for steering in the case of
+	L* endpoint specification.
 */
 func name2ip( name *string ) ( ip *string ) {
 	ip = nil
+
+	if name == nil || *name == "" {
+		return
+	}
 
 	ch := make( chan *ipc.Chmsg )	
 	defer close( ch )									// close it on return
@@ -144,9 +151,12 @@ func get_hostinfo( name *string ) ( *string, *string, *string, int ) {
 		if req.State == nil {
 			htoks := strings.Split( req.Response_data.( string ), "," )					// results are: ip, mac, switch-id, switch-port; all strings
 			return &htoks[0], &htoks[1], &htoks[2], clike.Atoi( htoks[3] )
+		} else {
+			rm_sheep.Baa( 1, "get_hostinfo: error from network mgr: %s", req.State )
 		}
 	}
 
+	rm_sheep.Baa( 1, "get_hostinfo: no name provided" )
 	return nil, nil, nil, 0
 }
 
@@ -265,12 +275,13 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 */
 func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, hto_limit int64 ) ( npushed int ) {
 	var (
-		push_count	int = 0
+		bw_push_count	int = 0
+		st_push_count	int = 0
 		pend_count	int = 0
 		pushed_count int = 0
 	)
 
-	rm_sheep.Baa( 2, "pushing reservations, %d in cache", len( i.cache ) )
+	rm_sheep.Baa( 4, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
 			/*
@@ -293,9 +304,11 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
+						bw_push_count++
 						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit )
 
 					case gizmos.PT_STEERING:
+						st_push_count++
 						push_st_reservation( p, rname, ch, hto_limit )
 
 					case gizmos.PT_MIRRORING:
@@ -309,8 +322,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 		}
 	}
 
-	if push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
-		rm_sheep.Baa( 1, "push_bw_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
+	if st_push_count > 0 || bw_push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
+		rm_sheep.Baa( 1, "push_bw_reservations: %d bandwidth, %d steering, %d pending, %d already pushed", bw_push_count, st_push_count, pend_count, pushed_count )
 	}
 
 	return pushed_count
@@ -425,24 +438,30 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 					if  p.Is_expired() {
 						rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", p.To_str() )
 					} else {
-						h1, h2 := p.Get_hosts( )							// get the host names, fetch ostack data and update graph
-						update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
-						update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
+						switch p.Get_ptype() {
+							case gizmos.PT_STEERING:
+								rm_sheep.Baa( 0, "did not restore steerin reservation from checkpoint; not implemented" )
 
-						req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-						req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
-						req = <- my_ch										// should be OK, but the underlying network could have changed
+							case gizmos.PT_BANDWIDTH:
+								h1, h2 := p.Get_hosts( )							// get the host names, fetch ostack data and update graph
+								update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
+								update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
 		
-						if req.Response_data != nil {
-							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-							p.Set_path_list( path_list )
-							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", p.Get_id, *h1, *h2, len( path_list ) )
-							err = i.Add_res( p )
-						} else {
-							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
+								req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
+								req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
+								req = <- my_ch										// should be OK, but the underlying network could have changed
+				
+								if req.Response_data != nil {
+									path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+									p.Set_path_list( path_list )
+									rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", p.Get_id, *h1, *h2, len( path_list ) )
+									err = i.Add_res( p )
+								} else {
+									rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
+								}
 						}
 					}
-			}
+			}				// outer switch
 		}
 	}
 

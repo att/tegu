@@ -59,6 +59,7 @@
 				16 Jan 2015 : Support port masks in flow-mods.
 				27 Jan 2015 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
 				17 Feb 2015 : Added mirroring
+				24 Feb 2014 : prevent interface issue in steer parsing and adjust to work with lazy update.
 */
 
 package managers
@@ -242,16 +243,20 @@ func wc2name( raw string ) ( string ) {
 	}
 
 	switch toks[1] {
-		case "E*":					// look up gateway for project
+		case "E*", "e*":					// look up gateway for project
 			req := ipc.Mk_chmsg( )
 
-			req.Send_req( nw_ch, lch, REQ_GETGW, &toks[0], nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
+	//		req.Send_req( nw_ch, lch, REQ_GETGW, &toks[0], nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
+			req.Send_req( osif_ch, lch, REQ_GET_DEFGW, &toks[0], nil )	// ask osif to fetch info and dig out the default (first in list) gw ip address
 			req = <- lch											// hard wait for network thread response
 			if req.Response_data.(*string) != nil {
+				http_sheep.Baa(	1, "E* converted to gw: %s", *(req.Response_data.( *string ) ) )
 				return *(req.Response_data.( *string ))
+			} else {
+				http_sheep.Baa( 1, "E* wasn't translated to name" )
 			}
 
-		case "L*":
+		case "L*", "l*":
 			break
 
 		default:
@@ -356,7 +361,7 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 		}
 	} else {
 		if req.State != nil {
-			http_sheep.Baa( 2, "unable to get host info on %s: %s", req.State )		// this is probably ok as it's likely a !//ipaddress hostname, but we'll log it anyway
+			http_sheep.Baa( 2, "unable to get host info for %s: %s", *hname, req.State )		// this is probably ok as it's likely a !//ipaddress hostname, but we'll log it anyway
 		}
 	}
 
@@ -733,11 +738,21 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 					h1 = wc2name( h1 )							// resolve E* or L* wild cards
 					h2 = wc2name( h2 )
+http_sheep.Baa( 1, ">>>> steer: conversion: (%s) (%s)", h1, h2 )
+
+					if h1 != "" {
+						update_graph( &h1, false, h2 == "" )					// pull all of the VM information from osif then send to netmgr (block if h2 is empty)
+					}
+					if h2 != "" {
+						update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+					}
 
 					req := ipc.Mk_chmsg( )
 					req.Send_req( osif_ch, my_ch, REQ_VALIDATE_TOKEN, tmap["usrsp"], nil )		// validate token and convert user space to ID if name given
 					req = <- my_ch
-					tmap["usrsp"] = req.Response_data.( *string )
+					if req.Response_data != nil {
+						tmap["usrsp"] = req.Response_data.( *string )
+					}
 
 					if tmap["proto"] != nil { // DEBUG
 						http_sheep.Baa( 1, "steering using  proto: %s", *tmap["proto"] )
@@ -745,6 +760,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
 					res_name := mk_resname( )									// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+
 					res, err := gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"], tmap["proto"] )
 					if err != nil {
 						reason = fmt.Sprintf( "unable to create a steering reservation  %s", err )
@@ -760,6 +776,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						} else {
 							mbn = mbnames[i]
 						}
+
+						update_graph( &mbn, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
 						req.Send_req( nw_ch, my_ch, REQ_HOSTINFO, &mbn, nil )		// get host info string (mac, ip, switch)
 						req = <- my_ch
 						if req.State != nil {
@@ -772,7 +790,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 					if req.State == nil {											// all middle boxes were validated
 						req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )			// push it into the reservation manager which will drive flow-mods etc
-						req = <- my_ch
+						req = <- my_ch										
+					} else {
+						http_sheep.Baa( 1, "unable to validate all middle boxes" )
 					}
 
 					if req.State == nil {
@@ -785,6 +805,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						nerrors++
 						reason = fmt.Sprintf( "%s", req.State )
 					}
+					http_sheep.Baa( 1, "steering reservation %s; errors: %s", state, reason )
 
 				case "setulcap":									// set a user link cap; expect user-name limit
 					if validate_auth( &auth_data, is_token ) {

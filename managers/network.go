@@ -236,8 +236,6 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 		net.vmip2gw = make( map[string]*string )
 	}
 	
-
-
 	if vname != nil {
 		net.vm2ip[*vname] = vip4
 	}
@@ -423,6 +421,12 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
 	lname := *hname								// lookup name - we may have to strip leading !
+
+	if *hname == "" {
+		net_sheep.Baa( 1, "bad name passed to name2ip: empty" )
+		err = fmt.Errorf( "host unknown: empty name passed to network manager", *hname )
+		return 
+	}
 
 	if (*hname)[0:2] == "!/" {					// special external name (no tenant string following !)
 		ip = hname
@@ -748,6 +752,13 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 		}
 	} else {
 		err = fmt.Errorf( "cannot translate IP to MAC: %s", *ip )
+for k, v := range n.ip2mac {
+if v != nil {
+net_sheep.Baa( 1, ">>>%s -- %s", k, *v )
+}else{
+net_sheep.Baa( 1, ">>>%s -- nil", k )
+}
+}
 	}
 
 	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network 

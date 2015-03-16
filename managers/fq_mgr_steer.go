@@ -9,13 +9,13 @@
 	Date:		03 Nov 2014
 	Author:		E. Scott Daniels
 
-	Mods:		
+	Mods:		27 Feb 2015 - changes to deal with lazy update and to correct l* bug.
 */
 
 package managers
 
 import (
-	//"encoding/json"
+	"encoding/json"
 	"fmt"
 	//"os"
 	"strings"
@@ -25,6 +25,31 @@ import (
 	"codecloud.web.att.com/gopkgs/ipc"
 	//"codecloud.web.att.com/tegu/gizmos"
 )
+
+
+/*
+	Not to be confused with send_meta_fmods in res_mgr. This needs to be extended
+	such that resmgr can just send fq-mgr a request to invoke this.
+
+*/
+func send_meta_fm( hlist []string, table int, cookie int, pattern string ) {
+	tmsg := ipc.Mk_chmsg( )
+
+	msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
+	msg.Actions = make( []action, 1 )
+	msg.Actions[0].Atype = "flowmod"
+	msg.Actions[0].Hosts = hlist
+	msg.Actions[0].Fdata = make( []string, 1 )
+	msg.Actions[0].Fdata[0] = fmt.Sprintf( `-T %d -I -t 0 --match --action -m %s -N add 0x%x br-int`, table, pattern, cookie )
+
+	json, err := json.Marshal( msg )										// bundle into a json string
+	if err != nil {
+		fq_sheep.Baa( 0, "steer: unable to build json to set meta flow mod" )
+	} else {
+		fq_sheep.Baa( 2, "meta json: %s", json )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+	}
+}
 
 
 /*
@@ -52,6 +77,7 @@ import (
 			flag in the main request struct rather than deducing it from parms. 
 */
 func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) {
+	var hosts []string			// hosts that the fmod will target
 
 	if data.Pri <= 0 {
 		data.Pri = 100
@@ -82,7 +108,16 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		}
 	} 
 
-	on_all := data.Swid == nil 							// if no switch id, then we write to all
+	//on_all := data.Swid == nil 							// if no switch id, then we write to all
+	if data.Swid == nil {									// no switch id, then write to all hosts
+		hosts = strings.Split( *hlist, " " )
+	} else {
+		hosts = strings.Split( *data.Swid, " " )	
+	}
+
+	fq_sheep.Baa( 2, "sending steering metadata flow-mods to %d hosts alt-table base %d", len( hosts ), 90 )
+	send_meta_fm( hosts,  90, 0xe5d, "0x01/0x01" )			// TODO: these need to use the same base that res-mgr is using
+	send_meta_fm( hosts,  91, 0xe5d, "0x02/0x02" )
 
 	if data.Match.Swport >= 0  {						// valid port
 		match_opts += fmt.Sprintf( " -i %d", data.Match.Swport )
@@ -98,6 +133,11 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 
 	smac := data.Match.Smac								// smac wins if both smac and sip are given
 	if smac == nil {
+		if data.Match.Ip1 != nil {						// smac missing, set src IP (needed to support multiple res)
+			toks := strings.Split( *data.Match.Ip1, "/" )	// split off project/
+			match_opts += " -S " + toks[len( toks )-1]
+		}
+/*
 		if data.Match.Ip1 != nil {						// src supplied, match on src
 			smac = ip2mac[*data.Match.Ip1]
 			if smac == nil {
@@ -105,6 +145,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 				return
 			}
 		}
+*/
 	}
 	if smac != nil {
 		match_opts += " -s " + *smac
@@ -125,11 +166,11 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	}
 
 	if *data.Match.Tpsport >= "0" && data.Protocol != nil {						// we allow 0 as that means match all of this protocol
-        match_opts += fmt.Sprintf( " -p %s:%s", *data.Protocol, data.Match.Tpsport )
+        match_opts += fmt.Sprintf( " -p %s:%s", *data.Protocol, *data.Match.Tpsport )
     }
 
     if *data.Match.Tpdport >= "0" && data.Protocol != nil {
-        match_opts += fmt.Sprintf( " -P %s:%s", *data.Protocol, data.Match.Tpdport )
+        match_opts += fmt.Sprintf( " -P %s:%s", *data.Protocol, *data.Match.Tpdport )
     }
 
 	action_opts := ""
@@ -163,10 +204,32 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	//action_opts = fmt.Sprintf( "--action %s -R ,0 -N", action_opts )		// set up actions; may be order sensitive so -R and -N LAST 
 	action_opts = fmt.Sprintf( "--action %s %s", action_opts, output )		// set up actions
 
-	base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+	//base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
+
+//--------------------
+	tmsg := ipc.Mk_chmsg( )
+
+	msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
+	msg.Actions = make( []action, 1 )
+	msg.Actions[0].Atype = "flowmod"
+	msg.Actions[0].Hosts = make( []string, 1 )
+	msg.Actions[0].Hosts = hosts
+	msg.Actions[0].Fdata = make( []string, 1 )
+	msg.Actions[0].Fdata[0] = fmt.Sprintf( `%s -t %d -p %d %s %s add 0xedde br-int`, table, data.Expiry, data.Pri, match_opts, action_opts )
+
+	json, err := json.Marshal( msg )			// bundle into a json string
+	if err != nil {
+		fq_sheep.Baa( 0, "steer: unable to build json to set flow mod" )
+	} else {
+		fq_sheep.Baa( 2, "stfmod json: %s", json )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+	}
+
+//--------------------
+/*
+original pre broker code
 
 	if on_all {											// blast the fmod to all switches
-		hosts := strings.Split( *hlist, " " )
 		for i := range hosts {
 
 			json := base_json
@@ -185,5 +248,6 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
 	}
+*/
 	
 }
