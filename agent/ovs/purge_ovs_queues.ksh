@@ -20,6 +20,7 @@
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
 #				28 Jan 2014 - To allow agent with ssh-broker to execute on a remote host.
+#				16 Mar 2015 - Corrected bug in -h arg processing.
 # ----------------------------------------------------------------------------------------------------------
 #
 
@@ -59,7 +60,7 @@ do
 	case $1 in 
 		-a)		purge_all=1;;
 		-h)		
-				if [[ $2 != $(thost) && $2 != "localhost" ]]
+				if [[ $2 != $(hostname) && $2 != "localhost" ]]
 				then
 					ssh_host="ssh $ssh_opts $2"; 
 					rhost="$2"
