@@ -297,11 +297,6 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 				// mirror requests need to be undone when they become inactive
 				undo_mirror_reservation( p, rname, ch )
 			} else if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-				if push_count <= 0 {
-					rm_sheep.Baa( 1, "pushing proactive reservations" )
-				}
-				push_count++
-
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
 						bw_push_count++
