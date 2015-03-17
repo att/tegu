@@ -8,12 +8,12 @@
 	Author:		E. Scott Daniels
 
 	Mods:		08 Jan 2014 - Corrected bug that wasn't rejecting a pledge if the expiry time was < 0.
-				11 Feb 2014 - Added better doc to some functions and we now save the queue id in 
+				11 Feb 2014 - Added better doc to some functions and we now save the queue id in
 							the checkpoint file.
-				13 May 2014 - Added support to enable an exit dscp value on a reservation. 
+				13 May 2014 - Added support to enable an exit dscp value on a reservation.
 				05 Jun 2014 - Added support for pause.
 				20 Jun 2014 - Corrected bug that allowed future start time with an earlier expry time
-							to be accepted. 
+							to be accepted.
 				07 Jul 2014 - Added clone function.
 				24 Sep 2014 - Support for keep/delete toggle for dscp values
 				16 Jan 2014 - Conversion of transport port information to string to allow for mask.
@@ -53,13 +53,14 @@ type Pledge struct {
 	path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
 	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
 	paused		bool		// set if reservation has been paused
+	ptype		int			// pledge type from gizmos PT_ constants.
 }
 
 /*
-	A work struct used to decode a json string using Go's json package which requires things to 
+	A work struct used to decode a json string using Go's json package which requires things to
 	be exported (boo). We need this to easily parse the json saved in the checkpoint file.
 	We assume that host1/2 are saved _with_ trailing :port and thus we don't explicitly save/restore
-	the tp port fields.  The conversion from checkpoint value to full struct will split them off. 
+	the tp port fields.  The conversion from checkpoint value to full struct will split them off.
 */
 type Json_pledge struct {
 	Host1		*string
@@ -77,10 +78,10 @@ type Json_pledge struct {
 
 /*
 	Constructor; creates a pledge.
-	Creates a pledge of bandwidth between two hosts, allowing host2 to be nil which indicates that the 
-	pledge exists between host1 and any other host. If commence is 0, then the current time (now) is used. 
+	Creates a pledge of bandwidth between two hosts, allowing host2 to be nil which indicates that the
+	pledge exists between host1 and any other host. If commence is 0, then the current time (now) is used.
 
-	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward 
+	A nil pointer is returned if the expiry time is in the past and the comence time is adjusted forward
 	(to the current time) if it is less than the current time.
 */
 func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence int64, expiry int64, bandw_in int64, bandw_out int64, id *string, usrkey *string, dscp int, dscp_koe bool ) ( p *Pledge, err error ) {
@@ -99,7 +100,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence i
 		return
 	}
 	
-	if *host2 == "" || *host2 == "any" {			// no longer allowed 
+	if *host2 == "" || *host2 == "any" {			// no longer allowed
 		p = nil;
 		err = fmt.Errorf( "bad host2 name submitted: %s", *host2 )
 		obj_sheep.Baa( 1, "pledge: %s", err )
@@ -107,10 +108,10 @@ func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence i
 
 		//any_str := "any"
 		//p.host2 = &any_str
-	} 
+	}
 
-	p = &Pledge{ 
-		host1: host1, 
+	p = &Pledge{
+		host1: host1,
 		host2: host2,
 		tpport1: p1,
 		tpport2: p2,
@@ -120,6 +121,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence i
 		bandw_out:	bandw_out,
 		id: id,
 		dscp: dscp,
+		ptype:	PT_BANDWIDTH,
 		dscp_koe: dscp_koe,
 	}
 
@@ -134,7 +136,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence i
 
 /*
 	Create a clone of the pledge.  The path is NOT a copy, but just a reference to the list
-	from the original. 
+	from the original.
 */
 func (p *Pledge) Clone( name string ) ( newp *Pledge ) {
 	newp = &Pledge {
@@ -174,8 +176,8 @@ func (p *Pledge) Nuke( ) {
 
 /*
 	Given a json string unpack it and put it into a pledge struct.
-	We assume that the host names are name:port and split them apart 
-	as would be expected. 
+	We assume that the host names are name:port and split them apart
+	as would be expected.
 */
 func (p *Pledge) From_json( jstr *string ) ( err error ){
 	jp := new( Json_pledge )
@@ -199,7 +201,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 	p.host2 = &tokens[0]
 	if len( tokens ) > 1 {
 		//p.tpport2 = clike.Atoi( tokens[1] )
-		p.tpport2 = &tokens[1] 
+		p.tpport2 = &tokens[1]
 	} else {
 		//p.tpport2 = 0
 		dup_str := "0"
@@ -237,7 +239,7 @@ func (p *Pledge) Set_path_list( pl []*Path ) {
 	Sets a new expiry value on the pledge.
 */
 func (p *Pledge) Set_expiry ( v int64 ) {
-	p.expiry = v 
+	p.expiry = v
 	p.pushed = false		// force it to be resent to ajust times
 }
 
@@ -267,8 +269,8 @@ func (p *Pledge) Resume( reset bool ) {
 	}
 }
 
-/* 
-	Accepts a host name and returns true if it matches either of the names associated with 
+/*
+	Accepts a host name and returns true if it matches either of the names associated with
 	this pledge.
 */
 func (p *Pledge) Has_host( hname *string ) ( bool ) {
@@ -281,7 +283,7 @@ func (p *Pledge) Has_host( hname *string ) ( bool ) {
 */
 func (p *Pledge) To_str( ) ( s string ) {
 	var (
-		now 	int64; 
+		now 	int64;
 		state 	string
 		caption string
 		diff	int64
@@ -304,14 +306,14 @@ func (p *Pledge) To_str( ) ( s string ) {
 		}
 	}
 
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d koe=%v", state, diff, caption, 
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d koe=%v", state, diff, caption,
 			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, p.commence, p.expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe )
 	return
 }
 
 /*
-	Generate a json representation of a pledge. We do NOT use the json package because we 
-	don't put the object directly in; we render useful information, which excludes some of 
+	Generate a json representation of a pledge. We do NOT use the json package because we
+	don't put the object directly in; we render useful information, which excludes some of
 	the raw data, and we don't want to have to expose the fields publicly that do go into
 	the json output.
 */
@@ -335,7 +337,7 @@ func (p *Pledge) To_json( ) ( json string ) {
 		}
 	}
 	
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v }`, 
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v }`,
 			state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.id, *p.qid, p.dscp, p.dscp_koe )
 
 	return
@@ -347,11 +349,11 @@ func (p *Pledge) To_json( ) ( json string ) {
 	users.
 
 	There is no path information saved in the checkpt. If a reload from ckpt is needed, then we assume
-	that the network information was completely reset and the paths will be rebult using the host, 
+	that the network information was completely reset and the paths will be rebult using the host,
 	commence, expiry and bandwidth information that was saved.
 
 	If the pledge is expired, the string "expired" is returned which seems a bit better than just returning
-	an empty string, or "{ }" which is meaningless. 
+	an empty string, or "{ }" which is meaningless.
 */
 func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 	if p.Is_expired( ) {			// will show expired if p is nill, so safe without check
@@ -359,14 +361,14 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 		return
 	}
 	
-	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v }`, 
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v }`,
 			*p.host1, *p.tpport1, *p.host2, *p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe )
 
 	return
 }
 
 /*
-	Sets the pushed flag to true. 
+	Sets the pushed flag to true.
 */
 func (p *Pledge) Set_pushed( ) {
 	if p != nil {
@@ -406,7 +408,7 @@ func (p *Pledge) Is_paused( ) ( bool ) {
 }
 
 /*
-	Returns true if the pledge has expired (the current time is greather than 
+	Returns true if the pledge has expired (the current time is greather than
 	the expiry time in the pledge).
 */
 func (p *Pledge) Is_expired( ) ( bool ) {
@@ -429,7 +431,7 @@ func (p *Pledge) Is_pending( ) ( bool ) {
 
 /*
 	Returns true if the pledge is currently active (the commence time is <= than the current time
-	and the expiry time is > the current time. 
+	and the expiry time is > the current time.
 */
 func (p *Pledge) Is_active( ) ( bool ) {
 	if p == nil {
@@ -453,16 +455,16 @@ func (p *Pledge) Is_active_soon( window int64 ) ( bool ) {
 }
 
 /*
-	Check the cookie passed in and return true if it matches the cookie on the 
+	Check the cookie passed in and return true if it matches the cookie on the
 	pledge.
 */
 func (p *Pledge) Is_valid_cookie( c *string ) ( bool ) {
 	//fmt.Fprintf( os.Stderr, "pledge:>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
-	return *c == *p.usrkey 
+	return *c == *p.usrkey
 }
 
 /*
-	Returns true if pledge concluded between (now - window) and now-1. 
+	Returns true if pledge concluded between (now - window) and now-1.
 */
 func (p *Pledge) Concluded_recently( window int64 ) ( bool ) {
 	if p == nil {
@@ -475,8 +477,8 @@ func (p *Pledge) Concluded_recently( window int64 ) ( bool ) {
 
 /*
 	Returns true if pledge expired long enough ago that it can safely be discarded.
-	The window is the number of seconds that the pledge must have been expired to 
-	be considered extinct. 
+	The window is the number of seconds that the pledge must have been expired to
+	be considered extinct.
 */
 func (p *Pledge) Is_extinct( window int64 ) ( bool ) {
 	if p == nil {
@@ -490,19 +492,26 @@ func (p *Pledge) Is_extinct( window int64 ) ( bool ) {
 /*
 	Returns true if pledge started recently (between now and now - window seconds) and
 	has not expired yet. If the pledge started within the window, but expired before
-	the call to this function false is returned. 
+	the call to this function false is returned.
 */
 func (p *Pledge) Commenced_recently( window int64 ) ( bool ) {
 	if p == nil {
 		return false
 	}
 
-	now := time.Now().Unix() 
+	now := time.Now().Unix()
 	return (p.commence >= (now - window)) && (p.commence <= now ) && (p.expiry > now)
 }
 
 /*
-	Returns a pointer to the ID string of the pledge. 
+	Return the type of pledge; one of the PT_ constants.
+*/
+func (p *Pledge) Get_ptype( ) ( int ) {
+	return p.ptype
+}
+
+/*
+	Returns a pointer to the ID string of the pledge.
 */
 func (p *Pledge) Get_id( ) ( *string ) {
 	if p == nil {
@@ -583,11 +592,11 @@ func (p *Pledge) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *string,
 		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
 	}
 
-	return p.host1, p.host2, p.tpport1, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out 
+	return p.host1, p.host2, p.tpport1, p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out
 }
 
 /*
-	Return the dscp that was submitted with the resrrvation, and the state of the keep on 
+	Return the dscp that was submitted with the resrrvation, and the state of the keep on
 	exit flag.
 */
 func (p *Pledge) Get_dscp( ) ( int, bool ) {
@@ -600,7 +609,7 @@ func (p *Pledge) Get_dscp( ) ( int, bool ) {
 
 /*
 	Returns the list of path objects that are needed to fulfill the pledge. Mulitple
-	paths occur if the network is split. 
+	paths occur if the network is split.
 */
 func (p *Pledge) Get_path_list( ) ( []*Path ) {
 	if p == nil {
