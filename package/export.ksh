@@ -62,6 +62,7 @@ fi
 
 pkg_name=$1
 ver="$2"
+name_ver=${pkg_name}_${ver}
 pkg_list=${pkg_name}.exlist
 
 if [[ ! -r $pkg_list ]]
@@ -76,7 +77,7 @@ echo $ver >last_export_ver
 if [[ -z $dir ]]
 then
 	#dir=$ex_root/$(date +%Y%m%d)
-	dir=$ex_root/$ver
+	dir=$ex_root/$name_ver
 fi
 if [[ ! -d $dir ]]
 then
@@ -149,6 +150,6 @@ then
 fi
 
 mkdir -p $ex_root/bundle/
-tar -cf - . | gzip >/$ex_root/bundle/attlrqlite-${ver}.tar.gz
+tar -cf - . | gzip >/$ex_root/bundle/attlr${pkg_name}-${ver}.tar.gz
 trap - EXIT
-echo "packaged ready for deb build in: $ex_root/bundle/attlrqlite-${ver}.tar.gz"
+echo "packaged ready for deb build in: $ex_root/bundle/attlr${pkg_name}-${ver}.tar.gz"
