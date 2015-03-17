@@ -40,6 +40,7 @@
 				26 Jan 2015 - Corrected table number problem -- outbound data should resub through the base+1 table, but inbound
 					packets should resub through the base table, not base+1.
 				01 Feb 2015 - Corrected bug itroduced when host name removed from fmod parmss (agent w/ ssh-broker changes).
+				19 Feb 2015 - Change in adjust_queues_agent to allow create queues to be driven from agent without -h on command line.
 */
 
 package managers
@@ -163,6 +164,11 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 	This now augments the switch name with the suffix; needs to be fixed for q-full
 	so that it handles intermediate names properly.
+
+	In the world with the ssh-broker, there is no -h host on the command line and 
+	the script's view of host name might not have the suffix that we are supplied
+	with.  To prevent the script from not recognising an entry, we must now 
+	put an entry for both the host name and hostname+suffix into the list. 
 */
 func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	var (
@@ -173,9 +179,12 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 
 	target_hosts := make( map[string]bool )					// hosts that are actually affected by the queue list
 	if phsuffix != nil {									// need to convert the host names in the list to have suffix
-		nql := make( []string, len( qlist ) )
+		nql := make( []string, len( qlist ) * 2 )			// need one for each possible host name
 
+		offset := len( qlist )								// put the originals into the second half of the array
 		for i := range qlist {
+			nql[offset+i] = qlist[i]								// just copy the original
+
 			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
 			if len( toks ) == 2 {
 				nh := add_phost_suffix( &toks[0],  phsuffix )		// add the suffix

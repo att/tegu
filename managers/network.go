@@ -50,6 +50,9 @@
 					if a cross tenant reservation is being made. Also drops the requirement that the VM 
 					have a floating IP if the reservation is being made with a host using an external
 					IP address.
+				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the 
+					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
+					as the endpoint 'name'. 
 */
 
 package managers
@@ -251,6 +254,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 		net.ip2mac[*vip4] = vmac
 		net.ip2fip[*vip4] = vfip
 		net.vmip2gw[*vip4] = gw
+
 	}
 
 	if vfip != nil {
@@ -442,11 +446,9 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	} else {
 		ip = n.vm2ip[lname]						// it's not an ip, try to translate it as either a VM name or VM ID
 		if ip == nil {							// maybe it's just an ID, try without 
-			idx := strings.Index( lname, "/" )
-			if idx >= 0 {
-				lname = lname[idx+1:]			// point past the slant
-				ip = n.vm2ip[lname]				// see if it's there just based on what we asssume is an ID
-			}
+			tokens := strings.Split( lname, "/" )				// could be project/uuid or just uuid
+			lname = tokens[len( tokens ) -1]	// local name is the last token
+			ip = n.vmid2ip[lname]				// see if it maps to an ip
 		}
 		if ip != nil {							// the name translates, see if it's in the known net
 			if n.hosts[*ip] == nil {			// ip isn't in the network scope as a host, return nil
@@ -460,7 +462,6 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 			}
 		} else {
 			err = fmt.Errorf( "host unknown: %s could not be mapped to an IP address", *hname )
-			//net_sheep.Baa( 1, "unable to map name/ID to an IP: %s", *hname )						// caller should bleat
 		}
 	}
 
@@ -882,7 +883,11 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list[0].usr = &t1
 		pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
 	} else {
-		net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
+		if g2 == nil {
+			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation no-router??? <-> %s", *h2ip )
+		} else {
+			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
+		}
 	}
 
 	if h2_auth {
@@ -891,7 +896,11 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list[h2i].usr = &t2
 		pair_list[h2i].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
 	} else {
-		net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
+		if g1 == nil {
+			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation no-g1-router???? <-> %s",  *h1ip )
+		} else {
+			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
+		}
 	}
 
 	return

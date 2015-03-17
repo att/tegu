@@ -55,6 +55,7 @@
 				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
 				24 Feb 2015 : Added mirroring
 				27 Feb 2015 : Steering changes to work with lazy update.
+				17 March 2015 : lite version of resmgr brought more in line with steering.
 */
 
 package managers
@@ -267,6 +268,7 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	}
 }
 
+
 /*
 	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
 	next 15 seconds).  Also handles undoing any mirror reservations that have expired.
@@ -318,7 +320,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 	}
 
 	if st_push_count > 0 || bw_push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
-		rm_sheep.Baa( 1, "push_bw_reservations: %d bandwidth, %d steering, %d pending, %d already pushed", bw_push_count, st_push_count, pend_count, pushed_count )
+		rm_sheep.Baa( 1, "push_reservations: %d bandwidth, %d steering, %d pending, %d already pushed", bw_push_count, st_push_count, pend_count, pushed_count )
 	}
 
 	return pushed_count

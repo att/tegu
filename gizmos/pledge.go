@@ -86,6 +86,7 @@ type Json_pledge struct {
 }
 
 // ---- private -------------------------------------------------------------------
+
 /*
 	Adjust window. Returns a valid commence time (if earlier than now) or 0 if the
 	time window is not valid.

@@ -26,6 +26,8 @@
 #			02 Feb 2015 - Changed start to start only the ha daemon which will start tegu
 #					if needed on this host. Added forceup option to allow tegu to be forced
 #					to start without the ha daemon. 
+#			20 Feb 2015 - Added -u option to killall to supress warnings from killall
+#			10 Mar 2015 - Corrected missing tegu_user on the ha start in standby.
 #----------------------------------------------------------------------------------------
 trap "" 15				# prevent killall from killing the script when run from service
 
@@ -81,18 +83,18 @@ export PATH="${PATH:+$PATH:}/usr/bin:/usr/sbin:/sbin"	# ensure key directories a
 
 case "$1" in
   forceup)												# forces tegu to be started; might be stopped immediately by ha daemon
-	su -c "PATH=$PATH start_tegu" tegu
-	su -c "PATH=$PATH start_tegu_agent 1 2 3 4 5" tegu
+	su -c "PATH=$PATH start_tegu" $tegu_user
+	su -c "PATH=$PATH start_tegu_agent 1 2 3 4 5" $tegu_user
 	;;
 
   forcedown)											# force tegu and agents down; ha might well restart them
 	set +e
-	su -c "killall tegu_agent"
-	su -c "killall tegu"
+	su -c "killall -u $tegu_uer tegu_agent"
+	su -c "killall -u $tegu_user tegu"
 	;;
 
   start)
-	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon; let it decided if Tegu should be running here
+	su -c "PATH=$PATH start_tegu_ha" $tegu_user			# start high avail daemon; let it decided if Tegu should be running here
 	;;
 
   stop)								# stop everything, including the ha process
@@ -103,8 +105,8 @@ case "$1" in
 		su -c "kill -9 $ha_pid" tegu		# python seems to ignore term signals, send it down hard
 	fi
 
-	su -c "killall tegu_agent" tegu
-	su -c "killall tegu" tegu
+	su -c "killall -u $tegu_user tegu_agent" $tegu_user
+	su -c "killall -u $tegu_user tegu" $tegu_user
 	;;
 
   standby)
@@ -114,13 +116,13 @@ case "$1" in
 		chown $tegu_user:$tegu_group /etc/tegu/standby	
 		su -c "PATH=$PATH start_tegu" tegu >/dev/null 2>&1		# this will fail, but we want to ensure environment (cron etc.) is setup
 	fi
-	su -c "PATH=$PATH start_tegu_ha"					# start high avail daemon 
+	su -c "PATH=$PATH start_tegu_ha" $tegu_user					# start high avail daemon 
 	;;
 
   reload)
 	set +e
-	su -c "killall tegu_agent"
-	su -c "killall tegu"
+	su -c "killall -u $tegu_user tegu_agent"
+	su -c "killall -u $tegu_user tegu"
 	
 	# tegu_ha will restart things (safe to run this even if tegu_ha is already running)
 	su -c "PATH=$PATH start_tegu_ha" tegu					# start high avail daemon; let it decided if Tegu should be running here

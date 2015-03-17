@@ -110,7 +110,7 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 				fmod.Exttyp = plist[i].Get_extflag()
 
 				rm_sheep.Baa( 1, "res_mgr/push_reg: sending i/e flow-mods for path %d: %s flag=%s tptyp=%s h1=%s --> h2=%s ip1= %s ip2=%s ext=%s exp/fm_exp=%d/%d",
-					i, rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Extip, expiry, fmod.Expiry )
+					i, *rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Extip, expiry, fmod.Expiry )
 
 
 				// ---- push flow-mods in the h1->h2 direction -----------

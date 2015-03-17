@@ -68,6 +68,7 @@
 						openstack.
 				05 Dec 2014 - Added work round for AIC admin issue after they flipped to LDAP.
 				16 Jan 2014 - Support port masks in flow-mods.
+				18 Feb 2015 - Corrected slice index bug (@214)
 				27 Feb 2015 - To make steering work with lazy updates.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
@@ -181,7 +182,10 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-		case 3:										// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
+		case 3:													// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
+			if tokens[0] == "" || tokens[2] == "" {				// must have something out front, a ! or token, but empty is no good
+					return nil, fmt.Errorf( "invalid host name; expected {!|tok}/[project]/hostname, got: %s", *raw )
+			}
 
 			if tokens[1] == "" {								// empty project name, must attempt to extract from the token
 				if tokens[0] != "!" {							//  if !//stuff we leave things alone and !//stuff is returned later

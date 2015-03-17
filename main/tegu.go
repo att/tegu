@@ -94,7 +94,9 @@
 				01 Feb 2015 : Corrected bug introduced when host name removed from fmod command (agents with ssh-broker change).
 				09 Feb 2015 : Added work round to deal with OVS/openflow small hard timeout limit.
 				10 Feb 2015 : Corrected bug with refresh.
+				18 Feb 2015 : Corrected bug with slice index and enabled both host name types on create queue list.
 				24 Feb 2015 : Added mirroring (version => 3.1.3).
+				11 Mar 2015 : Corrected bug in network manager causing coredump when gateway info missing on bleat message.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -130,7 +132,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.3/13165"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
+		version		string = "v3.1.3/13175"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
