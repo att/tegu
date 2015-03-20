@@ -103,7 +103,7 @@ else										# set up just for "this" side
 	# inbound f-mods -- all inbound to the reservation vm must go through br-rl. all traffic inbound coming off of
 	# br-rl for the vm is sent directly to the VM since outbound normal routing taints the learning switch's 
 	# view of where the VM really is.
-	send_ovs_fmod $forreal $host -p 500 $timeout --match -i $rl_port -d $lmac -s $rmac $sexip --action $ivopt $strip_type -o $lmac  $operation $cookie $bridge
+	send_ovs_fmod $forreal $host -p 500 $timeout --match -i $rl_port -d $lmac --action $ivopt $strip_type -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
 	rc=$(( rc + $? ))
 	send_ovs_fmod $forreal $host -p 450 $timeout --match -d $lmac -s $rmac --action $queue -o $rl_port  $operation $cookie $bridge
 	rc=$(( rc + $? ))
@@ -116,7 +116,7 @@ else										# set up just for "this" side
 	send_ovs_fmod $forreal $host -p 450 -t 0 --match -m 0 -i $rl_port --action -R ,$mt_base -R ,0 -N	 $operation $cookie $bridge 	# anything else inbound from bridge goes out normally (persistent fmod)
 	rc=$(( rc + $? ))
 
-	send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match -m 0x0/0x7 $dexip -s $lmac -d $rmac $exip $proto --action $ovopt $dscp -o $rl_port $queue $operation $cookie $bridge
+	send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match -m 0x0/0x7 $dexip -s $lmac -d $rmac $proto --action $ovopt $dscp -o $rl_port $queue $operation $cookie $bridge
 	rc=$(( rc + $? ))
 	send_ovs_fmod $forreal $host $timeout -p 300 --match -m 0x0/0x7 -s $lmac  --action  $ovopt -T 0 -o $rl_port $operation $cookie $bridge
 	rc=$(( rc + $? ))
