@@ -52,10 +52,14 @@
 #				12 Nov 2014 - Extended the connect timeout to 10s
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
-#				04 Feb 2014 - Set initial value of rhost to "" to prevent ssh to localhost
-#				09 Feb 2014 - Cap the hard timout to 18 hours to prevent ovs rejecting the flow-mod
-#				13 Mar 2014 - Changed last attempt to set fmod to drop prototype information as that 
+#				04 Feb 2015 - Set initial value of rhost to "" to prevent ssh to localhost
+#				09 Feb 2015 - Cap the hard timout to 18 hours to prevent ovs rejecting the flow-mod
+#				13 Mar 2015 - Changed last attempt to set fmod to drop prototype information as that 
 #								seems to get in the way with things like strip vlan.
+#				18 Mar 2015 - if match -v option given, and vlan in ovs_sp2uuid data is < 0, then we assume
+#								trunk and do not set it in flo mod rather than generating an error.
+#				20 Mar 2015 - -V now accepts an optional mac addres and strips the vlan tag only if the
+#								associated port is NOT a trunk (trinity).
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -90,8 +94,8 @@ function help
 	Each match option is followed by a single token parameter
 		-d data-layer-destination-address (mac)
 		-D network-layer-dest-address (ip)
-		-i input-switch-port                (late bindign applied if mac address given)
-		-m meta-value/mask                  (0x0/0x01 matches if low order bit is on)
+		-i input-switch-port                (late bindign applied if mac address or :ID is given)
+		-m meta-value/mask                  (0x0/0x01 matches if low order bit is off)
 		-p transport-port-src               (specify as udp:port or tcp:port)
 		-P transport-port-dest              (specify as udp:port or tcp:port)
 		-s data-layer-src                   (mac)
@@ -100,7 +104,7 @@ function help
 		-T type-of-service-value            (diffserv)
 		-v vlan-tci
 		
-	Action Options:    (causes these fields to be changed to supplied value)
+	Action Options:    (causes these fields to be changed where values are involved)
 		-b output packet on the receipt port (bounce back)
 		-d data-layer-destination-address   (mac address)
 		-D network-layer-dest-address       (ip address)
@@ -118,7 +122,8 @@ function help
 		-t tunnel-id
 		-T n                                (diffserv/type of service)
 		-v vlan-tci
-		-V                                  (strip vlan, no parameter)
+		-V [mac]                            (strip vlan, if mac given, then strips only if mac is not a trunk
+											if mac not given, then it does a hard strip; user beware)
 	
 
 	Hard timeout is used only for an add flow mod, and defaults to 60s if not set.  
@@ -213,18 +218,20 @@ function check_irl
 
 		/port:.*qosirl[0-9]/ {
 			have_veth[sw] = 1;
+			port[sw] = $3
 			next;	
 		}
 
 		END {
 			if( have_rl && have_veth["int"] && have_veth["rl"] ) {
+				print port["int"]			# output the br-rl port on the br-int side
 				exit( 0 );
 			}
 
 			printf( "send_ovs_fmod: CRI: cannot find irl port or bridge in ovs data: br-rl %s, br-rl:qosirl %s, br-int:qosirl %s. target-host: %s   [QLTSFM000] \n", 
 					have_rl ? "good" : "missing", have_veth["rl"] ? "good" : "missing", have_veth["int"] ? "good" : "missing", rhost ) >"/dev/fd/2";
 			exit( 1 );
-		}' $ovs_data
+		}' $ovs_data | read irl_port junk
 
 	rc=$?
 	return $?			# do NOT put any commands between awk and return
@@ -250,11 +257,13 @@ function str2nwproto
 }
 
 
-# accept a port or mac as $1. If $1 is a mac address, then we attempt to find it
-# in ovs_sp2uuid information and echo out the corresponding port. 
+# accept a port, mac or special id (e.g. :qosirl0) as $1. If $1 is a mac address, then we attempt to find it
+# in ovs_sp2uuid information and echo out the corresponding port. If a special ID is given, then that ID, without
+# the leading : is epected to be listed as a port on a switch.
 #	ovs_sp2uuid output we want has the form: 
 #		switch: 000082e23ecd0e4d cd3ee281-ce07-4d0e-9350-f7faa43b6a91 br-int
 #		port: 01f7f621-03ff-43e5-a183-c66151eae9d7 346 tap916a2d34-eb fa:de:ad:54:08:6b 916a2d34-ebdf-402e-bcb3-904b56011773
+#		port: e3909c91-5d1a-4821-a12b-0130a62d456b 19 qosirl0   -1
 function late_binding
 {
 	get_ovs_data
@@ -263,10 +272,10 @@ function late_binding
 	then
 		typeset port=""
 	
-		awk -v mac=$1 ' 	
+		awk -v mac=${1/#:/} ' 							# strip lead : from mac if it is :id
 			/^switch:/ { sw = $4; next; }
 			/^port:/ {
-				if( $5 == mac )
+				if( $5 == mac || $4 == mac )			# match mac or port name (ID)
 				 { 
 					print sw, $3; 
 					exit( 0 ) 
@@ -378,7 +387,7 @@ do
 				# WARNING:  these MUST have a trailing space when added to match!
 				-d)	match+="dl_dst=$2 "; shift;;		# ethernet mac change of dest
 				-D)	match+="nw_dst=$2 "; shift;;		# network (ip) address change of dest
-				-i)	late_binding $2 |read p s			# if mac given, suss out the port/switch else get just port
+				-i)	late_binding $2 |read p s			# if mac or ID given, suss out the port/switch else get just port
 					lbswitch=$s
 					match+="in_port=$p " 
 					shift
@@ -450,6 +459,7 @@ do
 				-T) action+="mod_nw_tos:$2 "; shift;;
 				-v)	
 					vid="${2%%/*}"						# strip off if id/priority given
+					vpri="${2##*/}"						# snag the priority if there
 					if [[ $vid == *":"* ]]				# a mac address for us to look up in ovs and dig the assigned vlan tag
 					then
 						vid=$( suss_vid $vid )
@@ -461,18 +471,20 @@ do
 							vid="${2%%/*}"						# strip off if id/priority given
 							vid=$( suss_vid $vid )
 						fi
-						if [[ -n $vid ]]
+						if [[ -n $vid ]] && (( vid >= 0 ))		# -1 we assume is a trunk and we don't set anything in that case
 						then
 							action+="mod_vlan_vid:$vid "	# save the value found
 						else
-							logit "CRI: unable to map mac to vlan id: $2 on target-host: ${thost#* }	[FAIL] [QLTSFM002]"
-							cat $ovs_data >&2
-							exit 1
+							#logit "CRI: unable to map mac to vlan id: $2 on target-host: ${thost#* }	[FAIL] [QLTSFM002]"
+							#cat $ovs_data >&2
+							#exit 1
+							logit "valid vlan id not found ($vid) for $2, assuming trunk port and not setting id in flowmod"
+							vpri=""
 						fi
 					else
 						action+="mod_vlan_vid:$vid"			# just save it
 					fi
-					if [[ $2 == *"/"*   &&  -n $vid ]]
+					if [[ $2 == *"/"*   &&  -n $vpri ]]		# priority given, and not nixed b/c it's a trunk
 					then
 						action+="mod_vlan_pcp${2##*/} "	# prioritys can be 0-7 
 					fi
@@ -480,8 +492,21 @@ do
 					shift
 					;;
 
-				-V)	action+="strip_vlan "
-					of_protolist="OpenFlow10"			 # ovs won't acccept strip vlan if prototype options are supplied other than 1.0
+				-V)										# accept -V or -V mac (not standard, but nothing about this command line is!)
+					if [[ $2 == *":"* ]]
+					then
+						svid=$( suss_vid $vid )
+						if (( svid >= 0 ))				# if port has a vlan id, then safe to strip, otherwise it's a trunk and must NOT strip it
+						then
+							action+="strip_vlan "
+							of_protolist="OpenFlow10"	 # ovs won't acccept strip vlan if prototype options are supplied other than 1.0
+						fi
+
+						shift
+					else
+						action+="strip_vlan "
+						of_protolist="OpenFlow10"		 # ovs won't acccept strip vlan if prototype options are supplied other than 1.0
+					fi
 					;;
 
 				-X)	output="drop ";;	
