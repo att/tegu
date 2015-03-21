@@ -22,9 +22,54 @@ import (
 	"codecloud.web.att.com/tegu/gizmos"
 )
 
+
+
 /*
-	For a single pledge this function builds the necessary flow-mod directives and gives them to 
-	the fq_manager to dispatch down to the agents.
+type Fq_parms struct {
+	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
+	Ip2		*string
+	Tpsport	*string				// transport layer source port
+	Tpdport *string				// transport layer dest port
+	Swport	int					// the switch port 
+	Smac	*string				// source mac
+	Dmac	*string				// dest mac
+	Dscp	int					// dscp mask to match if non-zero
+	Meta	*string				// meta 
+	Vlan_id	*string				// probably a mac address for late binding, but could be a number
+}
+
+type Fq_req struct {
+	Pri		int					// fmod priority
+	Cookie	int					// cookie that is added to the flow-mod (not a reservation cookie)
+	Expiry	int64				// either a hard time or a timeout depending on the situation
+	Id		*string				// id that fq-mgr will pass back if it indicates an error
+	Table	int					// table to put the fmod into
+	Output	*string				// output directive: none, normal, drop (resub will force none)
+
+	Dir_in	bool				// true if direction is inbound (bandwidth fmods)
+	Spq		int					// switch's port for queue
+	Extip	*string				// exterior IP address necessary for inter-tenant reservations
+	Exttyp	*string				// external IP type (either -D or -S)
+	Tptype	*string				// transport type (i.e. protocol: tcp, udp, etc)
+	Resub	*string				// list of tables (space sep numbers) to resubmit to
+	Dscp	int					// dscp value that should be used for the traffic
+	Dscp_koe bool				// true if the value is to be kept on the packet as it leaves the environment
+
+	Nxt_mac	*string				// mac of next hop (steering)
+	Lbmac	*string				// late binding mac or ID (e.g. qosirl0)
+	Swid	*string				// switch ID (either a dpid or host name for ovs)
+	Espq	*gizmos.Spq			// a collection of swtich, port, queue information (might replace spq and swid)
+	Single_switch bool			// indicates that only one switch is involved (dscp handling is different)
+
+	Match	*Fq_parms			// things to match on
+	Action	*Fq_parms			// things to set in action
+}
+*/
+
+/*
+	For a single pledge this function sets things up and sends needed requests to the fq-manger to 
+	create any necessary flow-mods.   This has changed drastically now that we expect one agent 
+	onvocation to set up all bandwidth flow-mods for an endpoint switch.
 
 	With the new method of managing queues per reservation on ingress/egress hosts, we now send to fq_mgr:
 
@@ -36,14 +81,16 @@ import (
 	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but
 	asycnh; we do not wait for responses to each message generated here. If set_vlan is true then
 	we will send the src mac address on the flow-mod at ingress so that the vlan is properly set
-	(suports br-rl in a GRE environment).
+	(needed for using br-rl for ratelimiting).
 
 	To_limit is a cap to the expiration time sent when creating a flow-mod.  OVS (and others we assume)
 	use an unsigned int32 as a hard timeout value, and thus have an upper limit of just over 18 hours. If
 	to_limit is > 0, we'll ensure that the timeout passed on the request to fq-mgr won't exceed  the limit,
  	and we assume that this function is called periodically to update long running reservations.
+
+	Alt_table is the base alternate table set that we use for meta marking
 */
-func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64 ) {
+func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64, alt_table int ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -62,16 +109,147 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 		timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
 		for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
+			fmod := Mk_fqreq( rname )						// default flow mod request with empty match/actions (for bw requests, we don't need priority or such things)
+
+			fmod.Cookie =	0xffff							// should be ignored, if we see this out there we've got problems
+			fmod.Single_switch = false						// path involves multiple switches by default
+			fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
+
+			if p.Is_paused( ) {
+				fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
+			} else {
+				if to_limit > 0 && expiry > now + to_limit {
+					fmod.Expiry = now + to_limit			// expiry must be capped so as not to overflow virtual switch variable size
+				} else {
+					fmod.Expiry = expiry
+				}
+			}
+			fmod.Id = rname
+
+			extip := plist[i].Get_extip()					// if an external IP address is necessary on the fmod get it
+			if extip != nil {
+				fmod.Extip = extip
+			} else {
+				fmod.Extip = &empty_str
+			}
+
+			espq1, espq2 := plist[i].Get_endpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
+
+											//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
+			tptype_list := "none"							// default to no specific protocol 
+			if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
+				tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
+			}
+			tptype_toks := strings.Split( tptype_list, " " )
+
+			for tidx := range( tptype_toks ) {				// must have a flow-mod set for each transport protocol type
+				fmod.Tptype = &tptype_toks[tidx]
+				fmod.Exttyp = plist[i].Get_extflag()
+
+				if espq1 != nil {													// if single switch ep1 will be nil; if it's here we need to send fmods to that side too
+/*
+					cfmod := fmod.Clone()											// clone to send request for ep1
+					cfmod.Match.Tpsport= p2											// reverse direction transport ports are h2==src h1==dest
+					cfmod.Match.Tpdport= p1
+					cfmod.Match.Ip2, _ = plist[i].Get_h1().Get_addresses()			// set IP addresses; must get from path in case split
+					cfmod.Match.Ip1, _ = plist[i].Get_h2().Get_addresses()
+					cfmod.Espq = espq1
+
+					rm_sheep.Baa( 1, "res_mgr/push_reg: reverse endpoint flow-mods for path %d: %s flag=%s tptyp=%s h2=%s --> h1=%s ip2= %s ip1=%s tpsport=%s tpdport=%s spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
+						i, *rname, *cfmod.Exttyp, tptype_toks[tidx], *h2, *h1, *cfmod.Match.Ip2, *cfmod.Match.Ip1, *cfmod.Match.Tpsport, *cfmod.Match.Tpdport, 
+						espq1.Switch, espq1.Port, espq1.Queuenum, *cfmod.Extip, expiry, cfmod.Expiry )
+
+					msg = ipc.Mk_chmsg()
+					msg.Send_req( fq_ch, ch, REQ_BW_RESERVE, fmod, nil )					// queue work with fq-mgr
+*/
+		
+				} else {
+					fmod.Single_switch = true
+				}
+
+				fmod.Match.Tpsport= p1											// assume forward from plist[i].h1->h2; ports are  h1==src h2==dest
+				fmod.Match.Tpdport= p2
+				fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
+				fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
+				fmod.Espq = espq2													// prep and queue for ep2
+				rm_sheep.Baa( 1, "res_mgr/push_reg: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
+					i, *rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Match.Tpsport, *fmod.Match.Tpsport, 
+					espq1.Switch, espq1.Port, espq1.Queuenum, *fmod.Extip, expiry, fmod.Expiry )
+
+				msg = ipc.Mk_chmsg()
+				msg.Send_req( fq_ch, ch, REQ_BW_RESERVE, fmod, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
+				
+	
+				// WARNING:  this is q-lite only -- there is no attempt to set up fmods on intermediate switches!
+
+/*
+				// ---- push flow-mods in the h1->h2 direction -----------
+				if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
+																					// ep will be nil if both VMs are on the same switch
+					cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgr queue
+					cfmod.Dir_in = true
+					cfmod.Espq = espq1
+					msg = ipc.Mk_chmsg()
+					msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+				} else {
+					fmod.Single_switch = true
+				}
+
+				cfmod := fmod.Clone( )
+				cfmod.Espq = plist[i].Get_ilink_spq( rname, timestamp )				// send fmod to ingress switch on first link out from h1
+				cfmod.Dir_in = false
+				if nlinks > 1 && set_vlan {
+					cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
+				}
+				msg = ipc.Mk_chmsg()
+				msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )					// queue work to send to skoogi (errors come back asynch, successes do not generate response)
+
+				ilist := plist[i].Get_forward_im_spq( timestamp )						// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
+				for ii := range ilist {
+					cfmod = fmod.Clone( )												// copy to pass which we'll alter a wee bit
+					cfmod.Espq = ilist[ii]
+					rm_sheep.Baa( 2, "send forward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
+					msg = ipc.Mk_chmsg()
+					msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
+				}
+*/
+			}
+		}
+
+		p.Set_pushed()				// safe to mark the pledge as having been pushed.
+	}
+}
+
+func Xpush_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64, alt_table int ) {
+	var (
+		msg		*ipc.Chmsg
+		ip2		*string					// the ip ad
+	)
+
+	now := time.Now().Unix()
+
+	h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
+
+	ip1 := name2ip( h1 )
+	ip2 = name2ip( h2 )
+
+	pri_base := 0
+	if *p1 != "0" || *p2 != "0" {					// port oriented flow-mods get a slightly higher priority
+		pri_base =	5
+	} 
+
+	if ip1 != nil  &&  ip2 != nil {				// good ip addresses so we're good to go
+		plist := p.Get_path_list( )				// each path that is a part of the reservation
+
+		timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
+
+		for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
 			fmod := Mk_fqreq( rname )						// default flow mod request with empty match/actions
 
-			if *p1 != "0" || *p2 != "0" {					// port oriented flow-mods get a slightly higher priority
-				fmod.Pri =	405								// override the defaults
-			} else {
-				fmod.Pri =	400								// no port specification, higher than most, but allow a match on port first
-			}
 			fmod.Cookie =	0xdead
 			fmod.Single_switch = false						// path involves multiple switches by default
 			fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
+			fmod.Pri = 400 + pri_base
 
 			if p.Is_paused( ) {
 				fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out

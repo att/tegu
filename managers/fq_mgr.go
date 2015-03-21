@@ -456,6 +456,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 	}
 }
 
+
 /*
 	Send a newly arrived host list to the agent manager.
 */
@@ -616,7 +617,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					send_gfmod_agent( fdata,  ip2mac, host_list, phost_suffix )
 				}
 
-			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod
+			case REQ_BW_RESERVE:						// bandwidth endpoint flow-mod creation; single agent script creates all needed fmods
+				fq_sheep.Baa( 1, "bandwidth reserve called -- skipped at the moment" )
+				msg.Response_ch = nil					// nothing goes back from this
+
+			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod  (this is likely deprecated as of 3/21/2015 -- resmgr invokes the bw_fmods script via agent)
 				fdata = msg.Req_data.( *Fq_req ); 		// user view of what the flow-mod should be
 
 				if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled
@@ -640,13 +645,15 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 							cdata.Swid = &swid
 						}
 
-						resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
-						if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
-							resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
-						} else {
-							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
+						if cdata.Resub == nil {
+							resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
+							if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
+								resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
+							} else {
+								resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
+							}
+							cdata.Resub = &resub_list
 						}
-						cdata.Resub = &resub_list
 				
 						meta := "0x00/0x07"						// match-value/mask; match only when meta neither of our two bits, nor the agent bit (0x04) are set
 						cdata.Match.Meta = &meta

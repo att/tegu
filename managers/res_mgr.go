@@ -254,20 +254,11 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 	rm_sheep.Baa( 4, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
-			/*
-			table 9x fmods are sent with queues to avoid blasting to every host
-			if ! set_alt {
-				table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
-				table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
-				set_alt = true
-			}
-			*/
-
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
 						bw_push_count++
-						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit )
+						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit, alt_table )
 				}
 			} else {
 				pend_count++
@@ -822,7 +813,6 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 					}
 				}
 
-				//inv.push_bw_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )
 				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
@@ -862,6 +852,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )
 				msg.Response_data = nil
 				msg.State = fmt.Errorf( "res_mgr: unknown message (%d)", msg.Msg_type )
+				msg.Response_ch = nil				// we don't respond to these.
 		}
 
 		rm_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )

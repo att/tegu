@@ -109,6 +109,12 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 	defer close( my_ch )									// close it on return
 	p1 = &zero_string
 	p2 = &zero_string
+
+	if h1[0:1] == "!" {										// must have 'external' host as h2
+		hx := h1
+		h1 = h2
+		h2 = hx
+	}
 	
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host

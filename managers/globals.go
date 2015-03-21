@@ -89,6 +89,7 @@ const (
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
+	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request
 	
 )
 

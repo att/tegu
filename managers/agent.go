@@ -79,6 +79,7 @@ type agent_msg struct {
 	Rdata	[]string		// response data
 	State	int				// if an ack/nack some state information 
 	Vinfo	string			// agent verion (dbugging mostly)
+	Rid		uint32			// original request id
 }
 
 /*
