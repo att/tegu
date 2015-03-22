@@ -39,6 +39,7 @@
 					packets should resub through the base table, not base+1.
 				01 Feb 2015 - Corrected bug itroduced when host name removed from fmod parmss (agent w/ ssh-broker changes).
 				19 Feb 2015 - Change in adjust_queues_agent to allow create queues to be driven from agent without -h on command line.
+				21 Mar 2015 - Changes to support new bandwith endpoint flow-mod agent script.
 */
 
 package managers
@@ -229,6 +230,47 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	}
 }
 
+/*
+	Send a bandwidth endpoint flow-mod request to the agent manager. 
+	This is little more than a wrapper that converts the fq_req into
+	an agent request. 
+*/
+func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
+
+
+	if data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
+		fq_sheep.Baa( 1, "unable to send bw-fmods request to agent: no switch defined in input data" )
+		return
+	}
+
+	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
+	if phost_suffix != nil {										// we need to add the physical host suffix
+		host = add_phost_suffix( host, phost_suffix )
+	}
+
+	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	data.Match.Dmac = ip2mac[*data.Match.Ip2]
+
+	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
+	msg.Actions = make( []action, 1 )							// just a single action
+	msg.Actions[0].Atype = "bw_fmod"							// set all related bandwidth flow-mods for an endpoint
+	msg.Actions[0].Hosts = make( []string, 1 )					// bw endpoint flow-mods created on just one host
+	msg.Actions[0].Hosts[0] = *host
+	msg.Actions[0].Data = data.To_bw_map()						// convert useful data from caller into parms for agent
+
+	json, err := json.Marshal( msg )						// bundle into a json string
+	if err != nil {
+		fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+	} else {
+		fq_sheep.Baa( 2, "json: %s", json )
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+	}
+
+//TODO: change to 2
+	fq_sheep.Baa( 1, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
+	
+}
 
 /*
 	Send a flow-mod to the agent using a generic struct to represnt the match and action criteria.
@@ -619,6 +661,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 			case REQ_BW_RESERVE:						// bandwidth endpoint flow-mod creation; single agent script creates all needed fmods
 				fq_sheep.Baa( 1, "bandwidth reserve called -- skipped at the moment" )
+				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
+				send_bw_fmods( fdata, ip2mac, phost_suffix )
 				msg.Response_ch = nil					// nothing goes back from this
 
 			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod  (this is likely deprecated as of 3/21/2015 -- resmgr invokes the bw_fmods script via agent)

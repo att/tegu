@@ -46,9 +46,12 @@ import (
 
 type action struct {			// specific action
 	Atype	string				// something like map_mac2phost, or intermed_queues
+	Aid		uint32				// action id to be sent in the response
+	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
 	Hosts	[]string			// list of hosts to apply the action to
 	Dscps	string				// space separated list of dscp values
 	Fdata	[]string			// flowmod command data
+	Qdata	[]string			// queue parms 
 }
 
 type agent_cmd struct {			// overall command
