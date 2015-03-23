@@ -21,6 +21,7 @@
 				16 Jan 2014 - Support port masks in flow-mods.
 				22 Feb 2014 - Added REQ_GET_MIRRORS
 				26 Feb 2015 - Added support for default gateway sussing.
+				20 Mar 2014 - Added REQ_GET_PHOST_FROM_MAC
 */
 
 package managers
@@ -100,6 +101,7 @@ const (
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
 	REQ_GET_MIRRORS				// get a list of mirrors from res mgr
 	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
+	REQ_GET_PHOST_FROM_MAC		// used by mirroring to find the phost that goes with a MAC
 )
 
 const (

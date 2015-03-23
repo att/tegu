@@ -16,7 +16,8 @@
 
 	Author:		Robert Eby
 
-	Mods:		17 Feb 2015 : Created.
+	Mods:		17 Feb 2015 - Created.
+				20 Mar 2014 - Added support for specifying ports via MACs
 */
 
 package managers
@@ -139,7 +140,7 @@ func lookupMirror(name string, cookie string) (mirror *gizmos.Pledge) {
 	my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
 	defer close( my_ch )
 	req.Send_req( rmgr_ch, my_ch, REQ_GET, [] *string { &name, &cookie }, nil )
-	req = <- my_ch										
+	req = <- my_ch
 	if req.State == nil {
 		mirror = req.Response_data.( *gizmos.Pledge )
 	}
@@ -154,7 +155,7 @@ func getMirrors() ([]string) {
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )
 	req.Send_req( rmgr_ch, my_ch, REQ_GET_MIRRORS, nil, nil )	// push it into the reservation manager which will drive flow-mods etc
-	req = <- my_ch										
+	req = <- my_ch
 	if req.State == nil {
 		rv := string( *req.Response_data.(*string) )
 		return strings.Split(rv, " ")
@@ -203,8 +204,11 @@ func convertToJSON(mirror *gizmos.Pledge, scheme string, host string) (string) {
 	}
 	// Other, informational (non-API) fields
 	bs.WriteString(fmt.Sprintf("  \"physical_host\": \"%s\",\n", *mirror.Get_qid()))
-	bs.WriteString(fmt.Sprintf("  \"pushed\": %t,\n", mirror.Is_pushed()))
-	bs.WriteString(fmt.Sprintf("  \"paused\": %t,\n",  mirror.Is_paused()))
+	bs.WriteString(fmt.Sprintf("  \"pushed\": %t,\n",   mirror.Is_pushed()))
+	bs.WriteString(fmt.Sprintf("  \"paused\": %t,\n",   mirror.Is_paused()))
+	bs.WriteString(fmt.Sprintf("  \"pending\": %t,\n",  mirror.Is_pending()))
+	bs.WriteString(fmt.Sprintf("  \"active\": %t,\n",   mirror.Is_active()))
+	bs.WriteString(fmt.Sprintf("  \"expired\": %t,\n",  mirror.Is_extinct(0)))
 	bs.WriteString(fmt.Sprintf("  \"url\": \"%s://%s/tegu/mirrors/%s/\"\n", scheme, host, *mirror.Get_id()))
 	bs.WriteString("}\n")
 	return bs.String()
@@ -226,37 +230,52 @@ func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, e
 	namemap := make( map[string]MirrorInfo )
 	plist = &namemap
 	ix := 0
+	badports := *new( []string )
 	for _, p := range ports {
 		vm, err := validatePort(&p)		// vm is a Net_vm
-		if err == nil && vm.phost != nil {
-			// get info for port set physhost
-			phys := *vm.phost
+		if err == nil {
+			if vm.phost != nil {
+				// get info for port set physhost
+				phys := *vm.phost
 
-			nm := namemap[phys]
-			if nm.name == "" {
-				s := fmt.Sprintf("%s_%d", name, ix)
-				ix++
-				namemap[phys] = MirrorInfo {
-					name: s,
-					physhost: phys,
-					ports: [] string { *vm.mac },
+				nm := namemap[phys]
+				if nm.name == "" {
+					s := fmt.Sprintf("%s_%d", name, ix)
+					ix++
+					namemap[phys] = MirrorInfo {
+						name: s,
+						physhost: phys,
+						ports: [] string { *vm.mac },
+					}
+				} else {
+					// append port - Go can be SO annoying!
+					namemap[phys] = MirrorInfo {
+						name:     nm.name,
+						physhost: nm.physhost,
+						ports:    append(nm.ports, *vm.mac),
+					}
 				}
+				valid = true
 			} else {
-				// append port - Go can be SO annoying!
-				namemap[phys] = MirrorInfo {
-					name:     nm.name,
-					physhost: nm.physhost,
-					ports:    append(nm.ports, *vm.mac),
-				}
+				// invalid port: add to a group by itself, and report back
+				http_sheep.Baa( 1, " invalid port? port = " + p )
+				badports = append(badports, p)
 			}
-			valid = true
 		} else {
-			// TODO if invalid port add to a group by itself, and report back somehow
-			http_sheep.Baa( 1, " invalid port? " +p)
+			// invalid port: add to a group by itself, and report back
+			http_sheep.Baa( 1, " invalid port? " + err.Error() )
+			badports = append(badports, p)
 		}
 	}
 	if !valid {
 		err = fmt.Errorf("No valid ports found.")
+	}
+	if len(badports) > 0 {
+		mi := new (MirrorInfo)
+		mi.name  = "_badports_"
+		mi.ports = badports
+		mi.err   = fmt.Errorf("Invalid ports found.")
+		namemap["_badports_"] = *mi
 	}
 	if ix == 1 {
 		// Only 1 name used, use the unindexed name
@@ -273,12 +292,23 @@ func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, e
  * Validate a port.
  */
 func validatePort(port *string) (vm *Net_vm, err error) {
-	// handle uuid:port form
-	if strings.HasPrefix(*port, "uuid:") {
-		// TODO validate UUID somehow (does OS know this?) and find what host it is on
-		// for now, everything is on redbox
-		host := "redbox"
-		vm.phost = &host
+	// handle mac:port form
+	if strings.HasPrefix(*port, "mac:") {
+		// Map the port MAC to a phost
+		mac := (*port)[4:]
+
+		my_ch := make( chan *ipc.Chmsg )
+		defer close ( my_ch )
+
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, my_ch, REQ_GET_PHOST_FROM_MAC, &mac, nil )			// request MAC -> phost translation
+		req = <- my_ch
+		if req.Response_data == nil {
+			err = fmt.Errorf("Cannot find MAC: " + mac)
+		} else {
+			vm = Mk_netreq_vm( nil, nil, nil, nil, req.Response_data.(*string), &mac, nil, nil, nil )	// only use the two fields
+			http_sheep.Baa( 1, "name=NIL id=NIL ip4=NIL phost=%s mac=%s gw=NIL fip=NIL", safe(vm.phost), safe(vm.mac) )
+		}
 		return
 	}
 
@@ -289,14 +319,18 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, port, nil )				// request data
 	req = <- my_ch
-http_sheep.Baa( 1, " REQ_GET_HOSTINFO  " + *port + " response ")
 	if req.Response_data != nil {
 		vm = req.Response_data.( *Net_vm )
+		if vm.phost == nil {
+			// There seems to be a bug in REQ_GET_HOSTINFO, such that the 2nd call works
+			req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, port, nil )
+			req = <- my_ch
+			vm = req.Response_data.( *Net_vm )
+		}
 		http_sheep.Baa( 1, "name=%s id=%s ip4=%s phost=%s mac=%s gw=%s fip=%s", safe(vm.name), safe(vm.id), safe(vm.ip4), safe(vm.phost), safe(vm.mac), safe(vm.gw), safe(vm.fip) )
 	} else {
 		if req.State != nil {
 			err = req.State
-http_sheep.Baa( 1, " err: "+err.Error() )
 		}
 	}
 	return
@@ -463,40 +497,42 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 	code = http.StatusCreated
 	sep := "\n"
 	bs := bytes.NewBufferString("[")
-	for key := range *plist {
-		mirror := (*plist)[key]
+	for key, mirror := range *plist {
+		if key != "_badports_" {
+			// Make a pledge
+			phost := key
+			nam   := mirror.name
+			res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &nam, &req.Cookie, &phost, &req.Vlan )
+			if res != nil {
+				req := ipc.Mk_chmsg( )
+				my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
+				defer close( my_ch )								// close it on return
+				req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+				req = <- my_ch										// wait for completion
 
-		// Make a pledge
-		res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &mirror.name, &req.Cookie, &key, &req.Vlan )
-		if res != nil {
-			req := ipc.Mk_chmsg( )
-			my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
-			defer close( my_ch )								// close it on return
-			req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
-			req = <- my_ch										// wait for completion
+				if req.State == nil {
+					ckptreq := ipc.Mk_chmsg( )
+					ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+				} else {
+					err = fmt.Errorf( "%s", req.State )
+				}
 
-			if req.State == nil {
-				ckptreq := ipc.Mk_chmsg( )
-				ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+				if res_paused {
+					rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
+					res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+					res.Set_pushed( )
+				}
+
 			} else {
-				err = fmt.Errorf( "%s", req.State )
+				if err == nil {
+					err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
+				}
+				mirror.err = err
 			}
-
-			if res_paused {
-				rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
-				res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
-				res.Set_pushed( )
-			}
-
-		} else {
-			if err == nil {
-				err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
-			}
-			mirror.err = err
 		}
 
 		bs.WriteString(fmt.Sprintf(`%s { "name": "%s", `, sep, mirror.name))
-		bs.WriteString(fmt.Sprintf(`"ports": [ `))
+		bs.WriteString(fmt.Sprintf(`"port": [ `))
 		sep2 := ""
 		for _, p := range mirror.ports {
 			bs.WriteString(fmt.Sprintf(`%s"%s"`, sep2, p))

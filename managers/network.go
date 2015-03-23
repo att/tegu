@@ -53,6 +53,7 @@
 				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the 
 					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
 					as the endpoint 'name'. 
+				20 Mar 2014 - Added REQ_GET_PHOST_FROM_MAC code
 */
 
 package managers
@@ -1842,6 +1843,14 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								} else {
 									net_sheep.Baa( 2, "unable to find host entry for: %s", *hname )
 								}
+							}
+						}
+
+					case REQ_GET_PHOST_FROM_MAC:			// try to map a MAC to a phost -- used for mirroring
+						mac := req.Req_data.( *string )
+						for k, v := range act_net.mac2phost {
+							if *mac == k {
+								req.Response_data = v
 							}
 						}
 
