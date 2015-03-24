@@ -227,7 +227,7 @@ fi
 
 if (( one_switch == 0 ))							# both VMs are attached to the same OVS we only need the 400/405 fmod
 then
-	send_ovs_fmod $forreal $host -p 430 $timeout --match -d $lmac -s $rmac --action $queue -o $rl_port  $operation $cookie $bridge
+	send_ovs_fmod $forreal $host -p 430 $timeout --match -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
 	rc=$(( rc + $? ))
 else
 	logit "both endpoints on the same switch, outbound p400 fmod skipped"
