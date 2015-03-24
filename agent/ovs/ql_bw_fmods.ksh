@@ -202,8 +202,8 @@ fi
 
 if (( set_vlan ))
 then
-	ovopt="-v $lmac"					# outbound vlan action
-	ivopt="-V $lmac"					# inbound vlan action
+	ovopt="-v $lmac"					# outbound vlan action (set)
+	ivopt="-V $lmac"					# inbound vlan action (strip)
 fi
 
 if (( koe ))
@@ -219,7 +219,7 @@ fi
 # view of where the VM really is.
 if would_extend 500 "dst=$lmac" $to_value
 then
-	send_ovs_fmod $forreal $host -p 500 $timeout --match -i $rl_port -d $lmac --action $idscp -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
+	send_ovs_fmod $forreal $host -p 500 $timeout --match -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
 	rc=$(( rc + $? ))
 else
 	logit "timeout $to_value would not extend the current p500 f-mod, not generated"
