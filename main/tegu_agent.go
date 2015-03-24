@@ -173,7 +173,7 @@ func build_opt( value string, opt string ) ( parm string ) {
 			if have_eq {
 				parm = fmt.Sprintf( fmt_str, opt, value )		// --foo=true
 			} else {
-				parm = opt								// just -f
+				parm = opt + " "								// just -f
 			}
 
 		case "False", "false", "FALSE":
@@ -219,7 +219,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	cmd_str +=	build_opt( parms["queue"],  "-q" )
 	cmd_str +=	build_opt( parms["timeout"],  "-t" )
 	cmd_str +=	build_opt( parms["dscp"],  "-T" )
-	cmd_str +=	build_opt( parms["onesw"], "-o" ) 
+	cmd_str +=	build_opt( parms["oneswitch"], "-o" ) 
 
 
 	sheep.Baa( 1, "via broker on %s: %s", act.Hosts[0], cmd_str )
@@ -263,7 +263,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
 				}
 				if err != nil || sheep.Would_baa( 2 ) {
-					dump_stderr( stderr, "wa " + host )			// always dump stderr on error, or in chatty mode
+					dump_stderr( stderr, "bw_fmod " + host )			// always dump stderr on error, or in chatty mode
 				}
 		}
 	}
