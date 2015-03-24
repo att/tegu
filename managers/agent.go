@@ -230,7 +230,13 @@ func ( a *agent ) process_input( buf []byte ) {
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
 			
 							default:	
-								am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s  [TGUAGT001]", req.Rtype )
+								am_sheep.Baa( 1, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )
+								if am_sheep.Would_baa( 2 ) {
+									am_sheep.Baa( 2, "first few ignored messages from response:" )
+									for i := 0; i < len( req.Rdata ) && i < 10; i++ {
+										am_sheep.Baa( 2, "[%d] %s", i, req.Rdata[i] )
+									}
+								}
 						}
 				} else {
 					am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s  [TGUAGT002]", req.Rtype )

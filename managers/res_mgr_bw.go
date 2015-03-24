@@ -89,7 +89,7 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 				fmod.Extip = &empty_str
 			}
 
-			espq1, espq2 := plist[i].Get_endpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
+			espq1, _ := plist[i].Get_endpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
 			if espq1 == nil {													// if single switch ep1 will be nil; if it's here we need to send fmods to that side too
 				fmod.Single_switch = true
 			}
@@ -116,49 +116,18 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 				}
 				cfmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
 				cfmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
-				cfmod.Espq = espq2													// prep and queue for ep2
+				//cfmod.Espq = espq2													// prep and queue for ep2
+				cfmod.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
 
 				rm_sheep.Baa( 1, "res_mgr/push_reg: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
 					i, *rname, *cfmod.Exttyp, tptype_toks[tidx], *h1, *h2, *cfmod.Match.Ip1, *cfmod.Match.Ip2, *cfmod.Match.Tpsport, *cfmod.Match.Tpdport, 
-					espq2.Switch, espq2.Port, espq2.Queuenum, *cfmod.Extip, expiry, cfmod.Expiry )
+					cfmod.Espq.Switch, cfmod.Espq.Port, cfmod.Espq.Queuenum, *cfmod.Extip, expiry, cfmod.Expiry )
 
 				msg = ipc.Mk_chmsg()
 				msg.Send_req( fq_ch, ch, REQ_BW_RESERVE, cfmod, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
 				
 	
 				// WARNING:  this is q-lite only -- there is no attempt to set up fmods on intermediate switches!
-
-/*
-				// ---- push flow-mods in the h1->h2 direction -----------
-				if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
-																					// ep will be nil if both VMs are on the same switch
-					cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgr queue
-					cfmod.Dir_in = true
-					cfmod.Espq = espq1
-					msg = ipc.Mk_chmsg()
-					msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-				} else {
-					fmod.Single_switch = true
-				}
-
-				cfmod := fmod.Clone( )
-				cfmod.Espq = plist[i].Get_ilink_spq( rname, timestamp )				// send fmod to ingress switch on first link out from h1
-				cfmod.Dir_in = false
-				if nlinks > 1 && set_vlan {
-					cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
-				}
-				msg = ipc.Mk_chmsg()
-				msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )					// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-
-				ilist := plist[i].Get_forward_im_spq( timestamp )						// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
-				for ii := range ilist {
-					cfmod = fmod.Clone( )												// copy to pass which we'll alter a wee bit
-					cfmod.Espq = ilist[ii]
-					rm_sheep.Baa( 2, "send forward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
-					msg = ipc.Mk_chmsg()
-					msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
-				}
-*/
 			}
 		}
 

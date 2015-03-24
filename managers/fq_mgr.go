@@ -660,7 +660,6 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				}
 
 			case REQ_BW_RESERVE:						// bandwidth endpoint flow-mod creation; single agent script creates all needed fmods
-				fq_sheep.Baa( 1, "bandwidth reserve called -- skipped at the moment" )
 				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
 				send_bw_fmods( fdata, ip2mac, phost_suffix )
 				msg.Response_ch = nil					// nothing goes back from this

@@ -15,7 +15,6 @@ package managers
 import (
 	"fmt"
 	"encoding/json"
-	"os"
 	"time"
 
 	"codecloud.web.att.com/tegu/gizmos"
@@ -97,6 +96,9 @@ func ( fq *Fq_req ) To_json( ) ( *string, error ) {
 	Build a map suitable for use as parms for a bandwidth request to the agent manager.
 	The agent bandwidth flow-mod generator takes a more generic set of parameters
 	and the match/action information is "compressed".
+
+	OVS doesn't accept DSCP values, but shifted values (e.g. 46 == 184), so we shift
+	the DSCP value given to be what OVS might want as a parameter.
 */
 func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 	fmap = make( map[string]string )
@@ -117,7 +119,7 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 	}
 	fmap["extip"] = *fq.Extip
 	fmap["queue"] =  fmt.Sprintf( "%d", fq.Espq.Queuenum )
-	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp )
+	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )							// shift left 2 bits to match what OVS wants
 	fmap["timeout"] =  fmt.Sprintf( "%d", fq.Expiry - time.Now().Unix() )
 	//fmap["mtbase"] =  fmt.Sprintf( "%d", fq.Mtbase )
 	fmap["oneswitch"] = fmt.Sprintf( "%v", fq.Single_switch )
@@ -131,9 +133,11 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 		}
 	}
 
+/*
 for k, v := range fmap {
 	fmt.Fprintf( os.Stderr, "fq_req to map >>>> %s = %s\n", k, v )
 }
+*/
 
 	return
 }
