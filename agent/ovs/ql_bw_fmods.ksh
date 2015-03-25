@@ -30,12 +30,16 @@
 #						p300 meta == 0 && src == reservatio VM
 #							 [set vlan], output br-rl
 #
-#					When both VMs are on the same switch, the outbound p400 rule can be 
-#					omitted because it's the same as the p450 rule. When a specific protocl
-#					is also being matched, then the outbound p400 fmod will have a slightly
+#					When both VMs are on the same switch, the inbound p430 rule can be 
+#					omitted because the sending 400/5 rule will route it over the proper
+#					br-rl queue as an 'outbound' hit and we'll get rate limiting. When protocol
+#					is also defined, then the outbound p400 fmod will have a slightly
 #					higher priority (405) to avoid conflict should there be a more generic
 #					reservation with the same pair (concern is when the endpoint is the router
 #					rather than another VM).
+#
+#				Vlan (re)set happens only when the VM's port is listed as having a specific VLAN
+#				ID.
 #
 #				The 425 and 300 f-mods are generic and as such there will be only one even if there
 #				are multiple reservations involving the same endpoint.  Because of this, we need to 

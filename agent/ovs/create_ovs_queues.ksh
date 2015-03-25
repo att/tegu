@@ -54,6 +54,14 @@
 #				queue 1 for priority treatment, but no cap is enforced because it's assumed to 
 #				have been rate limited at ingress.
 #
+#				There is also now the need to allow a queue number to be supplied for a switch
+#				multiple times, and for the max value to be the sum of each specification. This 
+#				is a requirement because if engress queues are turned off, what would be the 
+#				egress queue for the VM is turned into the queue on br-rl which may be a dup.
+#				There isn't a way to avoid the dup without really hacking Tegu, and since the
+#				hope is that ratelimting will eventually be built into OVS, the hack will be 
+#				here. 
+#
 #	Author:		E. Scott Daniels
 #	Date: 		10 November 2013
 #
@@ -173,6 +181,43 @@ function usage
 	
 	exit 1
 }
+
+# With the deprecation of endpoint (egress) queues, there is a small chance that there will be a queue
+# duplication on an endpoint switch.  Because Tegu is forcing same switch reservations to use Q1 on 
+# the rate limiting bridge we don't expect this to be needed, but on the off chance that a queue is 
+# duplicated, we must ensure it is set with the sum of the values. 
+#
+# This function parses the tegu queue data, prefixing each output records with "data: " and eliminating
+# duplicates.
+#
+function preprocess_data
+{
+	awk -F , '
+		{
+			if( $4 != $5 )			# min and max _should_ be the same, but if not pick the smallest we see
+			{
+				if( min[$1" "$3] == 0  ||  $4 < min[$1" "$3] )
+					min[$1" "$3] = $4
+			} else {
+				min[$1" "$3] += $4
+			}
+				
+			max[$1" "$3] += $5
+			rid[$1" "$3] = $2
+			pri[$1" "$3] = $6
+
+			next;
+		}
+
+		END {
+			for( x in max ) {
+				split( x, a, " " )
+				printf( "data: %s,%s,%s,%s,%s,%s\n", a[1], rid[x], a[2], min[x], max[x], pri[x] )
+			}
+		}
+	' $1
+}
+
 # --------------------------------------------------------------------------------------------------------------
 
 argv0=${0##*/}
@@ -285,10 +330,11 @@ create_list=""
 		echo "data: $thost/-128,priority-in,1,10000000000,10000000000,200"
 	fi
 
-	if ! sed 's/^/data: /' $data_file
-	then
-		echo "ERROR!"
-	fi
+	preprocess_data $data_file				# must preprocess to combine queues for the vlinks
+	#if ! sed 's/^/data: /' $data_file
+	#then
+	#	echo "ERROR!"
+	#fi
 ) | awk \
 	-v static_q0size="${static_q0size:-1}" \
 	-v limit_lst="${limit:-br-int}" \
@@ -422,7 +468,7 @@ create_list=""
 				if( spq == 0 )
 					saw_queue0[sw,pt] = 1;				# allows data generator (setup_ovs_intermed most likely) to hard set a definition for q0 rather than computing it
 
-				switch_has_port[sw,pt] = 1				# only need -128 stuff once per switch
+				switch_has_port[sw,pt] = 1				# only need -128 port to list once in switcports[]
 			}
 		}
 		else														# just account for the single port
