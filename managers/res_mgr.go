@@ -9,11 +9,24 @@
 	Author:		E. Scott Daniels
 
 	CFG:		These config file variables are used when present:
-					default:alttable = n  The OVS table number to be used for metadata marking.
+					default:alttable -  The OVS table number to be used for metadata marking.
+
+					default:queue_type -  If "endpoint" then we only generate endpoint queues, not intermediate
+									switch queues.
 
 					resmgr:ckpt_dir	- name of the directory where checkpoint data is to be kept (/var/lib/tegu)
 									FWIW: /var/lib/tegu selected based on description:
 									http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
+
+					resmgr:verbose	- Defines the initial verbose setting for reservation manager bleater
+
+					resmgr:set_vlan - If true (default) then we flag fq-mgr to add vlan setting to flow-mods
+
+					resmgr:super_cookie - A cookie that can be used to manage any reservation.
+
+					resmgr:hto_limit - The hard timeout limit that should be used to reset flow-mods on long reservation.
+
+					resmgr:res_refresh - The rate (seconds) that reservations are refreshed if hto-limit is non-zero.
 
 
 	TODO:		need a way to detect when skoogie/controller has been reset meaning that all
@@ -52,7 +65,10 @@
 						written only when there are updates.
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
 				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
-				17 March 2015 : lite version of resmgr brought more in line with steering.
+				17 Mar 2015 : lite version of resmgr brought more in line with steering.
+				25 Mar 2015 : Reservation pushing only happens after a new queue list is received from netmgr
+						and sent to fq-mgr. The exception is if the hard swtich timeout pops where reservations
+						are pushed straight away (assumption is that queues don't change).
 */
 
 package managers
@@ -799,21 +815,22 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
 					rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
 					tmsg := ipc.Mk_chmsg( )
-					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr
+					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr and trigger flow-mod push
 				}
 				last_qcheck = now
 
-			case REQ_PUSH:								// driven every few seconds to push new reservations
+			case REQ_PUSH:								// driven every few seconds to check for need to refresh because of switch max timeout setting
 				if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
 					now := time.Now().Unix()
 					if now > res_refresh {
 						rm_sheep.Baa( 2, "refreshing all reservations" )	
 						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
 						res_refresh = now + int64( rr_rate )		// push everything again in an hour
+
+						inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )			// force a push of all
 					}
 				}
 
-				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
@@ -842,6 +859,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				fq_data[FQ_QLIST] = msg.Response_data
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
+
+				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )			// now safe to push reservations if any activated
 				
 			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 				if msg.Response_ch != nil {
