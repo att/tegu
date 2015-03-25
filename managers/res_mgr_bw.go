@@ -118,6 +118,9 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 				cfmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
 				//cfmod.Espq = espq2													// prep and queue for ep2
 				cfmod.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
+				if fmod.Single_switch {
+					cfmod.Espq.Queuenum = 1										// same switch always over br-rl queue 1
+				}
 
 				rm_sheep.Baa( 1, "res_mgr/push_reg: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
 					i, *rname, *cfmod.Exttyp, tptype_toks[tidx], *h1, *h2, *cfmod.Match.Ip1, *cfmod.Match.Ip2, *cfmod.Match.Tpsport, *cfmod.Match.Tpdport, 

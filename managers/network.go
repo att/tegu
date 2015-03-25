@@ -351,6 +351,7 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 	return
 }
 
+
 /*
 	Accepts a list (string) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
 	the list based on spaces and adds each information segment to the queue map.  If ep_only is true, 
@@ -388,14 +389,14 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	err = nil									// at the moment we are always successful
 	seen := make( map[string]int, 100 )			// prevent dups which occur because of double links
 
-	for _, link := range n.links {					// for each link in the graph
+	for _, link := range n.links {				// for each link in the graph
 		s := link.Queues2str( ts )
-		qlist2map( seen, &s, ep_only )						// add these to the map
+		qlist2map( seen, &s, ep_only )	// add these to the map
 	}
 
-	for _, link := range n.vlinks {					// and do the same for vlinks
+	for _, link := range n.vlinks {				// and do the same for vlinks
 		s := link.Queues2str( ts )
-		qlist2map( seen, &s, ep_only )						// add these to the map
+		qlist2map( seen, &s, ep_only )			// add these to the map
 	}
 
 	qmap = make( []string, len( seen ) )
@@ -1349,7 +1350,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		mlag_paths 		bool = true			// can be set to false in config (mlag_paths); overrides find_all_paths
 		link_headroom int = 0				// percentage that each link capacity is reduced by
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
-		limits map[string]*gizmos.Fence			// user link capacity boundaries
+		limits map[string]*gizmos.Fence		// user link capacity boundaries
 		phost_suffix *string = nil
 
 		ip2		*string

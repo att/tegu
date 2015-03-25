@@ -267,8 +267,7 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 	}
 
-//TODO: change to 2
-	fq_sheep.Baa( 1, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
+	fq_sheep.Baa( 2, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
 	
 }
 
