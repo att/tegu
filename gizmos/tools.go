@@ -170,3 +170,27 @@ func Split_port( host *string ) ( name *string, port *string ) {
 	// nothing matched, then it's ip6 and no port; default case works
 	return
 }
+
+/*
+	Given a host name of the form token/project/address return with the address string in 
+	square brackets if it seems to be an ipv6 address.
+*/
+func Bracket_address( oa string ) (ba *string) {
+
+	ba = &oa
+	if strings.Index( oa, ":" ) < 0 {				// not ipv6, just return pointer to it
+		return
+	}
+
+	tokens := strings.SplitAfter( oa, "/" )					// keeps trailing sep for easy join
+	tokens[len(tokens)-1] = "[" + tokens[len(tokens)-1]
+	bs := ""
+	for i := range tokens {
+		bs += tokens[i]
+	}
+	bs += "]"
+
+	ba = &bs
+
+	return
+}
