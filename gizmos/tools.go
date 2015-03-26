@@ -18,6 +18,7 @@
 					key=value, and the openstack auth token is also a key=value
 					pair, then all will be well.  In other words, the caller should
 					not mix things up if values will also contain equal signs.
+				26 Mar 2015 - Added support sussing out port from either ipv6 or v4 addresses.
 */
 
 package gizmos
@@ -119,5 +120,53 @@ func Toks2map( toks []string ) ( m map[string]*string ) {
 		}
 	}
 
+	return
+}
+
+/*
+	Given a tegu name which is likely has the form token/project/host where host could be 
+	one of the combinations listed below, separate off the port value and return the 
+	two separate strings. Possible host format:
+		ipv4
+		ipv4:port
+		ipv6
+		[ipv6]:port
+		name:port
+
+	In the case of an IPv6 address, the brackets will be removed from the return name 
+	portion. It is also assumed that an ip6 address will have more than one colon as
+	a part of the address regardless of whether a port is supplied. 
+*/
+func Split_port( host *string ) ( name *string, port *string ) {
+	zstr := "0"
+	name = host										// default 
+	port = &zstr
+
+	if strings.Index( *host, ":" ) < 0 {				// no port at all, not ipv6; default case 
+		return
+	}
+
+	if strings.Index( *host, "[" ) > 0 {							// either [ip6] or [ip6]:port
+		lead_toks := strings.Split( *host, "[" )					//  result: token/proj/   ip6]:port
+		trail_toks := strings.Split( lead_toks[1], "]" )   		// result: ip6   :port
+		h := lead_toks[0] + trail_toks[0]
+		name = &h
+		if len( trail_toks ) > 1 && len( trail_toks[1] ) > 1  {
+			p := trail_toks[1][1:]
+			port = &p
+		}
+		
+		return
+	}
+
+	fc := strings.Index( *host, ":" )				// first colon
+	if fc ==  strings.LastIndex( *host, ":" ) {		// just one, then its ipv4:port or name:port
+		tokens := strings.Split( *host, ":" )		// simple split will do it
+		name = &tokens[0]
+		port = &tokens[1]
+		return
+	}	
+
+	// nothing matched, then it's ip6 and no port; default case works
 	return
 }
