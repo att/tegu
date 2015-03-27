@@ -30,7 +30,7 @@ import (
 	//"html"
 	//"net/http"
 	//"os"
-	"strings"
+	//"strings"
 	"time"
 
 	//"codecloud.web.att.com/gopkgs/clike"
@@ -186,6 +186,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		return
 	}
 
+	/*
 	tokens := strings.Split( *jp.Host1, ":" )
 	p.host1 = &tokens[0]
 	if len( tokens ) > 1 {
@@ -196,7 +197,11 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		p.tpport1 = &dup_str
 		//p.tpport1 = 0
 	}
+	*/
+	p.host1, p.tpport1 = Split_port( jp.Host1 )		// suss apart host and port
+	p.host2, p.tpport2 = Split_port( jp.Host2 )
 
+	/*
 	tokens = strings.Split( *jp.Host2, ":" )
 	p.host2 = &tokens[0]
 	if len( tokens ) > 1 {
@@ -207,6 +212,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		dup_str := "0"
 		p.tpport2 = &dup_str
 	}
+	*/
 
 	p.commence = jp.Commence
 	p.expiry = jp.Expiry
@@ -338,7 +344,7 @@ func (p *Pledge) To_json( ) ( json string ) {
 	}
 	
 	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v }`,
-			state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.id, *p.qid, p.dscp, p.dscp_koe )
+			state, diff, p.bandw_in,  p.bandw_out, *(Bracket_address( *p.host1 )), *p.tpport1, *(Bracket_address( *p.host2 )), *p.tpport2, *p.id, *p.qid, p.dscp, p.dscp_koe )
 
 	return
 }
@@ -362,7 +368,7 @@ func (p *Pledge) To_chkpt( ) ( chkpt string ) {
 	}
 	
 	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v }`,
-			*p.host1, *p.tpport1, *p.host2, *p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe )
+			*(Bracket_address( *p.host1 )), *p.tpport1, *(Bracket_address( *p.host2 )), *p.tpport2, p.commence, p.expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe )
 
 	return
 }
