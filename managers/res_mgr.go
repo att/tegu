@@ -257,9 +257,11 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
 	next 15 seconds).  Also handles undoing any mirror reservations that have expired.
 
+	Favour_v6 is passed to push_bw and will favour the IPv6 address if a host has both addresses defined.
+
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, hto_limit int64 ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, hto_limit int64, favour_v6 bool ) ( npushed int ) {
 	var (
 		bw_push_count	int = 0
 		st_push_count	int = 0
@@ -274,7 +276,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
 						bw_push_count++
-						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit, alt_table )
+						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit, alt_table, favour_v6 )
 				}
 			} else {
 				pend_count++
@@ -676,6 +678,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
 		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
 		rr_rate		int = 3600			// refresh rate (1 hour)
+		favour_v6 bool = true			// favour ipv6 addresses if a host has both defined. 
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -696,6 +699,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	p = cfg_data["default"]["alttable"]				// alt table for meta marking
 	if p != nil {
 		alt_table = clike.Atoi( *p )
+	}
+
+	p = cfg_data["default"]["favour_ipv6"]
+	if p != nil {
+		favour_v6 = *p == "true"
 	}
 
 	if cfg_data["resmgr"] != nil {
@@ -827,7 +835,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
 						res_refresh = now + int64( rr_rate )		// push everything again in an hour
 
-						inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )			// force a push of all
+						inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ), favour_v6 )			// force a push of all
 					}
 				}
 
@@ -860,7 +868,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 
-				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )			// now safe to push reservations if any activated
+				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
 				
 			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 				if msg.Response_ch != nil {

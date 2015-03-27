@@ -53,6 +53,7 @@
 				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the 
 					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
 					as the endpoint 'name'. 
+				25 Mar 2015 - IPv6 changes.
 */
 
 package managers
@@ -146,11 +147,11 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 		}
 		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
 
-		for ip, mac := range n.ip2mac {				// add in regular VMs
+		for ip, mac := range n.ip2mac {							// add in regular VMs
 			vmid := n.ip2vmid[ip]
 			if vmid != nil && mac != nil {						// skip if we don't find a vmid
 				if n.vmid2phost[*vmid] != nil {
-					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					net_sheep.Baa( 2, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
 					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
 					i++
 				} else {
@@ -159,7 +160,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 			}
 		}
 
-		if n.gwmap != nil {						// add in the gateways which are not reported by openstack
+		if n.gwmap != nil {										// add in the gateways which are not reported by openstack
 			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
 				for mac, ip := range n.gwmap {
 					if n.mac2phost[mac] == nil {
@@ -660,22 +661,30 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 
 	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
-			if len( hlist[i].Ipv4 ) > 0 {
-				ip4 = hlist[i].Ipv4[0]; 		//TODO: we need to associate all ips with the host; for now just the first
-			} else {
-				ip4 = ""
-			}
-			if len( hlist[i].Ipv6 ) > 0 {
+			ip6 = ""
+			ip4 = ""
+
+			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this does snarf everything
+				if strings.Index( hlist[i].Ipv4[0], ":" ) >= 0 {	// if emulating floodlight, we get both kinds of IP in this field, one per hlist entry (ostack yields unique mac for each ip)
+					ip6 = hlist[i].Ipv4[0];
+				} else {
+					ip4 = hlist[i].Ipv4[0];
+				}
+			} 
+			if len( hlist[i].Ipv6 ) > 0 &&  hlist[i].Ipv6[0] != "" {			// if getting from floodlight, then it will be here, and we may have to IPs on the same NIC
 				ip6 = hlist[i].Ipv6[0]; 
-			} else {
-				ip6 = ""
-			}
+			} 
 
 			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
 			vmid := &empty_str
 			if old_net.ip2vmid != nil {
-				if old_net.ip2vmid[ip4] != nil {
-					vmid = old_net.ip2vmid[ip4]
+				key := ip4
+				if key == "" {
+					key = ip6
+				}
+				
+				if old_net.ip2vmid[key] != nil {
+					vmid = old_net.ip2vmid[key]
 					h.Add_vmid( vmid ) 
 				}
 			}
@@ -683,14 +692,14 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			for j := range hlist[i].AttachmentPoint {
 				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
 				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
-				if ssw != nil {							// it should always be known, but no chances
+				if ssw != nil {																	// it should always be known, but no chances
 					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
 					net_sheep.Baa( 4, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
 				}
 			}
 
 			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 3, "build: saving host ip4=%s as mac: %s", ip4, hlist[i].Mac[0] )
+			net_sheep.Baa( 2, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
 			if ip4 != "" {
 				n.hosts[ip4] = h
 			}

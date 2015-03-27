@@ -67,7 +67,7 @@ func in_subnet( ip string, net string, nbits int ) ( bool ) {
 		nett := strings.Split( net, "." )
 
 		if len( ipt ) < 4 || len( nett ) < 4 {
-			osif_sheep.Baa( 2, "in_subnet: bad/unsupported ip address or network address: %s %s", ip, net )
+			osif_sheep.Baa( 2, "in_subnet: bad/unsupported ip address or network address: addr=%s net=%s", ip, net )
 			return false
 		}
 
@@ -157,6 +157,11 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 				p.vmid2ip = vmid2ip						// id and vm name map to just ONE ip address
 				p.vm2ip = vm2ip
 				p.ip2vmid = ip2vmid						// the only complete list of ips
+if osif_sheep.Would_baa( 2 ) {
+for k, v := range p.ip2vmid {
+osif_sheep.Baa( 2, "   %s -> %s", k, *v )
+}
+}
 				p.vmid2host = vmid2host					// id to physical host
 				p.ip2vm = vmip2vm
 			}

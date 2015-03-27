@@ -100,24 +100,29 @@ func mk_resname( ) ( string ) {
 	The translated names are returned if _both_ are valid; error is set otherwise.
 	In addition, if a port number is added to a host name it is stripped and returned.
 
+	For IPv6 addresses, in order to be backwards compatable with the IPv4 notation of
+	address:port, we'll require the syntax [address]:port if a port is to be supplied
+	with an IPv6 address.
+
 	If the resulting host names match (project/host[:port]) then we return an error
 	as this isn't allowed. 
 */
 func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, err error ) {
+	var ht *string
 	
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
 	p1 = &zero_string
 	p2 = &zero_string
 
-	if h1[0:1] == "!" {										// must have 'external' host as h2
-		hx := h1
+	if h1[0:1] == "!" {										// the external host needs to be h2 for flow-mod generation
+		hx := h1											// so switch them if !address is first.
 		h1 = h2
 		h2 = hx
 	}
 	
 	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this token/project pair for host
 	req = <- my_ch													// hard wait for response
 
 	if req.State != nil {
@@ -125,12 +130,16 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
+	ht, p1 = gizmos.Split_port( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	h1x = *ht
+	/*
 	h1x = *( req.Response_data.( *string ) )
 	tokens := strings.Split( h1x, ":" )
 	if len( tokens ) > 1 {
 		h1x = tokens[0]
 		p1 = &tokens[1]
 	}
+	*/
 	
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
@@ -141,17 +150,21 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
-	h2x = *( req.Response_data.( *string ) )
-	if h1 == h2 {
+	ht, p2 = gizmos.Split_port( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	h2x = *ht
+	//h2x = *( req.Response_data.( *string ) )
+	if h1x == h2x {
 		err = fmt.Errorf( "host names are the same" )
 		return
 	}
 
+	/*
 	tokens = strings.Split( h2x, ":" )
 	if len( tokens ) > 1 {
 		h2x = tokens[0]
 		p2 = &tokens[1]
 	}
+	*/
 
 	return
 }

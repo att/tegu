@@ -45,8 +45,10 @@ import (
  	and we assume that this function is called periodically to update long running reservations.
 
 	Alt_table is the base alternate table set that we use for meta marking
+
+	If pref_ip6 is true, then if a host has both v4 and v6 addresses we will use the v6 address.
 */
-func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64, alt_table int ) {
+func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64, alt_table int, pref_ip6 bool ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
@@ -114,9 +116,10 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 					cfmod.Match.Tpsport= p1
 					cfmod.Match.Tpdport= p2
 				}
-				cfmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
-				cfmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
-				//cfmod.Espq = espq2													// prep and queue for ep2
+				//cfmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
+				//cfmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
+				cfmod.Match.Ip1 = plist[i].Get_h1().Get_address( pref_ip6 )			// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
+				cfmod.Match.Ip2 = plist[i].Get_h2().Get_address( pref_ip6 )
 				cfmod.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
 				if fmod.Single_switch {
 					cfmod.Espq.Queuenum = 1										// same switch always over br-rl queue 1
