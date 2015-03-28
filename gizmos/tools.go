@@ -194,3 +194,99 @@ func Bracket_address( oa string ) (ba *string) {
 
 	return
 }
+
+/*
+	Mixed tokens (key=value and positional) to map.
+	Given an array of tokens (strings), and a list of names, generate a map of tokens 
+	referenced by the corresponding name.  If tokens list is longer than the name list
+	the remaining tokens are not mapped.  If leading tokens are of the form key=value, 
+	then they are mapped directly and tokens after the last key=value pair in the tokens
+	array are then mapped in order. Thus splitting the string
+		action=parse verbose=true  300  usera userb
+	split into tokens, and the names string of "duration u1 u2" would result in a 
+	map:
+		{ action: "parse", verbose: true, duration: 300, u1: usera, u2: userb }
+
+	TODO: this needs to handle quoted tokens so that "xxx = yyyy" isn't treated as key 
+		a value pair.
+*/
+func Mixtoks2map( toks []string, names string ) ( tmap map[string]*string ) {
+	tmap = nil
+
+	nlist := strings.Split( names, " " )
+	maxt := len( toks )
+	tmap = make( map[string]*string, len( toks ) )
+
+	j := 0											// ensure it lives after loop
+	for j = 0; j < maxt; j++ {
+		if strings.Index( toks[j], "=" ) < 0 {
+			break
+		}
+
+		stok := strings.SplitN( toks[j], "=", 2 )
+		tmap[stok[0]] = &stok[1]
+	}
+
+	for i := range nlist {
+		if j >= maxt {
+			return
+		}
+
+		tmap[nlist[i]] = &toks[j]
+		j++
+	}
+
+	return
+}
+
+/*
+	Accepts a map and a space separated list of keys that are expected to exist in the map
+	and reference non-nil or non-empyt elements. Returns true when all elements in the 
+	list are present in the map, and false otherwise. If false is returned, a string 
+	listing the key(s) missing is non-empty. Map can be one of [string]string, [string]*string,
+	[string]int. If int is given, than missing is true only if the key isn't in the map.
+
+	It is not an error if the map has more than the listed elements (the function can be 
+	used to check for required elements etc.)
+*/
+func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
+	state := true
+	missing := ""
+
+	tokens := strings.Split( list, " " )
+
+	switch mi.(type) {
+		case map[string]string:
+			m := mi.( map[string]string )
+			for i := range tokens {
+				v, isthere := m[tokens[i]]
+				if !isthere || v == "" {
+					state = false
+					missing += tokens[i] + " "		
+				}
+			}
+
+		case map[string]*string:
+			m := mi.( map[string]*string )
+			for i := range tokens {
+				v, isthere := m[tokens[i]]
+				if !isthere || *v == "" {
+					state = false
+					missing += tokens[i] + " "		
+				}
+			}
+
+		case map[string]int:
+			m := mi.( map[string]int )
+			for i := range tokens {
+				_, isthere := m[tokens[i]]
+				if !isthere {							// assume a value of zero is acceptable, so false only if missing completely
+					state = false
+					missing += tokens[i] + " "		
+				}
+			}
+
+	}
+
+	return state, missing
+}
