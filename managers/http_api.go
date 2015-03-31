@@ -59,7 +59,8 @@
 				16 Jan 2015 : Support port masks in flow-mods.
 				27 Jan 2015 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
 				17 Feb 2015 : Added mirroring
-				24 Feb 2014 : prevent interface issue in steer parsing and adjust to work with lazy update.
+				24 Feb 2015 : prevent interface issue in steer parsing and adjust to work with lazy update.
+				30 Mar 2015 : Added support to force a project's VMs into the current graph.
 */
 
 package managers
@@ -462,6 +463,21 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 				case "graph":
 					if validate_auth( &auth_data, is_token ) {
+						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
+						if tmap["project"] != nil {
+							http_sheep.Baa( 1, "graph is forcing update of all VMs for the project: %s", *tmap["project"] )
+							req = ipc.Mk_chmsg( )
+							req.Send_req( osif_ch, my_ch, REQ_GET_PROJ_HOSTS, tmap["project"], nil )	// get a list of network vm insertion structs and push into the network
+							req = <- my_ch
+							if req.Response_data == nil {
+								http_sheep.Baa( 1, "failed to load all vm data: %s: %s", *tmap["project"], req.State )
+								jreason = fmt.Sprintf( "unable to load project data: %s", req.State )	
+							} else {
+								req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )	// send list to network to insert; must block until done so graph reqeust gets update
+								req = <- my_ch
+							}
+						}
+
 						req = ipc.Mk_chmsg( )
 
 						req.Send_req( nw_ch, my_ch, REQ_NETGRAPH, nil, nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
@@ -491,6 +507,21 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 				case "listhosts":											// list known host information
 					if validate_auth( &auth_data, is_token ) {
+						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
+						if tmap["project"] != nil {
+							http_sheep.Baa( 1, "listhosts is forcing update of all VMs for the project: %s", *tmap["project"] )
+							req = ipc.Mk_chmsg( )
+							req.Send_req( osif_ch, my_ch, REQ_GET_PROJ_HOSTS, tmap["project"], nil )	// get a list of network vm insertion structs and push into the network
+							req = <- my_ch
+							if req.Response_data == nil {
+								http_sheep.Baa( 1, "failed to load all vm data: %s: %s", *tmap["project"], req.State )
+								jreason = fmt.Sprintf( "unable to load project data: %s", req.State )	
+							} else {
+								req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )	// send list to network to insert; must block until done so listhosts reqeust gets update
+								req = <- my_ch
+							}
+						}
+
 						req = ipc.Mk_chmsg( )
 						req.Send_req( nw_ch, my_ch, REQ_LISTHOSTS, nil, nil )
 						req = <- my_ch

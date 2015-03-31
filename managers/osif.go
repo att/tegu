@@ -70,6 +70,7 @@
 				16 Jan 2014 - Support port masks in flow-mods.
 				18 Feb 2015 - Corrected slice index bug (@214)
 				27 Feb 2015 - To make steering work with lazy updates.
+				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -670,10 +671,16 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				}
 
 
-			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info from oepnstack and return in a network update struct
+			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info for a single host from oepnstack and return in a network update struct
 				if msg.Response_ch != nil {
 					go get_os_hostinfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
 					msg = nil							// prevent early response
+				}
+
+			case REQ_GET_PROJ_HOSTS:
+				if msg.Response_ch != nil {
+					go get_all_osvm_info( msg, os_refs, os_projects, id2pname, pname2id )		// do it asynch and return the result on the message channel
+					msg = nil																	// prevent response from this function
 				}
 
 			case REQ_GET_DEFGW:							// dig out the default gateway for a project

@@ -33,6 +33,8 @@
 #					and substituted a curl command since it seems keystone isn't installed
 #					everyplace (sigh).
 #				25 Feb 2015 - Added mirror commands
+#				31 Mar 2015 - Added support for sending key-value pairs to listhosts and 
+#					graph commands.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -277,11 +279,11 @@ case $1 in
 		;;
 
 	listr*)						# list reservations
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listres"
+		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listres $kv_pairs"
 		;;
 
 	listh*)						# list hosts
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listhosts"
+		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listhosts $kv_pairs"
 		;;
 
 	listul*)						# list user link caps
@@ -305,7 +307,7 @@ case $1 in
 		;;
 
 	graph)
-		rjprt  $opts -m POST -D "$token graph" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto://$host/tegu/api"
 		;;
 
 
@@ -373,7 +375,7 @@ case $1 in
 				exit 1
 			fi
 		fi
-		rjprt  $opts -m POST -D "reserve $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/api"
 		;;
 
 	setulcap)

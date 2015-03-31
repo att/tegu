@@ -7,11 +7,14 @@
 	Author:		E. Scott Daniels
 
 	Mods:		27 Feb 2015 - Changes to make steering work with lazy update.
+				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 */
 
 package managers
 
 import (
+	"fmt"
+
 	"codecloud.web.att.com/gopkgs/ipc"
 )
 
@@ -126,4 +129,26 @@ func  (vm *Net_vm) Add2graph( nw_ch chan *ipc.Chmsg ) {
 
 	msg := ipc.Mk_chmsg( )
 	msg.Send_req( nw_ch, nil, REQ_ADD, vm, nil )		
+}
+
+func enn( s *string ) ( *string ) {
+	if s != nil {
+		return s
+	}
+
+	ns := "<nil>"
+	return &ns
+}
+
+/*
+	Output in human readable form.
+*/
+func (vm *Net_vm) To_str() ( string ) {
+	//return fmt.Sprintf( "net_vm = { %s %s %s %s %s %s %s %s }", *enn( vm.name ), *enn( vm.id ), *enn( vm.ip4 ), *enn( vm.ip6 ), *enn( vm.phost ), *enn( vm.gw ), *enn( vm.mac ), *enn( vm.fip ) )
+	if vm == nil {
+		return ""
+	}
+
+	return fmt.Sprintf( "net_vm = { %s %s %s %x }", *enn( vm.name ), *enn( vm.id ), *enn( vm.ip4 ), vm.ip4 )
+	
 }

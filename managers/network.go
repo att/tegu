@@ -54,6 +54,7 @@
 					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
 					as the endpoint 'name'. 
 				20 Mar 2014 - Added REQ_GET_PHOST_FROM_MAC code
+				30 Mar 2014 - Added ability to accept an array of Net_vm blocks.
 */
 
 package managers
@@ -157,6 +158,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 				} else {
 					net_sheep.Baa( 1, "did NOT add host: mac=%s ip=%s phost=NIL", *mac, ip )
 				}
+			} else {
 			}
 		}
 
@@ -196,8 +198,9 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 */
 func (net *Network) insert_vm( vm *Net_vm ) {
 	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
-	if vname == nil {								// shouldn't happen, but be safe
-		return
+	if vname == nil || *vname == "" || *vname == "unknown" {								// shouldn't happen, but be safe
+		//return
+	
 	}
 
 	if net.vm2ip == nil {							// ensure everything exists
@@ -255,7 +258,6 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 		net.ip2mac[*vip4] = vmac
 		net.ip2fip[*vip4] = vfip
 		net.vmip2gw[*vip4] = gw
-
 	}
 
 	if vfip != nil {
@@ -754,13 +756,6 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 		}
 	} else {
 		err = fmt.Errorf( "cannot translate IP to MAC: %s", *ip )
-for k, v := range n.ip2mac {
-if v != nil {
-net_sheep.Baa( 1, ">>>%s -- %s", k, *v )
-}else{
-net_sheep.Baa( 1, ">>>%s -- nil", k )
-}
-}
 	}
 
 	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network 
@@ -1640,8 +1635,18 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 					case REQ_ADD:							// insert new information into the various vm maps
 						if req.Req_data != nil {
-							vm := req.Req_data.( *Net_vm )
-							act_net.insert_vm( vm )
+							switch req.Req_data.( type ) {
+								case *Net_vm:
+									vm := req.Req_data.( *Net_vm )
+									act_net.insert_vm( vm )
+
+								case []*Net_vm:
+									vlist := req.Req_data.( []*Net_vm )
+									for i := range vlist {
+										act_net.insert_vm( vlist[i] )
+									}
+							}
+
 							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
