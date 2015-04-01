@@ -61,6 +61,7 @@
 				17 Feb 2015 : Added mirroring
 				24 Feb 2015 : prevent interface issue in steer parsing and adjust to work with lazy update.
 				30 Mar 2015 : Added support to force a project's VMs into the current graph.
+				01 Apr 2015 : Corrected cause of nil ptr exception in steering reqest parsing.
 */
 
 package managers
@@ -763,13 +764,13 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					h1, h2, p1, p2, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 					if err != nil {
 						reason = fmt.Sprintf( "invalid endpoints:  %s", err )
+						http_sheep.Baa( 1, "steering reservation rejected: %s", reason )
 						nerrors++
 						break
 					}
 
 					h1 = wc2name( h1 )							// resolve E* or L* wild cards
 					h2 = wc2name( h2 )
-http_sheep.Baa( 1, ">>>> steer: conversion: (%s) (%s)", h1, h2 )
 
 					if h1 != "" {
 						update_graph( &h1, false, h2 == "" )					// pull all of the VM information from osif then send to netmgr (block if h2 is empty)
@@ -782,7 +783,13 @@ http_sheep.Baa( 1, ">>>> steer: conversion: (%s) (%s)", h1, h2 )
 					req.Send_req( osif_ch, my_ch, REQ_VALIDATE_TOKEN, tmap["usrsp"], nil )		// validate token and convert user space to ID if name given
 					req = <- my_ch
 					if req.Response_data != nil {
-						tmap["usrsp"] = req.Response_data.( *string )
+						if  req.Response_data.( *string ) != nil {
+							tmap["usrsp"] = req.Response_data.( *string )
+						} else {
+							nerrors++
+							reason = fmt.Sprintf( "unable to create steering reservation: %s", req.State )
+							break;
+						}
 					}
 
 					if tmap["proto"] != nil { // DEBUG
@@ -803,7 +810,9 @@ http_sheep.Baa( 1, ">>>> steer: conversion: (%s) (%s)", h1, h2 )
 					for i := range mbnames {									// generate a mbox object for each
 						mbn := ""
 						if strings.Index( mbnames[i], "/" ) < 0 {				// add user space info out front
-							mbn = *tmap["usrsp"] + mbnames[i] 					// validation/translation adds a trailing /, so not needed here
+							if tmap["usrsp"] != nil {
+								mbn = *tmap["usrsp"] + mbnames[i] 					// validation/translation adds a trailing /, so not needed here
+							}
 						} else {
 							mbn = mbnames[i]
 						}

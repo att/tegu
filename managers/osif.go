@@ -71,6 +71,8 @@
 				18 Feb 2015 - Corrected slice index bug (@214)
 				27 Feb 2015 - To make steering work with lazy updates.
 				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
+				01 Apr 2015 - Corrected bug introduced by requiring a validate token to have a non
+						empty host which is legit for steering.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -184,7 +186,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			}
 
 		case 3:													// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
-			if tokens[0] == "" || tokens[2] == "" {				// must have something out front, a ! or token, but empty is no good
+			if tokens[0] == ""  {								// must have something out front, a ! or token, but empty is no good ([2] can be empty)
 					return nil, fmt.Errorf( "invalid host name; expected {!|tok}/[project]/hostname, got: %s", *raw )
 			}
 
@@ -237,7 +239,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			}
 
 			xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
-			osif_sheep.Baa( 2, "validation: %s: tok//host ==> %s", *raw, xstr )
+			osif_sheep.Baa( 2, "validation: %s: proj/host ==> %s", *raw, xstr )
 			return &xstr, nil
 	}
 	
