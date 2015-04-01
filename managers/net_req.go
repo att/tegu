@@ -13,8 +13,6 @@
 package managers
 
 import (
-	"fmt"
-
 	"codecloud.web.att.com/gopkgs/ipc"
 )
 
@@ -131,24 +129,55 @@ func  (vm *Net_vm) Add2graph( nw_ch chan *ipc.Chmsg ) {
 	msg.Send_req( nw_ch, nil, REQ_ADD, vm, nil )		
 }
 
-func enn( s *string ) ( *string ) {
-	if s != nil {
-		return s
-	}
-
-	ns := "<nil>"
-	return &ns
-}
-
 /*
 	Output in human readable form.
 */
 func (vm *Net_vm) To_str() ( string ) {
-	//return fmt.Sprintf( "net_vm = { %s %s %s %s %s %s %s %s }", *enn( vm.name ), *enn( vm.id ), *enn( vm.ip4 ), *enn( vm.ip6 ), *enn( vm.phost ), *enn( vm.gw ), *enn( vm.mac ), *enn( vm.fip ) )
 	if vm == nil {
 		return ""
 	}
 
-	return fmt.Sprintf( "net_vm = { %s %s %s %x }", *enn( vm.name ), *enn( vm.id ), *enn( vm.ip4 ), vm.ip4 )
-	
-}
+	str := ""
+	if vm.name != nil {
+		str = str + *vm.name + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.id != nil {
+		str = str + *vm.id + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.ip4 != nil {
+		str = str + *vm.ip4 + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.ip6 != nil {
+		str = str + *vm.ip6 + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.phost != nil {
+		str = str + *vm.phost + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.gw != nil {
+		str = str + *vm.gw + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.mac != nil {
+		str = str + *vm.mac + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.fip != nil {
+		str = str + *vm.fip
+	} else {
+		str = str + "<nil>"
+	}
+
+	return str
+}	
