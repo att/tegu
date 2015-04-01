@@ -35,6 +35,7 @@
 #				25 Feb 2015 - Added mirror commands
 #				31 Mar 2015 - Added support for sending key-value pairs to listhosts and 
 #					graph commands.
+#				01 Apr 2015 - Corrected problem with token passed on steering request.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -384,7 +385,7 @@ case $1 in
 
 	steer)
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$token} $4 $5 $6 $7" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto://$host/tegu/api"
 		;;
 
 	verbose)
