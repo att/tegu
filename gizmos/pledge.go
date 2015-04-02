@@ -54,6 +54,7 @@ type Pledge struct {
 	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
 	paused		bool		// set if reservation has been paused
 	ptype		int			// pledge type from gizmos PT_ constants.
+	match_v6	bool		// true if we should force flow-mods to match on IPv6
 }
 
 /*
@@ -74,6 +75,7 @@ type Json_pledge struct {
 	Id			*string
 	Qid			*string
 	Usrkey		*string
+	Match_v6	bool
 }
 
 /*
@@ -123,6 +125,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence i
 		dscp: dscp,
 		ptype:	PT_BANDWIDTH,
 		dscp_koe: dscp_koe,
+		match_v6: false,
 	}
 
 	if *usrkey != "" {
@@ -232,6 +235,13 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 */
 func (p *Pledge) Set_qid( id *string ) {
 	p.qid = id
+}
+
+/*
+	Set match v6 flag based on user input.
+*/
+func (p *Pledge) Set_matchv6( state bool ) {
+	p.match_v6 = state
 }
 
 /*
@@ -514,6 +524,13 @@ func (p *Pledge) Commenced_recently( window int64 ) ( bool ) {
 */
 func (p *Pledge) Get_ptype( ) ( int ) {
 	return p.ptype
+}
+
+/*
+	Return whether the match on IPv6 flag is true
+*/
+func (p *Pledge) Get_matchv6() ( bool ) {
+	return p.match_v6
 }
 
 /*

@@ -50,6 +50,7 @@
 # 	Author: 	E. Scott Daniels
 #
 #	Mods:		22 Mar 2015 - Added keep on exit option. 
+#				27 Mar 2015 - Added ipv6 support.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -60,8 +61,9 @@ function logit
 function usage
 {
 	echo "$argv0 v1.0/13205"
-	echo "usage: $argv0 [-d dst-mac] [-E external-ip] [-h host] [-k] [-n] [-o] [-p|P proto:port] [-s src-mac] [-T dscp] [-t hard-timeout] [-v]"
+	echo "usage: $argv0 [-6] [-d dst-mac] [-E external-ip] [-h host] [-k] [-n] [-o] [-p|P proto:port] [-s src-mac] [-T dscp] [-t hard-timeout] [-v]"
 	echo ""
+	echo "  -6 forces IPv6 address matching to be set"
 }
 
 #
@@ -159,10 +161,12 @@ queue=""
 koe=0					# keep dscp value as packet 'exits' our environment. Set if global_* traffic type given to tegu
 timout="15"
 operation="add"			# -D causes deletes
+ip_type=""
 
 while [[ $1 == -* ]]
 do
 	case $1 in 
+		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod.
 		-b)		mt_base="$2"; shift;;
 		-d)		rmac="$2"; shift;;
 		-D)		operation="del";;
@@ -223,7 +227,7 @@ fi
 # view of where the VM really is.
 if would_extend 500 "dst=$lmac" $to_value
 then
-	send_ovs_fmod $forreal $host -p 500 $timeout --match -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
+	send_ovs_fmod $forreal $host -p 500 $timeout --match $ip_type -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
 	rc=$(( rc + $? ))
 else
 	logit "timeout $to_value would not extend the current p500 f-mod, not generated"
@@ -231,7 +235,7 @@ fi
 
 if (( one_switch == 0 ))							# both VMs are attached to the same OVS we only need the 400/405 fmod
 then
-	send_ovs_fmod $forreal $host -p 430 $timeout --match -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
+	send_ovs_fmod $forreal $host -p 430 $timeout --match $ip_type -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
 	rc=$(( rc + $? ))
 else
 	logit "both endpoints on the same switch, outbound p400 fmod skipped"
@@ -239,7 +243,7 @@ fi
 
 if would_extend 425 "dst=$lmac" $to_value			# only write this very generic f-mod if it extends one that is there, or one is not there
 then
-	send_ovs_fmod $forreal $host -p 425 $timeout --match -d $lmac --action -o $rl_port  $operation $cookie $bridge
+	send_ovs_fmod $forreal $host -p 425 $timeout --match $ip_type -d $lmac --action -o $rl_port  $operation $cookie $bridge
 	rc=$(( rc + $? ))
 else
 	logit "timeout $to_value would not extend the current p425 f-mod, not generated"
@@ -249,15 +253,15 @@ fi
 # outbound f-mods - anything from the VM goes over the rate limiting bridge. anything outbound coming off of the 
 # rl bridge goes through normal processing; p450 fmod must be lower priority than the p500 rule in inbound processing
 # this flow-mod ends up being persistant, so we'll keep it.
-send_ovs_fmod $forreal $host -p 450 -t 0 --match -m 0 -i $rl_port --action -R ,$mt_base -R ,0 -N	 $operation $cookie $bridge 	# anything else inbound from bridge goes out normally (persistent fmod)
+send_ovs_fmod $forreal $host -p 450 -t 0 --match $ip_type -m 0 -i $rl_port --action -R ,$mt_base -R ,0 -N	 $operation $cookie $bridge 	# anything else inbound from bridge goes out normally (persistent fmod)
 rc=$(( rc + $? ))
 
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match -m 0x0/0x7 $dexip -s $lmac -d $rmac $proto --action $ovopt $dscp -o $rl_port $queue $operation $cookie $bridge
+send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $ip_type -m 0x0/0x7 $dexip -s $lmac -d $rmac $proto --action $ovopt $dscp -o $rl_port $queue $operation $cookie $bridge
 rc=$(( rc + $? ))
 
 if would_extend 300 "src=$lmac" $to_value			# only write this very generic f-mod if it extends one that is there, or one is not there
 then
-	send_ovs_fmod $forreal $host $timeout -p 300 --match -m 0x0/0x7 -s $lmac  --action  $ovopt -T 0 -o $rl_port $operation $cookie $bridge
+	send_ovs_fmod $forreal $host $timeout -p 300 --match $ip_type -m 0x0/0x7 -s $lmac  --action  $ovopt -T 0 -o $rl_port $operation $cookie $bridge
 	rc=$(( rc + $? ))
 else
 	logit "timeout $to_value would not extend current p300 f-mod; not generated"

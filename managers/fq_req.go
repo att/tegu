@@ -52,6 +52,7 @@ func Mk_fqreq( id *string )  ( np *Fq_req ) {
 		Table:	0,
 		Output: &output,			// default to no output
 		Dscp_koe: false,
+		Ipv6:	false,
 	}
 
 	return
@@ -119,7 +120,8 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 	}
 	fmap["extip"] = *fq.Extip
 	fmap["queue"] =  fmt.Sprintf( "%d", fq.Espq.Queuenum )
-	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )							// shift left 2 bits to match what OVS wants
+	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )						// shift left 2 bits to match what OVS wants
+	fmap["ipv6"] =  fmt.Sprintf( "%v", fq.Ipv6 )							// force ipv6 fmods is on
 	fmap["timeout"] =  fmt.Sprintf( "%d", fq.Expiry - time.Now().Unix() )
 	//fmap["mtbase"] =  fmt.Sprintf( "%d", fq.Mtbase )
 	fmap["oneswitch"] = fmt.Sprintf( "%v", fq.Single_switch )

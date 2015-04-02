@@ -192,6 +192,7 @@ type Fq_req struct {
 	Resub	*string				// list of tables (space sep numbers) to resubmit to
 	Dscp	int					// dscp value that should be used for the traffic
 	Dscp_koe bool				// true if the value is to be kept on the packet as it leaves the environment
+	Ipv6	bool				// set to true to force ipv6 packet matching
 
 	Nxt_mac	*string				// mac of next hop (steering)
 	Lbmac	*string				// late binding mac

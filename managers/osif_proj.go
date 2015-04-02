@@ -15,7 +15,8 @@
 				09 Jan 2015 - No longer assume that the gateway list is limited by the project
 					that is valid in the creds.  At least some versions of Openstack were
 					throwing all gateways into the subnet list.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2015 - Support port masks in flow-mods.
+				01 Apr 2015 - Added ipv6 support for finding gateway/routers.
 */
 
 package managers
@@ -23,11 +24,11 @@ package managers
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/ipc"
 	"codecloud.web.att.com/gopkgs/ostack"
 )
@@ -52,45 +53,23 @@ type osif_project struct {
 
 // -------------------------------------------------------------------------------------------------
 
-/*	Given an IP address and a network address and number of bits test to
-	see if the IP address is in the subnet. Returns true if the IP address
-	is in the subnet. */
-func in_subnet( ip string, net string, nbits int ) ( bool ) {
-	var (
-		mask int64
-		ipv int64
-		netv int64
-	)
-
-	if nbits > 0 {									// if net bits given, compute the mask and compare
-		ipt := strings.Split( ip, "." )				// tokenise
-		nett := strings.Split( net, "." )
-
-		if len( ipt ) < 4 || len( nett ) < 4 {
-			osif_sheep.Baa( 2, "in_subnet: bad/unsupported ip address or network address: addr=%s net=%s", ip, net )
-			return false
-		}
-
-		ipv = 0
-		netv = 0
-		for i := 0; i < 4; i++ {
-			ipv <<= 8
-			netv <<= 8
-			
-			ipv += clike.Atoll( ipt[i] )
-			netv += clike.Atoll( nett[i] )
-		}
-
-		mask = 0
-		for i := 0; i < nbits; i++ {
-			mask = (mask >> 1) + 0x80000000
-		}
-
-		return (ipv & mask) ==  netv
+/*
+	Accepts an IP address, a network and number of bits that specify the network portion of an 
+	address. Using the number of bits the IP address is converted to it's network address and 
+	compared to the target network. If they match, the IP address is a member of the subnet
+	and true is returned.  Works for both ip4 and ip6 addresses. Errors returned by ParseCIDR
+	are ignored as they are most likely ip6 number of bits that are too large for an ip4 
+	address.  This can happen when both IP address types are in use on the same cluster.
+*/
+func in_subnet( ip string, target_net string, nbits string ) ( bool ) {
+	_, ip_net, err := net.ParseCIDR( ip + "/" + nbits )	
+	if err != nil {									// this will happen if we are validating an ip4 with an ip6 and the nbits is too large; ignore
+		return false
 	}
 
-	return false
+	return  target_net == ip_net.IP.String() 
 }
+
 
 // -------------------------------------------------------------------------------------------------
 
@@ -227,33 +206,32 @@ osif_sheep.Baa( 2, "   %s -> %s", k, *v )
 	seem to return every subnet, not just the subnets defined for the
 	project listed in the creds.
 */
-func (p *osif_project) ip2gw( ip4 *string ) ( *string ) {
-	if p == nil || ip4 == nil {
+func (p *osif_project) ip2gw( ip *string ) ( *string ) {
+	if p == nil || ip == nil {
 		return nil
 	}
 
-	ip_toks := strings.Split( *ip4, "/" )			// assume project/ip
-	ip := ""
+	ip_toks := strings.Split( *ip, "/" )			// assume project/ip
 	project := ""
 	if len( ip_toks ) > 1 {						// should always be 2, but don't core dump if not
-		ip = ip_toks[1]
+		ip = &ip_toks[1]
 		project = ip_toks[0]					// capture the project for match against the gateway
 	} else {
-		ip = ip_toks[0]
+		ip = &ip_toks[0]
 	}
 		
 	for k, v := range p.gw2cidr {												// key is the project/ip of the gate, value is the cidr
 		k_toks := strings.Split( k, "/" )										// need to match on project too
 		if len( k_toks ) == 1  ||  k_toks[0] ==  project || project == "" {		// safe to check the cidr
 			c_toks := strings.Split( *v, "/" )
-			if in_subnet( ip, c_toks[0], clike.Atoi( c_toks[1] ) ) {
-				osif_sheep.Baa( 1, "mapped ip to gateway for: %s  %s", *ip4, k )
-				return &k
-			}
+				if in_subnet( *ip, c_toks[0], c_toks[1]  ) {
+					osif_sheep.Baa( 1, "mapped ip to gateway for: %s  %s", *ip, k )
+					return &k
+				}
 		}
 	}
 
-	osif_sheep.Baa( 1, "osif-ip2gw: unable to map ip to gateway for: %s", *ip4 )
+	osif_sheep.Baa( 1, "osif-ip2gw: unable to map ip to gateway for: %s", *ip )
 	return nil
 }
 

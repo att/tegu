@@ -593,27 +593,14 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "reserve":
-						tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end 
-						if len( tmap ) < 1  {
-							if ntokens < 4  {		
-								nerrors++
-								reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1>[,<host2>] cookie dscp; received: %s", ntokens-1, recs[i] ); 
-								break
-							} 
-
-							tmap["bandw"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
-							tmap["window"] = &tokens[2]
-							tmap["hosts"] = &tokens[3]
-							tmap["cookie"] = &empty_str
-							dup_str := "0"
-							tmap["dscp"] = &dup_str
-							if ntokens > 4 {					// optional, cookie must be supplied if dscp is supplied
-								tmap["cookie"] = &tokens[4]
-								if ntokens > 5 {
-									tmap["dscp"] = &tokens[5]
-								}
-							} 
-						}
+						key_list := "bandw window hosts cookie dscp" 
+						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
+						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
+						if !ok {
+							nerrors++
+							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] ); 
+							break
+						} 
 
 						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
 							subtokens := strings.Split( *tmap["bandw"], "," )
@@ -656,8 +643,11 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							}
 						}
 
-
 						if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+							if tmap["ipv6"] != nil {
+								res.Set_matchv6( *tmap["ipv6"] == "true" )
+							}
+							
 							reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
 							if ecount == 0 {
 								state = "OK"

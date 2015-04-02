@@ -754,11 +754,13 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
 	the VM doesn't have a floating IP. 
 */
-func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair ) {
+func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
 	var (
 		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different tenants
 		h2_auth bool = true
 	)
+
+	err = nil
 
 	if strings.Index( *h1ip, "/" ) < 0 {					// no tenant id in the name we have to assume in the same realm
 		pair_list = make( []host_pair, 1 )
@@ -846,7 +848,8 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
 	} else {
 		if g2 == nil {
-			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation no-router??? <-> %s", *h2ip )
+			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation no-g2-router??? <-> %s", *h2ip )
+			err = fmt.Errorf( "unable to create partial pair reservation to %s: no router", *h2ip )
 		} else {
 			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
 		}
@@ -860,6 +863,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	} else {
 		if g1 == nil {
 			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation no-g1-router???? <-> %s",  *h1ip )
+			err = fmt.Errorf( "unable to create partial pair reservation to %s: no router", *h2ip )
 		} else {
 			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
 		}
@@ -1010,6 +1014,11 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		lcap_trip bool = false		// local capacity trip flag; indicates one or more paths blocked by capacity limits
 	)
 
+	if h1nm == nil || h2nm == nil {
+		net_sheep.Baa( 1, "IER:	find_paths: one/both names is/are nil  h1 nil=%v  h2 nil=%v", h1nm == nil, h2nm == nil )
+		return 0, nil, false
+	}
+
 	h1 = n.hosts[*h1nm]
 	if h1 == nil {
 		path_list = nil
@@ -1155,7 +1164,11 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	path_list = nil
 	if n == nil { return }
 
-	pair_list := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different tenants
+	pair_list, err := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different tenants
+	if err != nil {
+		net_sheep.Baa( 1, "unable to build path: %s", err )
+		return
+	}
 	if pair_list == nil {										// likely no fip for one or the other VMs
 		return
 	}
@@ -1179,7 +1192,12 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation 
 			}
 		} else {
-			net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", *pair_list[i].h1, *pair_list[i].h2, cap_trip )
+			if pair_list[i].h1 != nil && pair_list[i].h2 != nil {											 // pair might be nil if no gateway; don't stack dump
+				net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", *pair_list[i].h1, *pair_list[i].h2, cap_trip )	
+			} else {
+				net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", h1nm, h2nm,  cap_trip )
+			}
+
 			if cap_trip {
 				lcap_trip = true
 			}

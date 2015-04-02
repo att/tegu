@@ -20,7 +20,7 @@
 
 					resmgr:verbose	- Defines the initial verbose setting for reservation manager bleater
 
-					resmgr:set_vlan - If true (default) then we flag fq-mgr to add vlan setting to flow-mods
+					deprecated - resmgr:set_vlan - If true (default) then we flag fq-mgr to add vlan setting to flow-mods
 
 					resmgr:super_cookie - A cookie that can be used to manage any reservation.
 
@@ -261,7 +261,7 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, hto_limit int64, favour_v6 bool ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_limit int64, pref_v6 bool ) ( npushed int ) {
 	var (
 		bw_push_count	int = 0
 		st_push_count	int = 0
@@ -276,7 +276,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
 						bw_push_count++
-						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit, alt_table, favour_v6 )
+						push_bw_reservations( p, &rname, ch, hto_limit, alt_table, pref_v6 )
 				}
 			} else {
 				pend_count++
@@ -667,7 +667,6 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 	var (
-		set_vlan	bool = true			// set the vlan tag on forward ingress flow mods
 		inv	*Inventory
 		msg	*ipc.Chmsg
 		ckptd	string
@@ -719,10 +718,12 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
 
+		/*
 		p = cfg_data["resmgr"]["set_vlan"]
 		if p != nil {
 			set_vlan = *p == "true"
 		}
+		*/
 
 		p = cfg_data["resmgr"]["super_cookie"]
 		if p != nil {
@@ -835,7 +836,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
 						res_refresh = now + int64( rr_rate )		// push everything again in an hour
 
-						inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ), favour_v6 )			// force a push of all
+						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// force a push of all
 					}
 				}
 
@@ -868,7 +869,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 
-				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
+				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
 				
 			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 				if msg.Response_ch != nil {
