@@ -207,19 +207,20 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 
 	parms := act.Data
 
-	cmd_str = fmt.Sprintf( `%sql_bw_fmods `, pstr )
-	cmd_str +=	build_opt( parms["smac"], "-s" )
-	cmd_str +=	build_opt( parms["dmac"], "-d" )
-	cmd_str +=	build_opt( parms["extip"], "-E" )
-	cmd_str +=	build_opt( parms["flvlan"],  "-v" )
-	cmd_str +=	build_opt( parms["koe"],  "-k" )
-	cmd_str +=	build_opt( parms["one_switch"],  "-o" )
-	cmd_str +=	build_opt( parms["sproto"],  "-p" )
-	cmd_str +=	build_opt( parms["dproto"],  "-P" )
-	cmd_str +=	build_opt( parms["queue"],  "-q" )
-	cmd_str +=	build_opt( parms["timeout"],  "-t" )
-	cmd_str +=	build_opt( parms["dscp"],  "-T" )
-	cmd_str +=	build_opt( parms["oneswitch"], "-o" ) 
+	cmd_str = fmt.Sprintf( `%sql_bw_fmods `, pstr ) +
+			build_opt( parms["smac"], "-s" ) +
+			build_opt( parms["dmac"], "-d" ) +
+			build_opt( parms["extip"], "-E" ) +
+			build_opt( parms["flvlan"],  "-v" ) +
+			build_opt( parms["koe"],  "-k" ) +
+			build_opt( parms["one_switch"],  "-o" ) +
+			build_opt( parms["sproto"],  "-p" ) +
+			build_opt( parms["dproto"],  "-P" ) +
+			build_opt( parms["queue"],  "-q" ) +
+			build_opt( parms["timeout"],  "-t" ) +
+			build_opt( parms["dscp"],  "-T" ) +
+			build_opt( parms["oneswitch"], "-o" )  +
+			build_opt( parms["ipv6"], "-6" ) 
 
 
 	sheep.Baa( 1, "via broker on %s: %s", act.Hosts[0], cmd_str )
@@ -318,7 +319,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	rdata := make( []string, 8192 )		// might need to revisit this limit
 	ridx := 0
 
-	sheep.Baa( 1, "map_mac2phost: waiting for %d responses", wait4 )
+	sheep.Baa( 2, "map_mac2phost: waiting for %d responses", wait4 )
 	timer_pop := false						// indicates a timeout for loop exit
 	errcount := 0
 	for wait4 > 0 && !timer_pop {			// wait for responses back on the channel or the timer to pop
@@ -331,7 +332,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 				wait4--
 				stdout, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "map_mac2phost: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+				sheep.Baa( 2, "map_mac2phost: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
 					sheep.Baa( 1, "WRN: error running map_mac2phost command on %s", host )
 					errcount++
@@ -392,7 +393,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 				wait4--
 				_, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "setup-intermed: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+				sheep.Baa( 2, "setup-intermed: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
 					sheep.Baa( 1, "WRN: error running setup-intermed queue command on %s", host )
 					errcount++
@@ -473,7 +474,7 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 				wait4--
 				_, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "create-q: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+				sheep.Baa( 2, "create-q: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
         			sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", host, fname, err )
 					errcount++
