@@ -461,7 +461,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 func usage( version string ) {
 	fmt.Fprintf( os.Stdout, "tegu_agent %s\n", version )
-	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-l log-dir] [-p tegu-port] [-v | -V level]\n" )
+	fmt.Fprintf( os.Stdout, "usage: tegu_agent -i id [-l log-dir] [-p tegu-port] [-u user] [-v | -V level]\n" )
 }
 
 func main() {
