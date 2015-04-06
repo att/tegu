@@ -194,7 +194,7 @@ func is_admin_token( token *string ) ( bool ) {
 	defer close( my_ch )									// close it on return
 	
 	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_ADMIN, token, nil )		// verify that the token is good for the admin (default) user given in the config file
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_TEGU_ADMIN, token, nil )		// verify that the token is good for the admin (default) user given in the config file
 	req = <- my_ch														// hard wait for response
 
 	if req.State == nil {
@@ -202,6 +202,27 @@ func is_admin_token( token *string ) ( bool ) {
 	}
 
 	http_sheep.Baa( 1, "admin token auth failed: %s", req.State )
+	return false
+}
+
+/*
+	Given a token test to see if any of the roles in the list are listed as roles by openstack.
+	Returns true if one or more are listed.
+*/
+func token_has_osroles( token *string, roles string ) ( bool ) {
+	dstr := *token + " " + roles					// osif expects single string, space separated token and list
+	
+	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
+	
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_HAS_ANY_ROLE, &dstr, nil )		// go check it out
+	req = <- my_ch														// hard wait for response
+
+	if req.State == nil {
+		return true
+	}
+
 	return false
 }
 
@@ -432,7 +453,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					} 
 
 				case "graph":
-					if validate_auth( &auth_data, is_token ) {
+					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" )) || validate_auth( &auth_data, is_token ) {
 						req = ipc.Mk_chmsg( )
 		
 						req.Send_req( nw_ch, my_ch, REQ_NETGRAPH, nil, nil )	// request to net thread; it will create a json blob and attach to the request which it sends back
@@ -461,7 +482,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					} 
 		
 				case "listhosts":											// list known host information
-					if validate_auth( &auth_data, is_token ) {
+					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" ))  ||  validate_auth( &auth_data, is_token ) {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( nw_ch, my_ch, REQ_LISTHOSTS, nil, nil )
 						req = <- my_ch

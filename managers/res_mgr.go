@@ -413,7 +413,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 						if req.Response_data != nil {
 							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 							p.Set_path_list( path_list )
-							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", p.Get_id, *h1, *h2, len( path_list ) )
+							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *p.Get_id, *h1, *h2, len( path_list ) )
 							err = i.Add_res( p )
 						} else {
 							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
