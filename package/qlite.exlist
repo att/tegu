@@ -16,6 +16,7 @@
 ../agent/ovs/send_ovs_fmod	usr/bin/
 ../agent/ovs/create_ovs_queues	usr/bin/
 ../agent/ovs/ql_setup_irl	usr/bin/
+../agent/ovs/ql_bw_fmods	/usr/bin/
 
 ../system/tegu_req	usr/bin/
 ../system/start_tegu_agent	usr/bin/
