@@ -86,10 +86,10 @@ const (
 	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
 	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
 	REQ_GENCREDS				// generate crdentials
-	REQ_VALIDATE_ADMIN			// validate an admin token
 	REQ_PROJNAME2ID				// translate project name to ID
 	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port
 	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
+	REQ_VALIDATE_TEGU_ADMIN		// given a token validate that it is for the tegu user defined in our config
 	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
 	REQ_SETULCAP				// set a user link capacity
 	REQ_GETGW					// give a tenant ID and get it's gateway
@@ -104,6 +104,8 @@ const (
 	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
 	REQ_GET_PHOST_FROM_MAC		// used by mirroring to find the phost that goes with a MAC
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
+	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request
+	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 )
 
 const (
@@ -230,6 +232,7 @@ type Fq_req struct {
 	Resub	*string				// list of tables (space sep numbers) to resubmit to
 	Dscp	int					// dscp value that should be used for the traffic
 	Dscp_koe bool				// true if the value is to be kept on the packet as it leaves the environment
+	Ipv6	bool				// set to true to force ipv6 packet matching
 
 	Nxt_mac	*string				// mac of next hop (steering)
 	Lbmac	*string				// late binding mac

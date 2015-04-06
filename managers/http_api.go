@@ -108,18 +108,29 @@ func mk_resname( ) ( string ) {
 	The translated names are returned if _both_ are valid; error is set otherwise.
 	In addition, if a port number is added to a host name it is stripped and returned.
 
+	For IPv6 addresses, in order to be backwards compatable with the IPv4 notation of
+	address:port, we'll require the syntax [address]:port if a port is to be supplied
+	with an IPv6 address.
+
 	If the resulting host names match (project/host[:port]) then we return an error
 	as this isn't allowed.
 */
 func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, err error ) {
-
+	var ht *string
+	
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
 	p1 = &zero_string
 	p2 = &zero_string
 
+	if h1[0:1] == "!" {										// the external host needs to be h2 for flow-mod generation
+		hx := h1											// so switch them if !address is first.
+		h1 = h2
+		h2 = hx
+	}
+	
 	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this host
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this token/project pair for host
 	req = <- my_ch													// hard wait for response
 
 	if req.State != nil {
@@ -127,12 +138,16 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
+	ht, p1 = gizmos.Split_port( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	h1x = *ht
+	/*
 	h1x = *( req.Response_data.( *string ) )
 	tokens := strings.Split( h1x, ":" )
 	if len( tokens ) > 1 {
 		h1x = tokens[0]
 		p1 = &tokens[1]
 	}
+	*/
 
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
@@ -143,17 +158,21 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
-	h2x = *( req.Response_data.( *string ) )
-	if h1 == h2 {
+	ht, p2 = gizmos.Split_port( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	h2x = *ht
+	//h2x = *( req.Response_data.( *string ) )
+	if h1x == h2x {
 		err = fmt.Errorf( "host names are the same" )
 		return
 	}
 
+	/*
 	tokens = strings.Split( h2x, ":" )
 	if len( tokens ) > 1 {
 		h2x = tokens[0]
 		p2 = &tokens[1]
 	}
+	*/
 
 	return
 }
@@ -183,7 +202,7 @@ func is_admin_token( token *string ) ( bool ) {
 	defer close( my_ch )									// close it on return
 
 	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_ADMIN, token, nil )		// verify that the token is good for the admin (default) user given in the config file
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_TEGU_ADMIN, token, nil )		// verify that the token is good for the admin (default) user given in the config file
 	req = <- my_ch														// hard wait for response
 
 	if req.State == nil {
@@ -195,7 +214,28 @@ func is_admin_token( token *string ) ( bool ) {
 }
 
 /*
-	This function will validate the requestor is authorised to make the request based on the setting
+	Given a token test to see if any of the roles in the list are listed as roles by openstack.
+	Returns true if one or more are listed.
+*/
+func token_has_osroles( token *string, roles string ) ( bool ) {
+	dstr := *token + " " + roles					// osif expects single string, space separated token and list
+	
+	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
+	
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_HAS_ANY_ROLE, &dstr, nil )		// go check it out
+	req = <- my_ch														// hard wait for response
+
+	if req.State == nil {
+		return true
+	}
+
+	return false
+}
+
+/*
+	This function will validate the requestor is authorised to make the request based on the setting 
 	of priv_auth. When localhost, the request must have originated from the localhost. When token
 	the user must have sent a valid token for the admin user defined in the config file. When none,
 	we just return true.
@@ -463,7 +503,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "graph":
-					if validate_auth( &auth_data, is_token ) {
+					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" )) || validate_auth( &auth_data, is_token ) {
 						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 						if tmap["project"] != nil {
 							http_sheep.Baa( 1, "graph is forcing update of all VMs for the project: %s", *tmap["project"] )
@@ -507,7 +547,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "listhosts":											// list known host information
-					if validate_auth( &auth_data, is_token ) {
+					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" ))  ||  validate_auth( &auth_data, is_token ) {
 						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 						if tmap["project"] != nil {
 							http_sheep.Baa( 1, "listhosts is forcing update of all VMs for the project: %s", *tmap["project"] )
@@ -654,27 +694,14 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "reserve":
-						tmap := gizmos.Toks2map( tokens )	// allow cookie=string dscp=n bandw=in[,out] hosts=h1,h2 window=[start-]end
-						if len( tmap ) < 1  {
-							if ntokens < 4  {
-								nerrors++
-								reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1>[,<host2>] cookie dscp; received: %s", ntokens-1, recs[i] );
-								break
-							}
-
-							tmap["bandw"] = &tokens[1]			// less efficient, but easier to read and we don't do this enough to matter
-							tmap["window"] = &tokens[2]
-							tmap["hosts"] = &tokens[3]
-							tmap["cookie"] = &empty_str
-							dup_str := "0"
-							tmap["dscp"] = &dup_str
-							if ntokens > 4 {					// optional, cookie must be supplied if dscp is supplied
-								tmap["cookie"] = &tokens[4]
-								if ntokens > 5 {
-									tmap["dscp"] = &tokens[5]
-								}
-							}
-						}
+						key_list := "bandw window hosts cookie dscp" 
+						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
+						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
+						if !ok {
+							nerrors++
+							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] ); 
+							break
+						} 
 
 						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
 							subtokens := strings.Split( *tmap["bandw"], "," )
@@ -718,6 +745,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						}
 
 						if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+							if tmap["ipv6"] != nil {
+								res.Set_matchv6( *tmap["ipv6"] == "true" )
+							}
+							
 							reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
 							if ecount == 0 {
 								state = "OK"

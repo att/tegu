@@ -19,6 +19,7 @@
 #				2014 11 Aug - Added ping check that allows a proxy to be involved (always connects).
 #				2014 14 Aug - Added checking to ensure tegu not running on a stand-by host.
 #				2014 03 Sep - Changed empty checkpoint message to a verbose only message to be less confusing.
+#				2015 19 Mar - Moved crontable setup after ID validation. Corrected bug in -f parsing.
 # -----------------------------------------------------------------------------------------------------------------------------
 
 function bleat
@@ -94,11 +95,6 @@ proto=http							# -S will set to https
 ignore_cert=""						# -i will set this to -k for curl
 
 
-if [[ -r $etcd/crontab ]]		# ensure the crontab is cleaning things up
-then
-	crontab $etcd/crontab
-fi
-
 ### we assume that everything we need is in the path
 #if [[ $PATH != *"$TEGU_ROOT/bin"* ]]
 #then
@@ -110,7 +106,7 @@ do
 	case $1 in 
 		-a)	async=0;;
 		-C)	config=$2; shift;;
-		-f)	tegu_user=$LOGNAME; shift;;
+		-f)	tegu_user=$LOGNAME;;
 		-i)	ignore_cert="-k";;				# curl option to ignore selfsigned cert
 		-l)	log_file=$2; shift;;
 		-n)	verbose=1; forreal=0;;
@@ -140,10 +136,28 @@ do
 	shift
 done
 
+if [[ $tegu_user == "root" ]]				# don't ever allow root to run this
+then
+	echo "start tegu as another user (tegu perhaps); don't start as root   [FAIL]" >&2
+	exit 2
+fi
+
+my_id=$( id|sed 's/ .*//;' )
+if [[ $my_id != *"($tegu_user)" ]]
+then
+	echo "you ($my_id) are not the tegu user ($tegu_user) and thust cannot start tegu   [FAIL]" >&2
+	exit 2
+fi
+
 if [[ ! -d $etcd ]]
 then
 	echo "cannot find tegu 'etc' directory: $etcd  [FAIL]"
 	exit 1
+fi
+
+if [[ -r $etcd/crontab ]]		# ensure the crontab is cleaning things up
+then
+	crontab $etcd/crontab
 fi
 
 if [[ -f $standby_file ]]
@@ -151,12 +165,6 @@ then
 	echo "tegu not started -- this is a standby machine   [WARN]" >&2
 	echo "execute 'tegu_standby off' to turn stand-by mode off and then attempt to start with $0" >&2
 	exit 0
-fi
-
-if [[ $tegu_user == "root" ]]				# don't ever allow root to run this
-then
-	echo "start tegu as another user (tegu perhaps); don't start as root   [FAIL]" >&2
-	exit 2
 fi
 
 whoiam=$( id -n -u )

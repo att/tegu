@@ -30,6 +30,7 @@
 				14 Jan 2014 : Added ssh-broker support. (bump to 2.0)
 				25 Feb 2015 : Added mirroring (version => 2.1), command line flags comment, and "mirrirwiz" handling.
 				27 Feb 2015 : Allow fmod to be sent to multiple hosts (steering).
+				20 Mar 2015 : Added support for bandwidth flow-mod generation script.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -60,7 +61,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.1/13165"
+	version		string = "v2.1/13205"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -75,7 +76,9 @@ var (
 */
 type json_action struct {
 	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
-	Qdata	[]string			// queue parms
+	Aid		uint32				// action id to be sent in the response
+	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
+	Qdata	[]string			// queue parms 
 	Fdata	[]string			// flow-mod parms
 	Hosts	[]string			// hosts to execute on if a multihost command
 	Dscps	string				// space separated list of dscp values
@@ -96,6 +99,7 @@ type agent_msg struct {
 	Edata	[]string		// response error data
 	State	int				// if an ack/nack some state information
 	Vinfo	string			// agent version info for debugging
+	Rid		uint32			// original request id
 }
 //--- generic message functions ---------------------------------------------------------------------
 
@@ -179,8 +183,145 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 // --------------- request support (command execution) ----------------------------------------------------------
 
 /*
-	Generate a map that lists physical host and mac addresses. Timeout is the max number of
-	seconds that we will wait for all responses.  If timeout seconds passes before all
+	Builds an option string of the form -X value if value passed in is not nil, and an empty string if 
+	if the value is nil.  If the value is "true" or "True", then -X is returned, if value is "false"
+	or "False", then an empty string is returned.  Opt is the -X or --longname option to use. If
+	opt ends in an equal sign, (e.g. --longname=), then no space will separate the key and value
+	in the resulting string.
+*/
+
+func build_opt( value string, opt string ) ( parm string ) {
+	parm = ""
+
+	if value == "" {
+		return
+	}
+
+	have_eq := false
+	fmt_str := "%s %s "
+	li := len(opt) 					// last index 
+	if opt[li-1:li] == "=" {
+		fmt_str = "%s%s "
+		have_eq = true
+	} 
+
+	switch( value ) {
+		case "True", "true", "TRUE":
+			if have_eq {
+				parm = fmt.Sprintf( fmt_str, opt, value )		// --foo=true
+			} else {
+				parm = opt + " "								// just -f
+			}
+
+		case "False", "false", "FALSE":
+			if have_eq {								// need to output --foo=false in this case
+				parm = fmt.Sprintf( fmt_str, opt, value )
+			}
+
+		default:
+			parm = fmt.Sprintf( fmt_str, opt, value )
+		
+	}
+	
+	return
+	
+}
+
+/*	
+	Bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which 
+	eliminates the need for Tegu to understand/know things like command line parms, bridge names and
+	such.  Parms in the map are converted to script command line options.
+ */
+func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
+    var (
+		cmd_str string  
+    )
+	
+	pstr := ""
+	if path != nil {
+		pstr = fmt.Sprintf( "PATH=%s:$PATH ", *path )		// path to add if needed
+	}
+
+	parms := act.Data
+
+	cmd_str = fmt.Sprintf( `%sql_bw_fmods `, pstr ) +
+			build_opt( parms["smac"], "-s" ) +
+			build_opt( parms["dmac"], "-d" ) +
+			build_opt( parms["extip"], "-E" ) +
+			build_opt( parms["flvlan"],  "-v" ) +
+			build_opt( parms["koe"],  "-k" ) +
+			build_opt( parms["one_switch"],  "-o" ) +
+			build_opt( parms["sproto"],  "-p" ) +
+			build_opt( parms["dproto"],  "-P" ) +
+			build_opt( parms["queue"],  "-q" ) +
+			build_opt( parms["timeout"],  "-t" ) +
+			build_opt( parms["dscp"],  "-T" ) +
+			build_opt( parms["oneswitch"], "-o" )  +
+			build_opt( parms["ipv6"], "-6" ) 
+
+
+	sheep.Baa( 1, "via broker on %s: %s", act.Hosts[0], cmd_str )
+
+	msg := agent_msg{}				// build response to send back
+	msg.Ctype = "response"
+	msg.Rtype = cmd_type
+	msg.Rid = act.Aid				// response id so tegu can map back to requestor
+	msg.Vinfo = version
+	msg.State = 0					// assume success
+
+	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
+	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// for now, there will only ever be one host for these commands
+	if err != nil {
+		sheep.Baa( 1, "WRN: error submitting wa command  to %s: %s", act.Hosts[0], err )
+		jout, _ = json.Marshal( msg )
+		return
+	}
+
+	rdata := make( []string, 8192 )								// response output converted to strings
+	edata := make( []string, 8192 )
+	ridx := 0													// index of next insert point into rdata
+	wait4 := 1
+	timer_pop := false
+	for wait4 > 0 && !timer_pop {								// wait for response back on the channel or the timer to pop
+		select {
+			case <- time.After( timeout * time.Second ):		// timeout if we don't get something back soonish
+				sheep.Baa( 1, "WRN: timeout waiting for response to: %s", cmd_str )
+				timer_pop = true
+
+			case resp := <- ssh_rch:					// response from broker
+				wait4--
+				stdout, stderr, _, err := resp.Get_results()
+				host, _, _ := resp.Get_info()
+				eidx := buf_into_array( stderr, edata, 0 )			// capture error messages, if any
+				msg.Edata = edata[0:eidx]
+				if err != nil {
+					msg.State = 1
+					sheep.Baa( 1, "WRN: error running command: host=%s: %s", host, err )
+				} else {
+					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
+				}
+				if err != nil || sheep.Would_baa( 2 ) {
+					dump_stderr( stderr, "bw_fmod " + host )			// always dump stderr on error, or in chatty mode
+				}
+		}
+	}
+
+	msg.Rdata = rdata[0:ridx]										// return just what was filled in
+
+	if msg.State > 0 {
+		sheep.Baa( 1, "bw_fmod (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
+	} else {
+		sheep.Baa( 1, "bw_fmod cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+	}
+
+	jout, err = json.Marshal( msg )
+	return
+}
+
+/*
+	Generate a map that lists physical host and mac addresses. Timeout is the max number of 
+	seconds that we will wait for all responses.  If timeout seconds passes before all 
 	responses are received we will return what we have. The map command is executed on all
 	hosts, so we send a non-blocking command to the broker for each host and wait for the
 	responses to come back on the channel.  This allows them to run in parallel across
@@ -216,7 +357,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	rdata := make( []string, 8192 )		// might need to revisit this limit
 	ridx := 0
 
-	sheep.Baa( 1, "map_mac2phost: waiting for %d responses", wait4 )
+	sheep.Baa( 2, "map_mac2phost: waiting for %d responses", wait4 )
 	timer_pop := false						// indicates a timeout for loop exit
 	errcount := 0
 	for wait4 > 0 && !timer_pop {			// wait for responses back on the channel or the timer to pop
@@ -229,7 +370,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 				wait4--
 				stdout, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "map_mac2phost: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+				sheep.Baa( 2, "map_mac2phost: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
 					msg_009( "map_mac2phost", host )
 					errcount++
@@ -290,7 +431,7 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 				wait4--
 				_, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "setup-intermed: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+				sheep.Baa( 2, "setup-intermed: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
 					msg_009( "setup_intermed", host )
 					errcount++
@@ -371,7 +512,7 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 				wait4--
 				_, stderr, elapsed, err := resp.Get_results()
 				host, _, _ := resp.Get_info()
-				sheep.Baa( 1, "create-q: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
+				sheep.Baa( 2, "create-q: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
         			sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", host, fname, err )
 					errcount++
@@ -564,6 +705,13 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 			case "mirrorwiz":
 					do_mirrorwiz(req.Actions[i], broker, path)
+
+			case "bw_fmod":									// new bandwidth flow-mod
+					p, err := req.Actions[i].do_bw_fmod( req.Actions[i].Atype, broker, path, 15 )
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
 
 			default:
 				sheep.Baa( 0, "unknown action type received from tegu: %s", req.Actions[i].Atype )

@@ -60,6 +60,7 @@ type Pledge struct {
 	mbox_list	[]*Mbox		// list of middleboxes if the pledge is a steering pledge
 	mbidx		int			// insertion point into mblist
 	ptype		int			// pledge type from gizmos PT_ constants.
+	match_v6	bool		// true if we should force flow-mods to match on IPv6
 }
 
 /*
@@ -83,6 +84,7 @@ type Json_pledge struct {
 	Usrkey		*string
 	Ptype		int
 	Mbox_list	[]*Mbox
+	Match_v6	bool
 }
 
 // ---- private -------------------------------------------------------------------
@@ -154,6 +156,7 @@ func Mk_pledge( host1 *string, host2 *string, p1 *string, p2 *string, commence i
 		ptype:	PT_BANDWIDTH,
 		protocol:	&empty_str,
 		dscp_koe: dscp_koe,
+		match_v6: false,
 	}
 
 	if *usrkey != "" {
@@ -303,6 +306,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		return
 	}
 
+	/*
 	tokens := strings.Split( *jp.Host1, ":" )
 	p.host1 = &tokens[0]
 	if len( tokens ) > 1 {
@@ -313,7 +317,11 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		p.tpport1 = &dup_str
 		//p.tpport1 = 0
 	}
+	*/
+	p.host1, p.tpport1 = Split_port( jp.Host1 )		// suss apart host and port
+	p.host2, p.tpport2 = Split_port( jp.Host2 )
 
+	/*
 	tokens = strings.Split( *jp.Host2, ":" )
 	p.host2 = &tokens[0]
 	if len( tokens ) > 1 {
@@ -324,6 +332,7 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 		dup_str := "0"
 		p.tpport2 = &dup_str
 	}
+	*/
 
 	p.protocol = jp.Protocol
 	p.commence = jp.Commence
@@ -350,6 +359,13 @@ func (p *Pledge) From_json( jstr *string ) ( err error ){
 */
 func (p *Pledge) Set_qid( id *string ) {
 	p.qid = id
+}
+
+/*
+	Set match v6 flag based on user input.
+*/
+func (p *Pledge) Set_matchv6( state bool ) {
+	p.match_v6 = state
 }
 
 /*
@@ -772,6 +788,13 @@ func (p *Pledge) Commenced_recently( window int64 ) ( bool ) {
 */
 func (p *Pledge) Get_ptype( ) ( int ) {
 	return p.ptype
+}
+
+/*
+	Return whether the match on IPv6 flag is true
+*/
+func (p *Pledge) Get_matchv6() ( bool ) {
+	return p.match_v6
 }
 
 /*

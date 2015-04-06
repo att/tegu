@@ -247,7 +247,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 }
 
 /*
-	Verifies that the token passed in is a valid token for the default user given in the
+	Verifies that the token passed in is a valid token for the default user (a.k.a. the tegu admin) given in the
 	config file.
 	Returns "ok" (err is nil) if it is good, and an error otherwise. 	
 */
@@ -262,6 +262,32 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 	}
 
 	return err
+}
+
+/*
+	Given a token, return true if the token is valid for one of the roles listed in role.
+	Role is a list of space separated role names. 
+*/
+func has_any_role( admin *ostack.Ostack, token *string, roles *string ) ( found bool, err error ) {
+
+	stuff, err := admin.Crack_token( token ) 						// return a stuff struct with details about the token
+	
+	found = false													// assume the worst
+	if err == nil {
+		err = fmt.Errorf( "role not defined; %s", *roles )			// asume not
+		rtoks := strings.Split( *roles, "," )
+		for i := range rtoks {
+			if  stuff.Roles[rtoks[i]] {
+				err = nil 
+				found = true
+				return												// short out
+			}
+		}
+	} else {
+		osif_sheep.Baa( 1, "unable to verify role: %s", err )
+	}
+
+	return
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
@@ -701,10 +727,23 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, false )		// same process as validation but token not required
 				}
 
-			case REQ_VALIDATE_ADMIN:					// validate an admin token passed in
+			case REQ_VALIDATE_TEGU_ADMIN:					// validate that the token is for the tegu user
 				if msg.Response_ch != nil {
 					msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ), def_usr )
 					msg.Response_data = ""
+				}
+
+			case REQ_HAS_ANY_ROLE:							// given a token and list of roles, returns true if any role listed is listed by openstack for the token
+				if msg.Response_ch != nil {
+					d := msg.Req_data.( *string )
+					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
+					if len( dtoks ) > 1 {
+						msg.Response_data, msg.State = has_any_role( os_admin, &dtoks[0], &dtoks[1] )
+					} else { 
+						msg.State = fmt.Errorf( "has_any_role: bad input data" )
+						msg.Response_data = false
+					}
+
 				}
 
 			case REQ_PNAME2ID:							// user, project, tenant (what ever) name to ID

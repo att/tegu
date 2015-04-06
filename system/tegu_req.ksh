@@ -35,7 +35,7 @@
 #				25 Feb 2015 - Added mirror commands
 #				31 Mar 2015 - Added support for sending key-value pairs to listhosts and 
 #					graph commands.
-#				01 Apr 2015 - Corrected problem with token passed on steering request.
+#				01 Apr 2015 - Corrected bug with token passed on steering request.
 # ----------------------------------------------------------------------------------------
 
 function usage {

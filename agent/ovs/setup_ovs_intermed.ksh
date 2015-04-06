@@ -103,6 +103,8 @@
 #				12 Feb 2014 - Corrected issues with iptables function when running on a local host (ssh-broker)
 #				11 Mar 2015 - Allow intermdeiate queues not to be set, and to delete the flow-mods 
 #								associated with them if that option is taken.
+#				27 Mar 2015 - Defaults to _not_ setting the 180/190 flow-mods on br-int as the flow-mods
+#								now written by ql_bw_fmods do not need them.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -282,6 +284,7 @@ forreal=""
 allow_iptables=1		# -T turns this off
 allow_reset=1			# -D sets to 0 to prevent writing the dscp reset flowmods
 allow_irl=1				# -I turns off irl configuration
+allow_irl_meta=0		# -M turns on (not needed once VLAN trunking, bw_fmods, are in use)
 delete_data=0
 						# both host values set when -h given on the command line
 rhost=""				# given on commands like ovs_sp2uuid (will be -h foo)
@@ -317,6 +320,7 @@ do
 
 		-l)  log_file=$2; shift;;
 		-m)	min=$( expand $2 ); shift;;
+		-M)	allow_irl_meta=1;;
 		-n)	no_exec_str="no exec: " 
 			forreal="logit noexec (-n) mode: "
 			noexec="-n"
@@ -451,39 +455,46 @@ ovs_sp2uuid -a $rhost any |	awk \
 	}
 ' >$queue_data
 
-if [[ -s $rl_data ]]									# there is a rate limiting port on br-int, set the flow-mods to and from it
+if (( allow_irl_meta ))				# eventually this block of code can be removed, but we need it at least for the next release to clear the deaf fmods
 then
-	head -1 $rl_data | read rl_port tun_port junk		# port on br-int where rl-data pipe is attached 
-	if [[ -n $rl_port && -n $tun_port ]]
+	if [[ -s $rl_data ]]									# there is a rate limiting port on br-int, set the flow-mods to and from it
 	then
-		logit "setting rate limiting flow-mods from br-rl port $rl_port to patch-tun $tun_port and into br-rl	[OK]"
-																												# use a cookie different than all others as we delete all that match the cookie
-		irl_rc=0
-		# bug fix 227 send_ovs_fmod $noexec $rhost -t 0 -p 190 --match  --action del 0xdeaf br-int							# must delete the preivous ones on the off chance that the veth port changed
-		# irl_rc=$(( irl_rc += $? ))
-
-		# because we check for rate limiting before trying to set these, it is safe to invoke with -I and not duplicate the check
-		send_ovs_fmod $noexec $rhost -I -t 0 -p 999 --match -m 0x0/0x08 -i $tun_port --action -R ",98" -R ",0" -N add 0xdeaf br-int	# in from tunnel; set high meta flag (0x08) to prevent pushing into br-rl
-		irl_rc=$(( irl_rc += $? ))
-
-		send_ovs_fmod $noexec $rhost -I -t 0 -p 190 --match -i $rl_port  --action -o $tun_port add 0xdeaf br-int		# reservation f-mods are used to set the queue, so match after
-		irl_rc=$(( irl_rc += $? ))
-
-		send_ovs_fmod $noexec $rhost -I -T ${QL_M8_TABLE:-98} -t 0  --match --action -m 0x8/0x8  -N  add 0xbeef br-int	# cannot set meta before resub, so set in alternate table
-		irl_rc=$(( irl_rc += $? ))
-
-		send_ovs_fmod $noexec $rhost -I -t 0 -p 180 --match -m 0x02  --action -o $rl_port add 0xdeaf br-int 	#  packet matched outbound reservation rule; CAUTION: the match is a _hard_ value match not a mask match
-		irl_rc=$(( irl_rc += $? ))
-
-		if (( irl_rc != 0 ))
+		head -1 $rl_data | read rl_port tun_port junk		# port on br-int where rl-data pipe is attached 
+		if [[ -n $rl_port && -n $tun_port ]]
 		then
-			logit "CRI: unable to set one or more ingress rate limiting flow-mods. target-host: ${thost#* } [FAIL]	[QLTSOM000]"
+			logit "setting rate limiting flow-mods from br-rl port $rl_port to patch-tun $tun_port and into br-rl	[OK]"
+																													# use a cookie different than all others as we delete all that match the cookie
+			irl_rc=0
+			# bug fix 227 send_ovs_fmod $noexec $rhost -t 0 -p 190 --match  --action del 0xdeaf br-int							# must delete the preivous ones on the off chance that the veth port changed
+			# irl_rc=$(( irl_rc += $? ))
+
+			# because we check for rate limiting before trying to set these, it is safe to invoke with -I and not duplicate the check
+			send_ovs_fmod $noexec $rhost -I -t 0 -p 999 --match -m 0x0/0x08 -i $tun_port --action -R ",98" -R ",0" -N add 0xdeaf br-int	# in from tunnel; set high meta flag (0x08) to prevent pushing into br-rl
+			irl_rc=$(( irl_rc += $? ))
+
+			send_ovs_fmod $noexec $rhost -I -t 0 -p 190 --match -i $rl_port  --action -o $tun_port add 0xdeaf br-int		# reservation f-mods are used to set the queue, so match after
+			irl_rc=$(( irl_rc += $? ))
+
+			send_ovs_fmod $noexec $rhost -I -T ${QL_M8_TABLE:-98} -t 0  --match --action -m 0x8/0x8  -N  add 0xbeef br-int	# cannot set meta before resub, so set in alternate table
+			irl_rc=$(( irl_rc += $? ))
+
+			send_ovs_fmod $noexec $rhost -I -t 0 -p 180 --match -m 0x02  --action -o $rl_port add 0xdeaf br-int 	#  packet matched outbound reservation rule; CAUTION: the match is a _hard_ value match not a mask match
+			irl_rc=$(( irl_rc += $? ))
+
+			if (( irl_rc != 0 ))
+			then
+				logit "CRI: unable to set one or more ingress rate limiting flow-mods. target-host: ${thost#* } [FAIL]	[QLTSOM000]"
+			fi
+		else
+			logit "WRN: no rl_port or patch-tun port information was found; br-rl related flow-mods not set for target-host: ${thost#* } [QLTSOM001]" 	# these are warnings because it might be OK not to have br-rl active
 		fi
 	else
-		logit "WRN: no rl_port or patch-tun port information was found; br-rl related flow-mods not set for target-host: ${thost#* } [QLTSOM001]" 	# these are warnings because it might be OK not to have br-rl active
+		logit "WRN: ingress rate limiting flow mods not set -- OVS data missing from target-host: ${thost#* }    [QLTSOM002]"
 	fi
-else
-	logit "WRN: ingress rate limiting flow mods not set -- OVS data missing from target-host: ${thost#* }    [QLTSOM002]"
+else		# ensure these are turned off as they might get in the way
+	send_ovs_fmod $noexec $rhost -I -t 0 -p 999 --match -m 0x0/0x08  --action -R ",98" -R ",0" -N del 0xdeaf br-int	
+	send_ovs_fmod $noexec $rhost -I -t 0 -p 190 --match   --action  del 0xdeaf br-int
+	send_ovs_fmod $noexec $rhost -I -t 0 -p 180 --match -m 0x02  --action  del 0xdeaf br-int
 fi
 
 if (( verbose ))

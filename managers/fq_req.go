@@ -13,7 +13,10 @@
 package managers
 
 import (
+	"fmt"
 	"encoding/json"
+	"time"
+
 	"codecloud.web.att.com/tegu/gizmos"
 )
 
@@ -49,6 +52,7 @@ func Mk_fqreq( id *string )  ( np *Fq_req ) {
 		Table:	0,
 		Output: &output,			// default to no output
 		Dscp_koe: false,
+		Ipv6:	false,
 	}
 
 	return
@@ -89,3 +93,53 @@ func ( fq *Fq_req ) To_json( ) ( *string, error ) {
 	return &s, err
 }
 
+/*
+	Build a map suitable for use as parms for a bandwidth request to the agent manager.
+	The agent bandwidth flow-mod generator takes a more generic set of parameters
+	and the match/action information is "compressed".
+
+	OVS doesn't accept DSCP values, but shifted values (e.g. 46 == 184), so we shift
+	the DSCP value given to be what OVS might want as a parameter.
+*/
+func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
+	fmap = make( map[string]string )
+
+	if fq == nil {
+		return
+	}
+
+	if fq.Match.Smac != nil {
+		fmap["smac"] = *fq.Match.Smac
+	} else {
+		fmap["smac"] = ""
+	}
+	if fq.Match.Dmac != nil {
+		fmap["dmac"] = *fq.Match.Dmac
+	} else {
+		fmap["dmac"] = ""
+	}
+	fmap["extip"] = *fq.Extip
+	fmap["queue"] =  fmt.Sprintf( "%d", fq.Espq.Queuenum )
+	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )						// shift left 2 bits to match what OVS wants
+	fmap["ipv6"] =  fmt.Sprintf( "%v", fq.Ipv6 )							// force ipv6 fmods is on
+	fmap["timeout"] =  fmt.Sprintf( "%d", fq.Expiry - time.Now().Unix() )
+	//fmap["mtbase"] =  fmt.Sprintf( "%d", fq.Mtbase )
+	fmap["oneswitch"] = fmt.Sprintf( "%v", fq.Single_switch )
+	fmap["koe"] = fmt.Sprintf( "%v", fq.Dscp_koe )
+	if fq.Tptype != nil && *fq.Tptype != "none" {
+		if fq.Match.Tpsport != nil && *fq.Match.Tpsport != "0" {
+			fmap["sproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpsport )
+		}
+		if fq.Match.Tpdport != nil && *fq.Match.Tpdport != "0" {
+			fmap["dproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpdport )
+		}
+	}
+
+/*
+for k, v := range fmap {
+	fmt.Fprintf( os.Stderr, "fq_req to map >>>> %s = %s\n", k, v )
+}
+*/
+
+	return
+}
