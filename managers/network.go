@@ -53,6 +53,7 @@
 				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the 
 					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
 					as the endpoint 'name'. 
+				25 Mar 2015 - IPv6 changes.
 */
 
 package managers
@@ -146,11 +147,11 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 		}
 		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
 
-		for ip, mac := range n.ip2mac {				// add in regular VMs
+		for ip, mac := range n.ip2mac {							// add in regular VMs
 			vmid := n.ip2vmid[ip]
 			if vmid != nil && mac != nil {						// skip if we don't find a vmid
 				if n.vmid2phost[*vmid] != nil {
-					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					net_sheep.Baa( 2, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
 					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
 					i++
 				} else {
@@ -159,7 +160,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 			}
 		}
 
-		if n.gwmap != nil {						// add in the gateways which are not reported by openstack
+		if n.gwmap != nil {										// add in the gateways which are not reported by openstack
 			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
 				for mac, ip := range n.gwmap {
 					if n.mac2phost[mac] == nil {
@@ -351,6 +352,7 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 	return
 }
 
+
 /*
 	Accepts a list (string) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
 	the list based on spaces and adds each information segment to the queue map.  If ep_only is true, 
@@ -388,14 +390,14 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	err = nil									// at the moment we are always successful
 	seen := make( map[string]int, 100 )			// prevent dups which occur because of double links
 
-	for _, link := range n.links {					// for each link in the graph
+	for _, link := range n.links {				// for each link in the graph
 		s := link.Queues2str( ts )
-		qlist2map( seen, &s, ep_only )						// add these to the map
+		qlist2map( seen, &s, ep_only )	// add these to the map
 	}
 
-	for _, link := range n.vlinks {					// and do the same for vlinks
+	for _, link := range n.vlinks {				// and do the same for vlinks
 		s := link.Queues2str( ts )
-		qlist2map( seen, &s, ep_only )						// add these to the map
+		qlist2map( seen, &s, ep_only )			// add these to the map
 	}
 
 	qmap = make( []string, len( seen ) )
@@ -659,22 +661,30 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 
 	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
-			if len( hlist[i].Ipv4 ) > 0 {
-				ip4 = hlist[i].Ipv4[0]; 		//TODO: we need to associate all ips with the host; for now just the first
-			} else {
-				ip4 = ""
-			}
-			if len( hlist[i].Ipv6 ) > 0 {
+			ip6 = ""
+			ip4 = ""
+
+			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this does snarf everything
+				if strings.Index( hlist[i].Ipv4[0], ":" ) >= 0 {	// if emulating floodlight, we get both kinds of IP in this field, one per hlist entry (ostack yields unique mac for each ip)
+					ip6 = hlist[i].Ipv4[0];
+				} else {
+					ip4 = hlist[i].Ipv4[0];
+				}
+			} 
+			if len( hlist[i].Ipv6 ) > 0 &&  hlist[i].Ipv6[0] != "" {			// if getting from floodlight, then it will be here, and we may have to IPs on the same NIC
 				ip6 = hlist[i].Ipv6[0]; 
-			} else {
-				ip6 = ""
-			}
+			} 
 
 			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
 			vmid := &empty_str
 			if old_net.ip2vmid != nil {
-				if old_net.ip2vmid[ip4] != nil {
-					vmid = old_net.ip2vmid[ip4]
+				key := ip4
+				if key == "" {
+					key = ip6
+				}
+				
+				if old_net.ip2vmid[key] != nil {
+					vmid = old_net.ip2vmid[key]
 					h.Add_vmid( vmid ) 
 				}
 			}
@@ -682,14 +692,14 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			for j := range hlist[i].AttachmentPoint {
 				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
 				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
-				if ssw != nil {							// it should always be known, but no chances
+				if ssw != nil {																	// it should always be known, but no chances
 					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
 					net_sheep.Baa( 4, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
 				}
 			}
 
 			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 3, "build: saving host ip4=%s as mac: %s", ip4, hlist[i].Mac[0] )
+			net_sheep.Baa( 2, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
 			if ip4 != "" {
 				n.hosts[ip4] = h
 			}
@@ -744,11 +754,13 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
 	the VM doesn't have a floating IP. 
 */
-func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair ) {
+func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
 	var (
 		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different tenants
 		h2_auth bool = true
 	)
+
+	err = nil
 
 	if strings.Index( *h1ip, "/" ) < 0 {					// no tenant id in the name we have to assume in the same realm
 		pair_list = make( []host_pair, 1 )
@@ -836,7 +848,8 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
 	} else {
 		if g2 == nil {
-			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation no-router??? <-> %s", *h2ip )
+			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation no-g2-router??? <-> %s", *h2ip )
+			err = fmt.Errorf( "unable to create partial pair reservation to %s: no router", *h2ip )
 		} else {
 			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
 		}
@@ -850,6 +863,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	} else {
 		if g1 == nil {
 			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation no-g1-router???? <-> %s",  *h1ip )
+			err = fmt.Errorf( "unable to create partial pair reservation to %s: no router", *h2ip )
 		} else {
 			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
 		}
@@ -1000,6 +1014,11 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		lcap_trip bool = false		// local capacity trip flag; indicates one or more paths blocked by capacity limits
 	)
 
+	if h1nm == nil || h2nm == nil {
+		net_sheep.Baa( 1, "IER:	find_paths: one/both names is/are nil  h1 nil=%v  h2 nil=%v", h1nm == nil, h2nm == nil )
+		return 0, nil, false
+	}
+
 	h1 = n.hosts[*h1nm]
 	if h1 == nil {
 		path_list = nil
@@ -1145,7 +1164,11 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	path_list = nil
 	if n == nil { return }
 
-	pair_list := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different tenants
+	pair_list, err := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different tenants
+	if err != nil {
+		net_sheep.Baa( 1, "unable to build path: %s", err )
+		return
+	}
 	if pair_list == nil {										// likely no fip for one or the other VMs
 		return
 	}
@@ -1169,7 +1192,12 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation 
 			}
 		} else {
-			net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", *pair_list[i].h1, *pair_list[i].h2, cap_trip )
+			if pair_list[i].h1 != nil && pair_list[i].h2 != nil {											 // pair might be nil if no gateway; don't stack dump
+				net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", *pair_list[i].h1, *pair_list[i].h2, cap_trip )	
+			} else {
+				net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", h1nm, h2nm,  cap_trip )
+			}
+
 			if cap_trip {
 				lcap_trip = true
 			}
@@ -1349,7 +1377,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		mlag_paths 		bool = true			// can be set to false in config (mlag_paths); overrides find_all_paths
 		link_headroom int = 0				// percentage that each link capacity is reduced by
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
-		limits map[string]*gizmos.Fence			// user link capacity boundaries
+		limits map[string]*gizmos.Fence		// user link capacity boundaries
 		phost_suffix *string = nil
 
 		ip2		*string

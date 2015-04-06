@@ -9,11 +9,24 @@
 	Author:		E. Scott Daniels
 
 	CFG:		These config file variables are used when present:
-					default:alttable = n  The OVS table number to be used for metadata marking.
+					default:alttable -  The OVS table number to be used for metadata marking.
+
+					default:queue_type -  If "endpoint" then we only generate endpoint queues, not intermediate
+									switch queues.
 
 					resmgr:ckpt_dir	- name of the directory where checkpoint data is to be kept (/var/lib/tegu)
 									FWIW: /var/lib/tegu selected based on description:
 									http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
+
+					resmgr:verbose	- Defines the initial verbose setting for reservation manager bleater
+
+					deprecated - resmgr:set_vlan - If true (default) then we flag fq-mgr to add vlan setting to flow-mods
+
+					resmgr:super_cookie - A cookie that can be used to manage any reservation.
+
+					resmgr:hto_limit - The hard timeout limit that should be used to reset flow-mods on long reservation.
+
+					resmgr:res_refresh - The rate (seconds) that reservations are refreshed if hto-limit is non-zero.
 
 
 	TODO:		need a way to detect when skoogie/controller has been reset meaning that all
@@ -52,7 +65,10 @@
 						written only when there are updates.
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
 				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
-				17 March 2015 : lite version of resmgr brought more in line with steering.
+				17 Mar 2015 : lite version of resmgr brought more in line with steering.
+				25 Mar 2015 : Reservation pushing only happens after a new queue list is received from netmgr
+						and sent to fq-mgr. The exception is if the hard swtich timeout pops where reservations
+						are pushed straight away (assumption is that queues don't change).
 */
 
 package managers
@@ -241,9 +257,11 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
 	next 15 seconds).  Also handles undoing any mirror reservations that have expired.
 
+	Favour_v6 is passed to push_bw and will favour the IPv6 address if a host has both addresses defined.
+
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, hto_limit int64 ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_limit int64, pref_v6 bool ) ( npushed int ) {
 	var (
 		bw_push_count	int = 0
 		st_push_count	int = 0
@@ -254,20 +272,11 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, set_vl
 	rm_sheep.Baa( 4, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! p.Is_pushed() {
-			/*
-			table 9x fmods are sent with queues to avoid blasting to every host
-			if ! set_alt {
-				table9x_fmods( &rname, alt_table, "0x01/0x01", 0xe5d )		// ensure alternate table meta marking flowmods exist
-				table9x_fmods( &rname, alt_table+1, "0x02/0x02", 0xe5d )
-				set_alt = true
-			}
-			*/
-
 			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 				switch p.Get_ptype() {
 					case gizmos.PT_BANDWIDTH:
 						bw_push_count++
-						push_bw_reservations( p, &rname, ch, set_vlan, hto_limit )
+						push_bw_reservations( p, &rname, ch, hto_limit, alt_table, pref_v6 )
 				}
 			} else {
 				pend_count++
@@ -404,7 +413,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 						if req.Response_data != nil {
 							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 							p.Set_path_list( path_list )
-							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", p.Get_id, *h1, *h2, len( path_list ) )
+							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *p.Get_id, *h1, *h2, len( path_list ) )
 							err = i.Add_res( p )
 						} else {
 							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
@@ -658,7 +667,6 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 	var (
-		set_vlan	bool = true			// set the vlan tag on forward ingress flow mods
 		inv	*Inventory
 		msg	*ipc.Chmsg
 		ckptd	string
@@ -669,6 +677,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
 		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
 		rr_rate		int = 3600			// refresh rate (1 hour)
+		favour_v6 bool = true			// favour ipv6 addresses if a host has both defined. 
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -691,6 +700,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		alt_table = clike.Atoi( *p )
 	}
 
+	p = cfg_data["default"]["favour_ipv6"]
+	if p != nil {
+		favour_v6 = *p == "true"
+	}
+
 	if cfg_data["resmgr"] != nil {
 		cdp := cfg_data["resmgr"]["chkpt_dir"]
 		if cdp == nil {
@@ -704,10 +718,12 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
 
+		/*
 		p = cfg_data["resmgr"]["set_vlan"]
 		if p != nil {
 			set_vlan = *p == "true"
 		}
+		*/
 
 		p = cfg_data["resmgr"]["super_cookie"]
 		if p != nil {
@@ -808,22 +824,22 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
 					rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
 					tmsg := ipc.Mk_chmsg( )
-					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr
+					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr and trigger flow-mod push
 				}
 				last_qcheck = now
 
-			case REQ_PUSH:								// driven every few seconds to push new reservations
+			case REQ_PUSH:								// driven every few seconds to check for need to refresh because of switch max timeout setting
 				if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
 					now := time.Now().Unix()
 					if now > res_refresh {
 						rm_sheep.Baa( 2, "refreshing all reservations" )	
 						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
 						res_refresh = now + int64( rr_rate )		// push everything again in an hour
+
+						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// force a push of all
 					}
 				}
 
-				//inv.push_bw_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )
-				inv.push_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
@@ -852,6 +868,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				fq_data[FQ_QLIST] = msg.Response_data
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
+
+				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
 				
 			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 				if msg.Response_ch != nil {
@@ -862,6 +880,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )
 				msg.Response_data = nil
 				msg.State = fmt.Errorf( "res_mgr: unknown message (%d)", msg.Msg_type )
+				msg.Response_ch = nil				// we don't respond to these.
 		}
 
 		rm_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )

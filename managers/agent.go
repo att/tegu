@@ -46,9 +46,12 @@ import (
 
 type action struct {			// specific action
 	Atype	string				// something like map_mac2phost, or intermed_queues
+	Aid		uint32				// action id to be sent in the response
+	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
 	Hosts	[]string			// list of hosts to apply the action to
 	Dscps	string				// space separated list of dscp values
 	Fdata	[]string			// flowmod command data
+	Qdata	[]string			// queue parms 
 }
 
 type agent_cmd struct {			// overall command
@@ -79,6 +82,7 @@ type agent_msg struct {
 	Rdata	[]string		// response data
 	State	int				// if an ack/nack some state information 
 	Vinfo	string			// agent verion (dbugging mostly)
+	Rid		uint32			// original request id
 }
 
 /*
@@ -226,10 +230,19 @@ func ( a *agent ) process_input( buf []byte ) {
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
 			
 							default:	
-								am_sheep.Baa( 1, "WRN:  unrecognised response type from agent: %s  [TGUAGT001]", req.Rtype )
+								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )
+								if am_sheep.Would_baa( 2 ) {
+									am_sheep.Baa( 2, "first few ignored messages from response:" )
+									for i := 0; i < len( req.Rdata ) && i < 10; i++ {
+										am_sheep.Baa( 2, "[%d] %s", i, req.Rdata[i] )
+									}
+								}
 						}
 				} else {
-					am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s  [TGUAGT002]", req.Rtype )
+					am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: %s  [TGUAGT002]", req.Rtype )
+					for i := 0; i < len( req.Rdata ) && i < 20; i++ {
+						am_sheep.Baa( 2, "  [%d] %s", i, req.Rdata[i] )
+					}
 				}
 
 				default:

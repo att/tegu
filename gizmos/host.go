@@ -16,6 +16,8 @@
 				of attachment points seem not to be ordered.
 
 	Mod:		29 Jun 2014 - Changes to support user link limits.
+				26 Mar 2015 - Added Get_address() function to return one address with 
+					favourtism if host has both addresses defined.
 */
 
 package gizmos
@@ -64,6 +66,11 @@ func Mk_host( mac string, ip4 string, ip6 string ) (h *Host) {
 	Destruction
 */
 func ( h *Host ) Nuke() {
+
+	if h == nil {
+		return
+	}
+
 	h.conns = nil
 	h.ports = nil
 }
@@ -83,6 +90,10 @@ func (h *Host) Add_switch( sw *Switch, port int ) {
 		new_conns	[]*Switch
 		new_ports	[]int
 	)
+
+	if h == nil {
+		return
+	}
 
 	if h.cidx >= len( h.conns ) {						// out of room, extend and copy to new
 		new_conns = make( []*Switch, h.cidx + 10 )
@@ -109,6 +120,10 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 	s = nil
 	p = -1
 
+	if h == nil {
+		return
+	}
+
 	if i < len( h.conns ) {
 		s = h.conns[i]
 		p = h.ports[i]
@@ -124,6 +139,10 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 */
 func (h *Host) Get_port( s *Switch ) ( int ) {
 	var p int
+
+	if h == nil {
+		return -1
+	}
 
 	for p = 0; p < h.cidx; p++ {
 		if h.conns[p] == s {
@@ -149,15 +168,39 @@ func (h *Host) Iterate_switch_port( data interface{}, cb func( *Switch, int, int
 	Return both IP address strings or nil
 */
 func ( h *Host ) Get_addresses( ) ( ip4 *string, ip6 *string ) {
+	if h == nil {
+		return nil, nil
+	}
+
 	ip4 = &h.ip4
 	ip6 = &h.ip6
 	return
 }
 
 /*
+	Return one of the IP addresses associated with the host. If both are defined the IPv6 addr
+	is returned in favour of the IP v4 address if pref_v6 is true.
+*/
+func( h *Host ) Get_address( pref_v6 bool ) ( *string ) {
+	if h == nil {
+		return nil
+	}
+
+	if (h.ip6 != "" && pref_v6) || h.ip4 == "" {
+		return &h.ip6
+	}
+	
+	return &h.ip4
+}
+
+/*
 	Return the number of connections
 */
 func ( h *Host ) Get_nconns( ) ( int ) {
+	if h == nil {
+		return 0
+	}
+
 	return h.cidx
 }
 
@@ -165,6 +208,10 @@ func ( h *Host ) Get_nconns( ) ( int ) {
 	return a pointer to the string that has the mac address
 */
 func (h *Host) Get_mac( ) (s *string) {
+	if h == nil {
+		return nil
+	}
+
 	return &h.mac
 }
 
@@ -172,6 +219,10 @@ func (h *Host) Get_mac( ) (s *string) {
 	generate a string of the basic info
 */
 func (h *Host) To_str( ) ( s string ) {
+	if h == nil {
+		return ""
+	}
+
 	s = fmt.Sprintf( "{ host: %s ",  h.mac )
 	if h.ip4 != "" {
 		s += fmt.Sprintf( "ip4: %s ",  h.ip4 )
@@ -255,6 +306,9 @@ func (h *Host) Ports2json( ) ( s string ) {
 	var (
 		sep string = ""
 	)
+	if h == nil {
+		return `{ "mac": "null-host" }`
+	}
 
 	s = fmt.Sprintf( `{ "host": { "ip4": %q, "mac": %q, "conns": [`, h.ip4, h.mac )
 	for i := 0; i < h.cidx; i++ {

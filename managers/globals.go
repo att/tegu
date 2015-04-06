@@ -80,7 +80,7 @@ const (
 	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
 	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
 	REQ_GENCREDS				// generate crdentials
-	REQ_VALIDATE_ADMIN			// validate an admin token
+	REQ_VALIDATE_TEGU_ADMIN		// given a token validate that it is for the tegu user defined in our config
 	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
 	REQ_SETULCAP				// set a user link capacity
 	REQ_XLATE_HOST				// translate a [token/][project/]hostname into ID/hostname without validation of token if it exits.
@@ -89,6 +89,8 @@ const (
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
+	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request
+	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 	
 )
 
@@ -191,6 +193,7 @@ type Fq_req struct {
 	Resub	*string				// list of tables (space sep numbers) to resubmit to
 	Dscp	int					// dscp value that should be used for the traffic
 	Dscp_koe bool				// true if the value is to be kept on the packet as it leaves the environment
+	Ipv6	bool				// set to true to force ipv6 packet matching
 
 	Nxt_mac	*string				// mac of next hop (steering)
 	Lbmac	*string				// late binding mac
