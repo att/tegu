@@ -93,6 +93,8 @@
 				10 Feb 2015 : Corrected bug with refresh. 
 				18 Feb 2015 : Corrected bug with slice index and enabled both host name types on create queue list.
 				11 Mar 2015 : Corrected bug in network manager causing coredump when gateway info missing on bleat message.
+				25 Mar 2015 : Added support for IPv6 in bandwidth reservations, and new bandwidth flow-mod script in the agent.
+				03 Apr 2015 : Added role verification for graph and listhosts to allow any admin to submit these from afar.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -127,7 +129,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.0.2/13125"		// for usage and passed on manager initialisation so ping responds with this too.
+		version		string = "v3.0.2/14035"		// for usage and passed on manager initialisation so ping responds with this too.
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
