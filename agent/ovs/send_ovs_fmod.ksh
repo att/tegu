@@ -64,6 +64,7 @@
 #				20 Mar 2015 - -V now accepts an optional mac addres and strips the vlan tag only if the
 #								associated port is NOT a trunk (trinity).
 #				27 Mar 2015 - Added IPv6 support.
+#				07 Apr 2015 - Ensure correct behaviour if proto: given as prototype instead of proto:0.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -422,7 +423,7 @@ do
 
 				-m)	warn=1; match+="metadata=$2 "; shift;;
 				-p)	match+="nw_proto=$( str2nwproto ${2%%:*} ) " 		# get protocol:port for src
-					if [[ ${2##*:} != "0" ]]
+					if [[ ${2##*:} != "0"  && ${2##*:} != "" ]]			# assume udp:  is same as udp:0
 					then
 						match+="tp_src=${2##*:} " 
 					fi
@@ -430,7 +431,7 @@ do
 					;;
 
 				-P) match+="nw_proto=$( str2nwproto ${2%%:*} ) "		# get protocol:port for dest
-					if [[ ${2##*:} != "0" ]]
+					if [[ ${2##*:} != "0"  && ${2##*:} != "" ]]			# assume proto:  is same as proto:0
 					then
 						match+="tp_dst=${2##*:} " 
 					fi
