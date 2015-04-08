@@ -103,6 +103,7 @@
 #						- static queue0 is on by default, -S turns it off
 #						- queues are no longer written to egress VMs unless -e is set
 #						- outward queues (port == -128) are written only to qosirl interfaces unless -A is set
+#				08 Apr 2015 - Corrected typos in error messages.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -623,7 +624,7 @@ then
 	fi
 	if (( rc > 0 ))
 	then
-		logit "CRI: unble to set quuees on bridges, target-host: ${rhost#* }    [FAIL]  [QLTCOQ000]"
+		logit "CRI: unable to set queues on bridges, target-host: ${rhost#* }    [FAIL]  [QLTCOQ000]"
 	fi
 fi
 
