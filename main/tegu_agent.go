@@ -16,6 +16,7 @@
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
 				14 Jan 2015 : Added ssh-broker support. (bump to 2.0)
 				20 Mar 2015 : Added support for bandwidth flow-mod generation script.
+				09 Apr 2015 : Added ql_set_trunks to list of scripts to rsync.
 */
 
 package main
@@ -42,7 +43,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.0/13205"
+	version		string = "v2.0/14095"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -624,6 +625,8 @@ func main() {
 			"/usr/bin/purge_ovs_queues " +
 			"/usr/bin/ql_setup_irl " +
 			"/usr/bin/send_ovs_fmod " +
+			"/usr/bin/ql_bw_fmods " +
+			"/usr/bin/ql_set_trunks " +
 			"/usr/bin/setup_ovs_intermed "
 
 	if home == "" {
