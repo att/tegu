@@ -855,9 +855,11 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 	fmt.Fprintf( out,  "\"reqstate\":[ " )				// wrap request output into an array
 	state = "OK"
 	for i := 0; i < len( recs ); i++ {
+		http_sheep.Baa( 3, "delete received buffer (%s)", recs[i] )
+
 		ntokens, tokens = token.Tokenise_qpopulated( recs[i], " " )		// split and keep populated tokens (treats successive sep chrs as one), preserves spaces in "s
 
-		if ntokens < 1 || tokens[0][0:1] == "#" {			// skip comments or blank lines
+		if ntokens < 1 || len( tokens[0] ) < 2 || tokens[0][0:1] == "#" {		// prevent issues if empty line, skip comment.
 			continue
 		}
 
