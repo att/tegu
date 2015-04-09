@@ -402,21 +402,23 @@ func get_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 	}
 
 	if pid == nil {
-		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s",  *(msg.Req_data.( *string )) )  // might be !project/vm, and so this is ok
-		msg.State = fmt.Errorf( "%s could not be mapped to a osif_project", *(msg.Req_data.( *string )) )
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to an project (nil pid): %s",  *(msg.Req_data.( *string )) )  // might be !project/vm, and so this is ok
+		msg.State = fmt.Errorf( "%s could not be mapped to an osif_project", *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
 		return
 	}
 
 	p := os_projs[*pid]
 	if p == nil {
-		msg.State = fmt.Errorf( "%s could not be mapped to a osif_project", *(msg.Req_data.( *string )) )
+		osif_sheep.Baa( 1, "get hostinfo: %s mapped to a pid; pid did not map to project: %s", *(msg.Req_data.( *string )), *pid )
+		msg.State = fmt.Errorf( "%s could not be mapped to an osif_project", *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
 		return
 	}
 
 	creds := os_refs[*pname]
 	if creds == nil {
+		osif_sheep.Baa( 1, "get hostinfo: %s mapped to a project; did not map to creds: %s", *(msg.Req_data.( *string )), *pname )
 		msg.State = fmt.Errorf( "%s could not be mapped to openstack creds ", *pname )
 		msg.Response_ch <- msg
 		return
