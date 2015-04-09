@@ -56,8 +56,9 @@
 				18 Nov 2014 : Changes to support lazy osif data fetching
 				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
 					an ip2mac map to be forced out to fqmgr.
-				16 Jan 2014 : Support port masks in flow-mods.
-				27 Jan 2014 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
+				16 Jan 2015 : Support port masks in flow-mods.
+				27 Jan 2015 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
+				08 Apr 2015 : Corrected slice bounds error if input record was empty (e.g. '', no newline) 
 */
 
 package managers
@@ -421,7 +422,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 	for i := 0; i < len( recs ); i++ {
 		ntokens, tokens = token.Tokenise_qpopulated( recs[i], " " )		// split and keep populated tokens (treats successive sep chrs as one), preserves spaces in "s
 
-		if ntokens < 1 || tokens[0][0:1] == "#" {
+		if ntokens < 1 || len( tokens[0] ) < 2 || tokens[0][0:1] == "#" {		// prevent issues if empty line, skip comment.
 			continue
 		}
 
