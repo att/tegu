@@ -3,14 +3,14 @@
 /*
 
 	Mnemonic:	http_api
-	Abstract:	This provides an api interface based on http (shudders) RESTish. 
-				The main method here is expected to be driven as a go routine from 
+	Abstract:	This provides an api interface based on http (shudders) RESTish.
+				The main method here is expected to be driven as a go routine from
 				the main tegu function.
 
 				The main work functions (parse_get, parse_post, parse_delete) all generate
 				json formatted data to the output device (we assume back to the requesting
-				browser/user-agent).  The output should be an array (reqstate) with one "object" describing 
-				the result of each request, and a final object (endstate) describing the overall state. 
+				browser/user-agent).  The output should be an array (reqstate) with one "object" describing
+				the result of each request, and a final object (endstate) describing the overall state.
 
 				These requests are supported:
 					POST:
@@ -28,8 +28,8 @@
 						reservation
 
 
-					limited commands must be submitted from the host that Tegu is running on using the 
-					IPV4 localhost address -- this assumes that only admins will have access to the 
+					limited commands must be submitted from the host that Tegu is running on using the
+					IPV4 localhost address -- this assumes that only admins will have access to the
 					host and thus can issue the administrative commands.
 
 	Date:		20 November 2013 (broken out of initial test on 2 Dec)
@@ -40,25 +40,28 @@
 				22 May 2014 : Now forces a checkpoint after a successful reservation.
 				06 Jun 2014 : Added support to listen on https rather than http
 				10 Jun 2014 : Added requirement that certain admin commands be issued from localhost.
-				16 Jun 2014 : Added token validation for priv requests and added listhosts and graph to 
+				16 Jun 2014 : Added token validation for priv requests and added listhosts and graph to
 					the set of priv commands.
 				18 Jun 2014 : Corrected bug that was causing incorrect json goo when generating an error.
-				20 Jun 2014 : Corrected bug that allowed a reservation between the same host (VM) name. 
+				20 Jun 2014 : Corrected bug that allowed a reservation between the same host (VM) name.
 				29 Jun 2014 : Changes to support user link limits.
 				07 Jul 2014 : Change to drop the request to network manager on delete; reservation manager
-					now sends that request to tighten up the timing between the two. 
+					now sends that request to tighten up the timing between the two.
 					Added support for reservation refresh.
 				17 Jul 2014 : Corrected typo in localhost validation check.
 				18 Jul 2014 : Added better error messaging when unable to open a listening port.
 				15 Aug 2014 : Corrected bug (201) -- refresh not giving rejection message when rejecting.
-				24 Sep 2014 : Added support for ITONS traffic class demands. 
+				24 Sep 2014 : Added support for ITONS traffic class demands.
 				09 Oct 2014 : Allow verbose even if network not initialised correctly.
 				18 Nov 2014 : Changes to support lazy osif data fetching
 				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
 					an ip2mac map to be forced out to fqmgr.
 				16 Jan 2015 : Support port masks in flow-mods.
 				27 Jan 2015 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
-				08 Apr 2015 : Corrected slice bounds error if input record was empty (e.g. '', no newline) 
+				08 Apr 2015 : Corrected slice bounds error if input record was empty (e.g. '', no newline)
+				10 Apr 2015 : Seems some HTTP clients refuse or are unable to send a body on a DELETE.
+					Extended the POST function to include a "cancelres" request. Sheesh.  It would be
+					much simpler to listen on a socket and accept newline terminated messages; rest sucks.
 */
 
 package managers
@@ -93,11 +96,11 @@ import (
 func mk_resname( ) ( string ) {
 	r := res_nmseed
 	res_nmseed++
-	return fmt.Sprintf( "res%x_%05d", pid, r ); 
+	return fmt.Sprintf( "res%x_%05d", pid, r );
 }
 
 /*
-	Validate the h1 and h2 strings translating the project name to a tenant ID if present. 
+	Validate the h1 and h2 strings translating the project name to a tenant ID if present.
 	The translated names are returned if _both_ are valid; error is set otherwise.
 	In addition, if a port number is added to a host name it is stripped and returned.
 
@@ -106,7 +109,7 @@ func mk_resname( ) ( string ) {
 	with an IPv6 address.
 
 	If the resulting host names match (project/host[:port]) then we return an error
-	as this isn't allowed. 
+	as this isn't allowed.
 */
 func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, err error ) {
 	var ht *string
@@ -184,10 +187,10 @@ func is_localhost( a *string ) ( bool ) {
 }
 
 /*
-	Given what is assumed to be an admin token, verify it. The admin ID is assumed to be the 
-	ID defined as the default user in the config file. 
+	Given what is assumed to be an admin token, verify it. The admin ID is assumed to be the
+	ID defined as the default user in the config file.
 
-	Returns true if the token could be authorised. 
+	Returns true if the token could be authorised.
 */
 func is_admin_token( token *string ) ( bool ) {
 
@@ -228,12 +231,12 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 }
 
 /*
-	This function will validate the requestor is authorised to make the request based on the setting 
+	This function will validate the requestor is authorised to make the request based on the setting
 	of priv_auth. When localhost, the request must have originated from the localhost. When token
-	the user must have sent a valid token for the admin user defined in the config file. When none, 
-	we just return true. 
+	the user must have sent a valid token for the admin user defined in the config file. When none,
+	we just return true.
 
-	Returns true if the command can be allowed; false if not. 
+	Returns true if the command can be allowed; false if not.
 */
 func validate_auth( data *string, is_token bool ) ( allowed bool ) {
 	if priv_auth == nil {
@@ -259,7 +262,7 @@ func validate_auth( data *string, is_token bool ) ( allowed bool ) {
 	return false
 }
 
-// ------------------------------------------------------------------------------------------------------ 
+// ------------------------------------------------------------------------------------------------------
 
 /*
 	pull the data from the request (the -d stuff from churl -d)
@@ -281,7 +284,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	is successful, then we'll send the reservation off to reservation manager to do the rest (push flow-mods
 	etc.)  The return values may seem odd, but are a result of breaking this out of the main parser which
 	wants two reason strings and a count of errors in order to report an overall status and a status of
-	each request that was received from the outside world. 
+	each request that was received from the outside world.
 */
 func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
@@ -328,9 +331,9 @@ func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string
 
 
 /*
-	Gathers information about the host from openstack, and if known inserts the information into 
-	the network graph. If block is true, then we will block on a repl from network manager. 
-	If update_fqmgr is true, then we will also send osif a request to update the fqmgr with 
+	Gathers information about the host from openstack, and if known inserts the information into
+	the network graph. If block is true, then we will block on a repl from network manager.
+	If update_fqmgr is true, then we will also send osif a request to update the fqmgr with
 	data that might ahve changed as a result of lazy gathering of info by the get_hostinfo
 	request.  If block is set, then we block until osif acks the request. This ensures
 	that the request has been given to fq-mgr which is single threaded and thus will process
@@ -364,12 +367,12 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 		if block {
 			_ = <- my_ch
 		}	
-	} 
+	}
 }
 
 
 
-// ---- main parsers ------------------------------------------------------------------------------------ 
+// ---- main parsers ------------------------------------------------------------------------------------
 /*
 	parse and react to a POST request. we expect multiple, newline separated, requests
 	to be sent in the body. Supported requests:
@@ -385,8 +388,8 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 		listconns <hostname|hostip>
 
 
-	Because this is drien from within the go http support library, we expect a few globals 
-	to be in our envronment to make things easier.  
+	Because this is drien from within the go http support library, we expect a few globals
+	to be in our envronment to make things easier.
 		accept_requests	bool	set to true if we can accept and process requests. if false any
 								request is failed.
 */
@@ -432,7 +435,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 			ntokens--
 			is_token = true
 		} else {
-			auth_data = sender 
+			auth_data = sender
 			is_token = false
 		}
 
@@ -445,13 +448,19 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 			http_sheep.Baa( 3, "processing request: %s", tokens[0] )
 			switch tokens[0] {
 
+				case "cancelres":												// cancel reservation
+					err := delete_reservation( tokens )
+					if err != nil {
+						reason = fmt.Sprintf( "%s", err )
+					}
+
 				case "chkpt":
 					if validate_auth( &auth_data, is_token ) {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 						state = "OK"
 						reason = "checkpoint was requested"
-					} 
+					}
 
 				case "graph":
 					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" )) || validate_auth( &auth_data, is_token ) {
@@ -466,7 +475,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						} else {
 							reason = "no output from network thread"
 						}
-					} 
+					}
 		
 				case "listulcaps":											// list user link capacities known to network manager
 					if validate_auth( &auth_data, is_token ) {
@@ -480,7 +489,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						} else {
 							reason = fmt.Sprintf( "%s", req.State )
 						}
-					} 
+					}
 		
 				case "listhosts":											// list known host information
 					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" ))  ||  validate_auth( &auth_data, is_token ) {
@@ -494,7 +503,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						} else {
 							reason = fmt.Sprintf( "%s", req.State )
 						}
-					} 
+					}
 				
 				case "listres":											// list reservations
 					req = ipc.Mk_chmsg( )
@@ -512,7 +521,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				case "listconns":								// generate json describing where the named host is attached (switch/port)
 					if ntokens < 2 {
 						nerrors++
-						reason = fmt.Sprintf( "incorrect number of parameters supplied (%d) 1 expected: usage: attached2 hostname", ntokens-1 ); 
+						reason = fmt.Sprintf( "incorrect number of parameters supplied (%d) 1 expected: usage: attached2 hostname", ntokens-1 );
 					} else {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( nw_ch, my_ch, REQ_LISTCONNS, &tokens[1], nil )
@@ -545,7 +554,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								reason = fmt.Sprintf( "s", req.State )
 							}
 						}
-					} 
+					}
 
 				case "ping":
 					reason = ""
@@ -563,7 +572,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						sep := ""						// local scope not to trash the global var
 						for i := range m {
 							jreason += fmt.Sprintf( "%s%q", sep, m[i] )
-							sep = "," 
+							sep = ","
 						}
 						jreason += " ] }"
 						reason = "active queues"
@@ -615,14 +624,14 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "reserve":
-						key_list := "bandw window hosts cookie dscp" 
+						key_list := "bandw window hosts cookie dscp"
 						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
 						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
 						if !ok {
 							nerrors++
-							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] ); 
+							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] );
 							break
-						} 
+						}
 
 						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
 							subtokens := strings.Split( *tmap["bandw"], "," )
@@ -637,7 +646,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
 						h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
-						res = nil 
+						res = nil
 						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 
 						if err == nil {
@@ -656,7 +665,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								}
 								if dscp <= 0 {
 									err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
-								} 
+								}
 							}
 		
 							if err == nil {
@@ -810,7 +819,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 	if nerrors > 0 {
 		state = "ERROR"		// must set on the off chance that last request was ok
-	} 
+	}
 
 	if req_count <= 0 {
 		msg = fmt.Sprintf( "no requests found in input" )
@@ -828,29 +837,71 @@ func parse_put( out http.ResponseWriter, recs []string, sender string ) (state s
 	return
 }
 
+
+/*  Actually delete a reservation based on tokens passed in. Called from either the delete parser or from
+	the post parser so we can support broken http clients.
+
+	Tokens are the tokens from the request. token[0] is assumed to be the request name and is ignored
+	as it could be different depending on the source of the call (POST vs DELETE).
+
+	err will be nil on success. */
+func delete_reservation( tokens []string ) ( err error ) {
+
+	var (
+		my_ch		chan *ipc.Chmsg
+	)
+
+	my_ch = make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	defer close( my_ch )
+
+	ntokens := len( tokens )
+	if ntokens < 2 || ntokens > 3  {
+		err = fmt.Errorf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received %d tokens", len( tokens ) - 1 )
+	} else {
+		del_data := make( []*string, 2, 2 )			// delete data is the reservation name and the cookie if supplied
+		del_data[0] = &tokens[1]
+		if ntokens < 3 {
+			del_data[1] = &empty_str
+
+		} else {
+			del_data[1] = &tokens[2]
+		}
+
+		req := ipc.Mk_chmsg( )
+		req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
+		req = <- my_ch										// wait for delete response
+	
+		if req.State == nil {
+			err = nil
+		} else {
+			err = req.State
+		}
+	}
+
+	return
+}
+
 /*
 	Delete something. Currently only reservation is supported, but there might be other
 	things in future to delete, so we require a token 0 that indiccates what.
 
 	Supported delete actions:
 		reservation <name> [<cookie>]
+
+	Seems that some HTTP clients cannot send, or refuse to send, a body on a DELETE making deletes
+	impossible from those environments.  So this is just a wrapper that invokes yet another layer
+	to actually process the request. Gotta love REST.
 */
 func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( state string, msg string ) {
 	var (
 		sep			string = ""							// json output list separator
 		req_count	int = 0								// requests processed this batch
-		req			*ipc.Chmsg								// also used to receive a response
 		tokens		[]string								// parsed tokens from the http data
 		ntokens		int
 		nerrors		int = 0								// overall error count -- final status is error if non-zero
 		jdetails	string = ""							// result details in json
 		comment		string = ""							// comment about the state
-		my_ch		chan *ipc.Chmsg
-		del_data	[]*string								// data sent on delete
 	)
-
-	my_ch = make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
-	defer close( my_ch )
 
 	fmt.Fprintf( out,  "\"reqstate\":[ " )				// wrap request output into an array
 	state = "OK"
@@ -867,33 +918,16 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		state = "ERROR"
 		jdetails = ""
 
-		http_sheep.Baa( 2, "delete command for %s", tokens[0] )
+		http_sheep.Baa( 2, "parse_delete for %s", tokens[0] )
 		switch tokens[0] {
 			case "reservation":									// expect:  reservation name(id) [cookie]
-				if ntokens < 2 || ntokens > 3  {
-					nerrors++
-					comment = fmt.Sprintf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received '%s'", recs[i] ); 
+				err := delete_reservation( tokens )
+				if err == nil {
+					comment = "reservation successfully deleted"
+					state = "OK"
 				} else {
-					del_data = make( []*string, 2, 2 )			// delete data is the reservation name and the cookie if supplied
-					del_data[0] = &tokens[1]
-					if ntokens < 3 {
-						del_data[1] = &empty_str
-
-					} else {
-						del_data[1] = &tokens[2]
-					}
-
-					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
-					req = <- my_ch										// wait for delete response 
-
-					if req.State == nil {
-						comment = "reservation successfully deleted"
-						state = "OK"
-					} else {
-						nerrors++
-						comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
-					}
+					nerrors++
+					comment = fmt.Sprintf( "reservation delete failed: %s", err )
 				}
 
 			default:
@@ -915,7 +949,7 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 
 	if nerrors > 0 {
 		state = "ERROR"		// must set on the off chance that last request was ok
-	} 
+	}
 
 	if req_count <= 0 {
 		msg = fmt.Sprintf( "no requests found in input" )
@@ -936,16 +970,16 @@ func parse_get( out http.ResponseWriter, recs []string, sender string ) (state s
 
 /*
 	Deal with input from the other side; this is invoked directly by the http listener.
-	Because we are driven as a callback, and cannot controll the parameters passed in, we 
+	Because we are driven as a callback, and cannot controll the parameters passed in, we
 	must (sadly) rely on globals for some information; sigh. (There might be a way to deal
-	with this using a closure, but I'm not taking the time to go down that path until 
+	with this using a closure, but I'm not taking the time to go down that path until
 	other more important things are implemented.)
 
 	This function splits input, on either newlines or semicolons, into records. The array
 	of records is then passed to the appropriate parse function based on the http method
-	(PUT, GET, etc) that was used by the user-agent. 
+	(PUT, GET, etc) that was used by the user-agent.
 
-	Output to the client process is a bunch of {...} "objects", one per record, 
+	Output to the client process is a bunch of {...} "objects", one per record,
 	plus a final overall status; all are collected in square brackets and thus
 	should be parsable as json.
 */
@@ -1054,7 +1088,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		}
 	}
 
-	http.HandleFunc( "/tegu/api", deal_with )				// define callback 
+	http.HandleFunc( "/tegu/api", deal_with )				// define callback
 	if ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "" {
 		if  create_cert {
 			http_sheep.Baa( 1, "creating SSL certificate and key: %s %s", *ssl_cert, *ssl_key )
