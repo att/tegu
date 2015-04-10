@@ -31,6 +31,7 @@
 				25 Feb 2015 : Added mirroring (version => 2.1), command line flags comment, and "mirrirwiz" handling.
 				27 Feb 2015 : Allow fmod to be sent to multiple hosts (steering).
 				20 Mar 2015 : Added support for bandwidth flow-mod generation script.
+				09 Apr 2015 : Added ql_set_trunks to list of scripts to rsync.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -61,7 +62,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.1/13205"
+	version		string = "v2.1/14105"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -745,9 +746,11 @@ func main() {
 			"/usr/bin/purge_ovs_queues " +
 			"/usr/bin/ql_setup_irl " +
 			"/usr/bin/send_ovs_fmod " +
-			"/usr/bin/setup_ovs_intermed " +
 			"/usr/bin/tegu_add_mirror " +
-			"/usr/bin/tegu_del_mirror "
+			"/usr/bin/tegu_del_mirror " +
+			"/usr/bin/ql_bw_fmods " +
+			"/usr/bin/ql_set_trunks " +
+			"/usr/bin/setup_ovs_intermed "
 
 	if home == "" {
 		home = "/home/tegu"					// probably bogus, but we'll have something

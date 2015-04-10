@@ -62,6 +62,10 @@
 				24 Feb 2015 : prevent interface issue in steer parsing and adjust to work with lazy update.
 				30 Mar 2015 : Added support to force a project's VMs into the current graph.
 				01 Apr 2015 : Corrected cause of nil ptr exception in steering reqest parsing.
+				08 Apr 2015 : Corrected slice bounds error if input record was empty (e.g. '', no newline)
+				10 Apr 2015 : Seems some HTTP clients refuse or are unable to send a body on a DELETE.
+					Extended the POST function to include a "cancelres" request. Sheesh.  It would be
+					much simpler to listen on a socket and accept newline terminated messages; rest sucks.
 */
 
 package managers
@@ -235,7 +239,7 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 }
 
 /*
-	This function will validate the requestor is authorised to make the request based on the setting 
+	This function will validate the requestor is authorised to make the request based on the setting
 	of priv_auth. When localhost, the request must have originated from the localhost. When token
 	the user must have sent a valid token for the admin user defined in the config file. When none,
 	we just return true.
@@ -471,7 +475,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 	for i := 0; i < len( recs ); i++ {
 		ntokens, tokens = token.Tokenise_qpopulated( recs[i], " " )		// split and keep populated tokens (treats successive sep chrs as one), preserves spaces in "s
 
-		if ntokens < 1 || tokens[0][0:1] == "#" {
+		if ntokens < 1 || len( tokens[0] ) < 2 || tokens[0][0:1] == "#" {		// prevent issues if empty line, skip comment.
 			continue
 		}
 
@@ -493,6 +497,12 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 			http_sheep.Baa( 3, "processing request: %s", tokens[0] )
 			switch tokens[0] {
+
+				case "cancelres":												// cancel reservation
+					err := delete_reservation( tokens )
+					if err != nil {
+						reason = fmt.Sprintf( "%s", err )
+					}
 
 				case "chkpt":
 					if validate_auth( &auth_data, is_token ) {
@@ -694,14 +704,14 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "reserve":
-						key_list := "bandw window hosts cookie dscp" 
+						key_list := "bandw window hosts cookie dscp"
 						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
 						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
 						if !ok {
 							nerrors++
-							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] ); 
+							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] );
 							break
-						} 
+						}
 
 						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
 							subtokens := strings.Split( *tmap["bandw"], "," )
@@ -1002,36 +1012,80 @@ func parse_put( out http.ResponseWriter, recs []string, sender string ) (state s
 	return
 }
 
+
+/*  Actually delete a reservation based on tokens passed in. Called from either the delete parser or from
+	the post parser so we can support broken http clients.
+
+	Tokens are the tokens from the request. token[0] is assumed to be the request name and is ignored
+	as it could be different depending on the source of the call (POST vs DELETE).
+
+	err will be nil on success. */
+func delete_reservation( tokens []string ) ( err error ) {
+
+	var (
+		my_ch		chan *ipc.Chmsg
+	)
+
+	my_ch = make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	defer close( my_ch )
+
+	ntokens := len( tokens )
+	if ntokens < 2 || ntokens > 3  {
+		err = fmt.Errorf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received %d tokens", len( tokens ) - 1 )
+	} else {
+		del_data := make( []*string, 2, 2 )			// delete data is the reservation name and the cookie if supplied
+		del_data[0] = &tokens[1]
+		if ntokens < 3 {
+			del_data[1] = &empty_str
+
+		} else {
+			del_data[1] = &tokens[2]
+		}
+
+		req := ipc.Mk_chmsg( )
+		req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
+		req = <- my_ch										// wait for delete response
+	
+		if req.State == nil {
+			err = nil
+		} else {
+			err = req.State
+		}
+	}
+
+	return
+}
+
 /*
 	Delete something. Currently only reservation is supported, but there might be other
 	things in future to delete, so we require a token 0 that indiccates what.
 
 	Supported delete actions:
 		reservation <name> [<cookie>]
+
+	Seems that some HTTP clients cannot send, or refuse to send, a body on a DELETE making deletes
+	impossible from those environments.  So this is just a wrapper that invokes yet another layer
+	to actually process the request. Gotta love REST.
 */
 func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( state string, msg string ) {
 	var (
 		sep			string = ""							// json output list separator
 		req_count	int = 0								// requests processed this batch
-		req			*ipc.Chmsg								// also used to receive a response
 		tokens		[]string								// parsed tokens from the http data
 		ntokens		int
 		nerrors		int = 0								// overall error count -- final status is error if non-zero
 		jdetails	string = ""							// result details in json
 		comment		string = ""							// comment about the state
-		my_ch		chan *ipc.Chmsg
-		del_data	[]*string								// data sent on delete
 	)
-
-	my_ch = make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
-	defer close( my_ch )
 
 	fmt.Fprintf( out,  "\"reqstate\":[ " )				// wrap request output into an array
 	state = "OK"
 	for i := 0; i < len( recs ); i++ {
+		http_sheep.Baa( 3, "delete received buffer (%s)", recs[i] )
+
 		ntokens, tokens = token.Tokenise_qpopulated( recs[i], " " )		// split and keep populated tokens (treats successive sep chrs as one), preserves spaces in "s
 
-		if ntokens < 1 || tokens[0][0:1] == "#" {			// skip comments or blank lines
+		if ntokens < 1 || len( tokens[0] ) < 2 || tokens[0][0:1] == "#" {		// prevent issues if empty line, skip comment.
 			continue
 		}
 
@@ -1039,33 +1093,16 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		state = "ERROR"
 		jdetails = ""
 
-		http_sheep.Baa( 2, "delete command for %s", tokens[0] )
+		http_sheep.Baa( 2, "parse_delete for %s", tokens[0] )
 		switch tokens[0] {
 			case "reservation":									// expect:  reservation name(id) [cookie]
-				if ntokens < 2 || ntokens > 3  {
-					nerrors++
-					comment = fmt.Sprintf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received '%s'", recs[i] );
+				err := delete_reservation( tokens )
+				if err == nil {
+					comment = "reservation successfully deleted"
+					state = "OK"
 				} else {
-					del_data = make( []*string, 2, 2 )			// delete data is the reservation name and the cookie if supplied
-					del_data[0] = &tokens[1]
-					if ntokens < 3 {
-						del_data[1] = &empty_str
-
-					} else {
-						del_data[1] = &tokens[2]
-					}
-
-					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
-					req = <- my_ch										// wait for delete response
-
-					if req.State == nil {
-						comment = "reservation successfully deleted"
-						state = "OK"
-					} else {
-						nerrors++
-						comment = fmt.Sprintf( "reservation delete failed: %s", req.State )
-					}
+					nerrors++
+					comment = fmt.Sprintf( "reservation delete failed: %s", err )
 				}
 
 			default:

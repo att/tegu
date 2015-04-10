@@ -28,6 +28,7 @@
 #					to start without the ha daemon. 
 #			20 Feb 2015 - Added -u option to killall to supress warnings from killall
 #			10 Mar 2015 - Corrected missing tegu_user on the ha start in standby.
+#			09 Apr 2015 - Corrected typo in forcedown logic.
 #----------------------------------------------------------------------------------------
 trap "" 15				# prevent killall from killing the script when run from service
 
@@ -89,7 +90,7 @@ case "$1" in
 
   forcedown)											# force tegu and agents down; ha might well restart them
 	set +e
-	su -c "killall -u $tegu_uer tegu_agent"
+	su -c "killall -u $tegu_user tegu_agent"
 	su -c "killall -u $tegu_user tegu"
 	;;
 

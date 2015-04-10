@@ -103,6 +103,8 @@
 #						- static queue0 is on by default, -S turns it off
 #						- queues are no longer written to egress VMs unless -e is set
 #						- outward queues (port == -128) are written only to qosirl interfaces unless -A is set
+#				08 Apr 2015 - Corrected typos in error messages, must call ql_set_trunks to set up trunks on 
+#					the qosirl0 interface.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -247,6 +249,7 @@ static_q0size=1			# -S disables; causes q0 to be statically sized rather than va
 egress_queue=0			# set a queue into (egress) the VM (off by default, -E sets it so we create one)
 all_outward_ports=0		# -A and -l enables this; if off, then we set queues only on br-rl's qosirl0 port
 gen_q1=1				# -g disables; generate a 'synthetic' q1 for outward queues assuming setup intermediate queues is disabled
+noexec_arg=""			# set to -n by -n to pass to various things
 
 while [[ $1 == -* ]]
 do
@@ -270,7 +273,7 @@ do
 		-k)	purge_ok=0;;
 		-l) all_outward_ports=1; limit+="$2 "; shift;;		# implies all outward ports
 		-L)	log_file=$2; shift;;
-		-n)	purge_ok=0; delete_data=0; forreal=0;;
+		-n)	purge_ok=0; delete_data=0; forreal=0; noexec_arg="-n";;
 		-s)	static_q0size=1;;					# now the default, but backward compatable
 		-S) static_q0size=0;;
 		-v) verbose=1;;
@@ -299,6 +302,8 @@ if (( $(id -u) != 0 ))
 then
 	sudo="sudo"					# must use sudo for the ovs-vsctl commands
 fi
+
+ql_set_trunsk $noexec_arg		# must set trunks on the qos-irl interface
 
 if [[ -z $1 ]]			# assume data on stdin
 then
@@ -623,7 +628,7 @@ then
 	fi
 	if (( rc > 0 ))
 	then
-		logit "CRI: unble to set quuees on bridges, target-host: ${rhost#* }    [FAIL]  [QLTCOQ000]"
+		logit "CRI: unable to set queues on bridges, target-host: ${rhost#* }    [FAIL]  [QLTCOQ000]"
 	fi
 fi
 

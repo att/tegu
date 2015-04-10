@@ -101,6 +101,7 @@
 				31 Mar 2015 : Added abilty to force a load of any specific project's VM data into the graph, or all that are
 							known to Tegu. 
 				03 Apr 2015 : Added role verification for graph and listhosts to allow any admin to submit these from afar.
+				10 Apr 2015 : Added ability to delete reservation via post, corrected slice bounds error (tokeniser library fix).
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -136,7 +137,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.3/14035"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
+		version		string = "v3.1.3/14105"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
