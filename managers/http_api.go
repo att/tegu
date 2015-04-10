@@ -452,6 +452,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					err := delete_reservation( tokens )
 					if err != nil {
 						reason = fmt.Sprintf( "%s", err )
+					} else {
+						jreason = fmt.Sprintf( "reservation was cancelled (deleted): %s", tokens[1] )
+						state = "OK"
+						reason = ""
 					}
 
 				case "chkpt":
