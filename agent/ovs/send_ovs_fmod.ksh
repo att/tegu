@@ -64,6 +64,7 @@
 #				20 Mar 2015 - -V now accepts an optional mac addres and strips the vlan tag only if the
 #								associated port is NOT a trunk (trinity).
 #				27 Mar 2015 - Added IPv6 support.
+#				10 Apr 2015 - Correct typo in set address type function.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -166,9 +167,9 @@ function addr_type
 {
 	case $1 in
 		*:*:*)	echo "$ip6_type ipv6";;
-		*.*.*)	echo "$ip4type nw";;
+		*.*.*)	echo "$ip4_type nw";;
 		*)		logit "WRN: unrecognised address type, assuming ipv4: $1"
-				echo "$ip4type nw";;
+				echo "$ip4_type nw";;
 	esac
 }
 
