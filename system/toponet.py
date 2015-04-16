@@ -134,7 +134,6 @@ def parseLldpCtl(file, hosts, thisHost=None, ifacelist=set()):
                 current_host = normalizeHostname(current_host)
                 current_iface = iface
                 current_link = Link(current_host + '@' + current_iface, "-128")
-                current_link.capacity = DEF_HOSTCAPACITY
             else: # New link found, but we don't need it
                 current_link = None             
         elif current_link and re.search('-----------', line):
@@ -520,6 +519,9 @@ class TopoGen:
 def cli_main(argv=None):
     '''Command line options.'''
 
+    global DEF_HOSTCAPACITY
+    global DEF_SWITCHCAPACITY
+
     prog_name = os.path.basename(sys.argv[0])
     prog_ver = "v0.1"
     prog_build_date = "%s" % __updated__
@@ -583,7 +585,7 @@ def cli_main(argv=None):
                         help="set verbosity level [default: %default]")
 
     parser.set_defaults(outJsonFile="-")
-    parser.set_defaults(hostcap="1000000000")
+    parser.set_defaults(hostcap=DEF_HOSTCAPACITY)
     
     parser.set_defaults(ostack=False)
     parser.set_defaults(snmp=False)
