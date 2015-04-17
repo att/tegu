@@ -73,6 +73,7 @@
 				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 				01 Apr 2015 - Corrected bug introduced by requiring a validate token to have a non
 						empty host which is legit for steering.
+				16 Apr 2015 - Pick up and use a region parameter from the config file.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -87,7 +88,7 @@ import (
 	//"io"
 	"os"
 	"strings"
-	//"time"
+	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
 	"codecloud.web.att.com/gopkgs/clike"
@@ -393,17 +394,38 @@ func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err
 }
 
 /*
-	Gets an openstack interface object for the admin user.
+	Gets an openstack interface object for the admin user (tegu user id as defined in the config file).
+	This function blocks until it gets them AND can successfully authenticate.
 */
-func get_admin_creds( url *string, usr *string, passwd *string, project *string ) ( creds *ostack.Ostack ) {
+func get_admin_creds( url *string, usr *string, passwd *string, project *string, region *string ) ( creds *ostack.Ostack ) {
 	creds = nil
+
 	if url == nil || usr == nil || passwd == nil {
+		osif_sheep.Baa( 1, "cannot generate default tegu creds: no url, usr and/or password" );
 		return
 	}
 
-	creds = ostack.Mk_ostack( url, usr, passwd, project )		// project isn't known or needed for this
+	creds = ostack.Mk_ostack_region( url, usr, passwd, project, region )		// project isn't known or needed for this
 
-	return
+	if creds == nil {
+		osif_sheep.Baa( 1, "cannot generate default tegu creds: nil returned from library call" )
+		return 
+	}
+
+	for {
+		err := creds.Authorise()		// must ensure we can authorise before we can continue
+		if err == nil {
+			r_str := "default"
+			if region != nil {
+				r_str = *region
+			}
+			osif_sheep.Baa( 1, "tegu user (admin) creds were allocated and authorised with region: %s", r_str )
+			return
+		}
+
+		osif_sheep.Baa( 1, "unable to authenticate tegu (admin) creds: %s", err )
+		time.Sleep( time.Second * 60 )
+	}
 }
 
 /*
@@ -485,6 +507,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		def_usr		*string
 		def_url		*string
 		def_project	*string
+		def_region	*string
 	)
 
 	osif_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
@@ -510,6 +533,11 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			}
 		}
 	
+		p = cfg_data["osif"]["region"] 
+		if p != nil {
+			def_region = p
+		}
+
 		p = cfg_data["osif"]["ostack_list"] 				// preferred placement in osif section
 		if p == nil {
 			p = cfg_data["default"]["ostack_list"] 			// originally in default, so backwards compatable
@@ -534,7 +562,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	} else {
 		// TODO -- investigate getting id2pname maps from each specific set of creds defined if an overarching admin name is not given
 
-		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project )
+		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project, def_region )		// this will block until we authenticate
 		if os_admin != nil {
 			osif_sheep.Baa( 1, "admin creds generated, mapping tenants" )
 			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the initial translation maps
@@ -546,9 +574,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			id2pname = make( map[string]*string )				// empty maps and we'll never generate a translation from project name to tenant ID since there are no default admin creds
 			pname2id = make( map[string]*string )
 			if def_project != nil {
-				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, %s) to authorise with openstack  [TGUOSI009]", def_usr, def_project )
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, proj=%s, reg=%s) to authorise with openstack  [TGUOSI009]", def_usr, def_project, def_region )
 			} else {
-				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, no-project) to authorise with openstack  [TGUOSI009]", def_usr )	// YES msg ids are duplicated here
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, proj=no-project, reg=%s) to authorise with openstack  [TGUOSI009]", def_usr, def_region )	// YES msg ids are duplicated here
 			}
 		}
 

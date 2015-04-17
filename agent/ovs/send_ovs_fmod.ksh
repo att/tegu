@@ -65,6 +65,7 @@
 #								associated port is NOT a trunk (trinity).
 #				27 Mar 2015 - Added IPv6 support.
 #				07 Apr 2015 - Ensure correct behaviour if proto: given as prototype instead of proto:0.
+#				10 Apr 2015 - Correct typo in set address type function.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -167,9 +168,9 @@ function addr_type
 {
 	case $1 in
 		*:*:*)	echo "$ip6_type ipv6";;
-		*.*.*)	echo "$ip4type nw";;
+		*.*.*)	echo "$ip4_type nw";;
 		*)		logit "WRN: unrecognised address type, assuming ipv4: $1"
-				echo "$ip4type nw";;
+				echo "$ip4_type nw";;
 	esac
 }
 

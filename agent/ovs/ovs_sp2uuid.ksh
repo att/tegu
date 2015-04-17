@@ -40,6 +40,10 @@
 #				10 Dec 2014 - Reert the default to dropping interfaces marked as internal as some 
 #					gateways (router) are marked by quantum as internal.
 #				28 Dec 2015 - Prevent actually using ssh if the host given with -h is the localhost.
+#				14 Apr 2015 - Added call to filter_rtr which should eliminate any Openstack routers
+#					that are left in the OVS database, but aren't actually on the host.
+#					NOTE: filter router can be used ONLY if this script is executing on the local
+#					host and not if it's sending ovs commands to a remote host.
 # -----------------------------------------------------------------------------------------------
 
 # echos out the ovs commands that are needed to run in an ssh on the remote system
@@ -56,7 +60,23 @@ function cat_ovs_cmds
 endKat
 }
 
+# pass the standard in through the filter_router unless we are running this command on behalf
+# of another host. We assume the output from this script is being piped to this function
+# as ql_filter_rtr expects it on stdin.
+function filter
+{
+	if (( filter )) && [[ -z $ssh_host ]]		# cannot filter if target host is not local
+	then
+		ql_filter_rtr				# lop off routers that OVS reports, but aren't actually here
+	else
+		cat							# useful use of cat :)
+	fi
+}
+
+# --------------------------------------------------------------------------------------------------
+
 keep="/dev/null"
+filter=1					# -f can set to 0 to disable the filter
 show_adtl=0
 ssh_host=""
 rhost="localhost"
@@ -68,6 +88,7 @@ do
 	case $1 in 
 		-a)	show_adtl=1;;
 		-d)	data=$2; shift;;
+		-f)	filter=0;;
 		-h)	
 			if [[ $2 != $(hostname) && $2 != "localhost" ]]
 			then
@@ -256,6 +277,6 @@ fi
 		}
 	}
 
-'
+' | filter
 exit $?
 
