@@ -32,6 +32,10 @@ do
 done
 
 cache=/tmp/ql_rmac.cache
+if [[ -f /tmp/ql_filter_rtr.v ]]		# preliminary testing; delete next go round of changes
+then
+	verbose=1
+fi
 
 need=0
 if [[ ! -s $cache  ]]					# generate if empty or missing
@@ -40,7 +44,7 @@ then
 else
 	ts=$( stat -c %Y $cache )			# last mod time of the cache
 	now=$( date +%s )
-	if (( now - ts > $age ))
+	if (( now - ts > age ))
 	then
 		need=1
 	fi
@@ -51,9 +55,13 @@ then
 	echo "snarfing netns data"
 	ip netns | grep "qrouter-" | while read r 			# suss out the list of router name spaces
 	do 
-		echo "suss from $r   [OK]" >&2
+		if (( verbose ))
+		then
+			echo "suss from $r   [OK]" >&2
+		fi
 		sudo ip netns exec $r ifconfig | grep HWaddr	# query each name space, get all associated mac addresses
 	done >/tmp/PID$$.cache								# prevent accidents if multiple copies running
+
 	mv /tmp/PID$$.cache $cache							# if multiple copies running, this is atomic
 fi
 

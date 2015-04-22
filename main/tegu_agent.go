@@ -17,6 +17,7 @@
 				14 Jan 2015 : Added ssh-broker support. (bump to 2.0)
 				20 Mar 2015 : Added support for bandwidth flow-mod generation script.
 				09 Apr 2015 : Added ql_set_trunks to list of scripts to rsync.
+				20 Apr 2015 : Now accepts direction of external IP to pass on bw-fmod command.
 */
 
 package main
@@ -43,7 +44,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.0/14095"
+	version		string = "v2.0/14215/a"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -161,10 +162,14 @@ func build_opt( value string, opt string ) ( parm string ) {
 		return
 	}
 
+	if opt == "" {					// value is assumed to be -x or someething of the sort that can stand alone; just return it
+		return value + " "
+	}
+
 	have_eq := false
-	fmt_str := "%s %s "
+	fmt_str := "%s %s "				// default to -x value
 	li := len(opt) 					// last index 
-	if opt[li-1:li] == "=" {
+	if opt[li-1:li] == "=" {		// --longopt=  we assume, so tokens have no space
 		fmt_str = "%s%s "
 		have_eq = true
 	} 
@@ -212,6 +217,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 			build_opt( parms["smac"], "-s" ) +
 			build_opt( parms["dmac"], "-d" ) +
 			build_opt( parms["extip"], "-E" ) +
+			build_opt( parms["extdir"], "" ) +
 			build_opt( parms["flvlan"],  "-v" ) +
 			build_opt( parms["koe"],  "-k" ) +
 			build_opt( parms["one_switch"],  "-o" ) +
@@ -627,6 +633,7 @@ func main() {
 			"/usr/bin/send_ovs_fmod " +
 			"/usr/bin/ql_bw_fmods " +
 			"/usr/bin/ql_set_trunks " +
+			"/usr/bin/ql_filter_rtr " +
 			"/usr/bin/setup_ovs_intermed "
 
 	if home == "" {

@@ -69,6 +69,7 @@
 				25 Mar 2015 : Reservation pushing only happens after a new queue list is received from netmgr
 						and sent to fq-mgr. The exception is if the hard swtich timeout pops where reservations
 						are pushed straight away (assumption is that queues don't change).
+				20 Apr 2015 : Ensured that reservations are pushed following a cancel request.
 */
 
 package managers
@@ -793,6 +794,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 					msg.State = inv.Del_res( data[0], data[1] )
 				}
 
+				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// must force a push to push augmented (shortened) reservations
 				msg.Response_data = nil
 
 			case REQ_GET:											// user initiated get -- requires cookie

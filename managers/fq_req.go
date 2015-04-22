@@ -7,7 +7,8 @@
 	Author:		E. Scott Daniels
 
 	Mods:		24 Sep 2014 : Added support for vlan id setting.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2015 : Support port masks in flow-mods.
+				20 Apr 2015 : Correct bug - not passing direction of external IP address to agent.
 */
 
 package managers
@@ -118,7 +119,17 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 	} else {
 		fmap["dmac"] = ""
 	}
-	fmap["extip"] = *fq.Extip
+	if fq.Extip != nil {
+		fmap["extip"] = *fq.Extip												// external IP if supplied
+	} else {
+		fmap["extip"] = ""
+	}
+	if fq.Exttyp != nil {
+		fmap["extdir"] = *fq.Exttyp												// direction of external address (-D or -S)
+	} else {
+		fmap["extdir"] = ""
+	}
+
 	fmap["queue"] =  fmt.Sprintf( "%d", fq.Espq.Queuenum )
 	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )						// shift left 2 bits to match what OVS wants
 	fmap["ipv6"] =  fmt.Sprintf( "%v", fq.Ipv6 )							// force ipv6 fmods is on

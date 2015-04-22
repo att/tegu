@@ -17,7 +17,8 @@
 ../agent/ovs/create_ovs_queues	usr/bin/
 ../agent/ovs/ql_setup_irl	usr/bin/
 ../agent/ovs/ql_bw_fmods	/usr/bin/
-../agent/ovs/ql_set_trunks	/usr/bin/
+../agent/ovs/ql_set_trunks	usr/bin/
+../agent/ovs/ql_filter_rtr	usr/bin/
 
 ../system/tegu_req	usr/bin/
 ../system/start_tegu_agent	usr/bin/
@@ -26,6 +27,7 @@
 ../system/start_tegu_qlite usr/bin/start_tegu
 ../system/start_tegu_ha	usr/bin/
 ../system/tegu_ha	usr/bin/
+../system/ql_snuff	usr/bin/
 
 ../main/rjprt usr/bin/
 ../main/tegu usr/bin/
