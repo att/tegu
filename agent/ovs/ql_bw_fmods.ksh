@@ -14,9 +14,13 @@
 #				side of br-rl which it does not.
 #
 #				Fmods are set up this way:
-#					inbound
+#					inbound (modified, no inbound limiting, enabled when orig_inbound=0)
+#						p500 dest == reservation VM			must match before outbound 450
+#							 [strip-vlan], [strip dscp], output to VM port
+#
+#					inbound (original, inbound limiting. enabled by setting orig_inbound=1)
 #						p500 in from br-rl && dest == reservation VM			must match before outbound 450
-#							 [strip-vlan], [strip dscp], output to VM port 
+#							 [strip-vlan], [strip dscp], output to VM port
 #						p430 dest == reservation VM && src == reservation VM	must match after outbound 450
 #							 set queue, output to br-rl
 #						p425 dest == reservation VM
@@ -30,7 +34,7 @@
 #						p300 meta == 0 && src == reservatio VM
 #							 [set vlan], output br-rl
 #
-#					When both VMs are on the same switch, the inbound p430 rule can be 
+#					When both VMs are on the same switch, the inbound p430 rule can be
 #					omitted because the sending 400/5 rule will route it over the proper
 #					br-rl queue as an 'outbound' hit and we'll get rate limiting. When protocol
 #					is also defined, then the outbound p400 fmod will have a slightly
@@ -42,15 +46,16 @@
 #				ID.
 #
 #				The 425 and 300 f-mods are generic and as such there will be only one even if there
-#				are multiple reservations involving the same endpoint.  Because of this, we need to 
-#				create a 425 or 300 f-mod ONLY if the expiry time will be extended.  
+#				are multiple reservations involving the same endpoint.  Because of this, we need to
+#				create a 425 or 300 f-mod ONLY if the expiry time will be extended. 
 #
 #
 #	Date:		20 March 2015
 # 	Author: 	E. Scott Daniels
 #
-#	Mods:		22 Mar 2015 - Added keep on exit option. 
+#	Mods:		22 Mar 2015 - Added keep on exit option.
 #				27 Mar 2015 - Added ipv6 support.
+#				20 Apr 2015 - Accept external IP direction
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -79,7 +84,7 @@ function usage
 # the reservation.
 function would_extend
 {
-	if (( $3 < 60 )) || [[ $operation == "del" ]]
+	if (( $3 < 60 )) && [[ $operation == "del" ]]
 	then
 		return 0
 	fi
@@ -160,16 +165,21 @@ set_vlan=1				# default to setting vlan; -v turns it off
 queue=""
 koe=0					# keep dscp value as packet 'exits' our environment. Set if global_* traffic type given to tegu
 timout="15"
-operation="add"			# -D causes deletes
+operation="add"			# -X allows short time durations for deletes
 ip_type=""
+ex_dest=0				# by default, external address is source; -D sets true, -S sets false
+
+orig_inbound=1			# turn on/off original inbound flow-mod set and use non-interfering set (cannot be command line overridden)
+						# original inbound f-mods route all traffic to a reserved VM through br-rl, when off all traffic to a reservation
+						# VM is routed straight to the VM (no normal procssing in either case).
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod.
 		-b)		mt_base="$2"; shift;;
 		-d)		rmac="$2"; shift;;
-		-D)		operation="del";;
+		-D)		ex_dest=1;;
 		-E)		exip="$2"; shift;;
 		-h)		host="-h $2"; shift;;
 		-k)		koe=1;;
@@ -179,9 +189,11 @@ do
 		-P)		pri_base=5; proto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
 		-q)		queue="-q $2"; shift;;
 		-s)		lmac="$2"; shift;;
+		-S)		ex_dest=0;;
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		dscp="-T $2"; shift;;
 		-v)		set_vlan=0;;
+		-X)		operation="del";;
 
 		-\?)	usage
 				exit 0
@@ -198,8 +210,12 @@ done
 
 if [[ -n $exip ]]
 then
-	dexip="-D $exip"					# destination external ip address is dest
-	sexip="-S $exip"					# destination external ip address is source
+	if (( ex_dest ))					# external address is the destination
+	then
+		exip="-D $exip"					# destination external ip address is dest
+	else
+		exip="-S $exip"					# destination external ip address is source
+	fi
 fi
 
 if [[ -z $lmac || -z $rmac ]]
@@ -222,41 +238,52 @@ else
 fi
 
 
-# inbound f-mods -- all inbound to the reservation vm must go through br-rl. all traffic inbound coming off of
-# br-rl for the vm is sent directly to the VM since outbound normal routing taints the learning switch's 
-# view of where the VM really is.
-if would_extend 500 "dst=$lmac" $to_value
+if (( orig_inbound ))
 then
-	send_ovs_fmod $forreal $host -p 500 $timeout --match $ip_type -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
-	rc=$(( rc + $? ))
+	# inbound f-mods -- all inbound to the reservation vm must go through br-rl. all traffic inbound coming off of
+	# br-rl for the vm is sent directly to the VM since outbound normal routing taints the learning switch's
+	# view of where the VM really is.
+	if would_extend 500 "dst=$lmac" $to_value
+	then
+		send_ovs_fmod $forreal $host -p 500 $timeout --match $ip_type -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
+		rc=$(( rc + $? ))
+	else
+		logit "timeout $to_value would not extend the current p500 f-mod, not generated"
+	fi
+
+	if (( one_switch == 0 ))							# both VMs are attached to the same OVS we only need the 400/405 fmod
+	then
+		send_ovs_fmod $forreal $host -p 430 $timeout --match $ip_type -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
+		rc=$(( rc + $? ))
+	else
+		logit "both endpoints on the same switch, outbound p400 fmod skipped"
+	fi
+
+	if would_extend 425 "dst=$lmac" $to_value			# only write this very generic f-mod if it extends one that is there, or one is not there
+	then
+		send_ovs_fmod $forreal $host -p 425 $timeout --match $ip_type -d $lmac --action -o $rl_port  $operation $cookie $bridge
+		rc=$(( rc + $? ))
+	else
+		logit "timeout $to_value would not extend the current p425 f-mod, not generated"
+	fi
 else
-	logit "timeout $to_value would not extend the current p500 f-mod, not generated"
+	if would_extend 500 "dst=$lmac" $to_value
+	then
+		send_ovs_fmod $forreal $host -p 500 $timeout --match $ip_type  -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from any source, dest is res vm
+		rc=$(( rc + $? ))
+	else
+		logit "timeout $to_value would not extend the current p500 f-mod, not generated"
+	fi
 fi
 
-if (( one_switch == 0 ))							# both VMs are attached to the same OVS we only need the 400/405 fmod
-then
-	send_ovs_fmod $forreal $host -p 430 $timeout --match $ip_type -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
-	rc=$(( rc + $? ))
-else
-	logit "both endpoints on the same switch, outbound p400 fmod skipped"
-fi
 
-if would_extend 425 "dst=$lmac" $to_value			# only write this very generic f-mod if it extends one that is there, or one is not there
-then
-	send_ovs_fmod $forreal $host -p 425 $timeout --match $ip_type -d $lmac --action -o $rl_port  $operation $cookie $bridge
-	rc=$(( rc + $? ))
-else
-	logit "timeout $to_value would not extend the current p425 f-mod, not generated"
-fi
-
-
-# outbound f-mods - anything from the VM goes over the rate limiting bridge. anything outbound coming off of the 
+# outbound f-mods - anything from the VM goes over the rate limiting bridge. anything outbound coming off of the
 # rl bridge goes through normal processing; p450 fmod must be lower priority than the p500 rule in inbound processing
 # this flow-mod ends up being persistant, so we'll keep it.
 send_ovs_fmod $forreal $host -p 450 -t 0 --match $ip_type -m 0 -i $rl_port --action -R ,$mt_base -R ,0 -N	 $operation $cookie $bridge 	# anything else inbound from bridge goes out normally (persistent fmod)
 rc=$(( rc + $? ))
 
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $ip_type -m 0x0/0x7 $dexip -s $lmac -d $rmac $proto --action $ovopt $dscp -o $rl_port $queue $operation $cookie $bridge
+send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $ip_type -m 0x0/0x7 $exip -s $lmac -d $rmac $proto --action $ovopt $dscp -o $rl_port $queue $operation $cookie $bridge
 rc=$(( rc + $? ))
 
 if would_extend 300 "src=$lmac" $to_value			# only write this very generic f-mod if it extends one that is there, or one is not there
@@ -269,6 +296,7 @@ fi
 
 if (( rc ))
 then
+	rm -f /tmp/PID$$.*
 	exit  1
 fi
 

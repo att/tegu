@@ -9,6 +9,11 @@
 #
 # 				Running through the name spaces seems to be expensive, based on a trial on a loaded L3,
 #				so we'll cache the list and regenerate it only if we think it is out of date. 
+#			
+#				DANGER:  This can be _extremely_ expensive (in terms of wall clock execution time)
+#						and thus any code that calls it, and is expected to return a result quickly
+#						might not.  The run time is proportional to the number of routers that are
+#						existing on the host (readl longer for an L3).
 #
 #	Author: 	E. Scott Daniels
 #	Date:		14 April 2015
@@ -24,6 +29,7 @@ do
 
 		*)	echo "unrecognised option $1"
 			echo "usage: $0 [-a age|-f] [data-file]"
+			echo "data file is the output from ovs_sp2uuid; if omitted the output is assumed to be on stdin"
 			exit 1
 			;;
 	esac
@@ -31,7 +37,12 @@ do
 	shift
 done
 
-cache=/tmp/ql_rmac.cache
+user=${USER:-$LOGNAME}					# one of these should be set; prevent issues if someone runs manually
+cache=/tmp/ql_rmac_${user}.cache
+if [[ -f /tmp/ql_filter_rtr.v ]]		# preliminary testing; delete next go round of changes
+then
+	verbose=1
+fi
 
 need=0
 if [[ ! -s $cache  ]]					# generate if empty or missing
@@ -40,7 +51,7 @@ then
 else
 	ts=$( stat -c %Y $cache )			# last mod time of the cache
 	now=$( date +%s )
-	if (( now - ts > $age ))
+	if (( now - ts > age ))
 	then
 		need=1
 	fi
@@ -51,9 +62,13 @@ then
 	echo "snarfing netns data"
 	ip netns | grep "qrouter-" | while read r 			# suss out the list of router name spaces
 	do 
-		echo "suss from $r   [OK]" >&2
+		if (( verbose ))
+		then
+			echo "suss from $r   [OK]" >&2
+		fi
 		sudo ip netns exec $r ifconfig | grep HWaddr	# query each name space, get all associated mac addresses
 	done >/tmp/PID$$.cache								# prevent accidents if multiple copies running
+
 	mv /tmp/PID$$.cache $cache							# if multiple copies running, this is atomic
 fi
 
@@ -81,3 +96,4 @@ fi
 	{ print; next; }
 	'
 
+exit 0

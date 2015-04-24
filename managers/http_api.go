@@ -1023,7 +1023,8 @@ func parse_put( out http.ResponseWriter, recs []string, sender string ) (state s
 	Tokens are the tokens from the request. token[0] is assumed to be the request name and is ignored
 	as it could be different depending on the source of the call (POST vs DELETE).
 
-	err will be nil on success. */
+	err will be nil on success.
+*/
 func delete_reservation( tokens []string ) ( err error ) {
 
 	var (

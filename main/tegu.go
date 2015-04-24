@@ -103,6 +103,7 @@
 				03 Apr 2015 : Added role verification for graph and listhosts to allow any admin to submit these from afar.
 				10 Apr 2015 : Added ability to delete reservation via post, corrected slice bounds error (tokeniser library fix).
 				16 Apr 2015 : Now supports openstack regions.
+				20 Apr 2015 : Corrected bug -- not passing external address direction to agent.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
