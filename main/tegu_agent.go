@@ -255,7 +255,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	for wait4 > 0 && !timer_pop {								// wait for response back on the channel or the timer to pop
 		select {
 			case <- time.After( timeout * time.Second ):		// timeout if we don't get something back soonish
-				sheep.Baa( 1, "WRN: timeout waiting for response to: %s", cmd_str )
+				sheep.Baa( 1, "WRN: timeout waiting for response from %s; cmd: %s", act.Hosts[0], cmd_str )
 				timer_pop = true
 
 			case resp := <- ssh_rch:					// response from broker
