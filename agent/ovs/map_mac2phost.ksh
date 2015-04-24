@@ -15,6 +15,8 @@
 #				29 Jan 2015 - Added prefix option to allow this to be executed on a local host
 #					where the operational name of the host doesn't match hostname (e.g. in the DPA1
 #					environment hostname returns o11r6 but the operational name is o11r6-ops.
+#				24 Apr 2015 - Doesn't use the grep return value as the final return value to prevent
+#					a bad return code if the resulting output is empty (normal if no VMs are on the host).
 # ----------------------------------------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------------------------------------
@@ -105,5 +107,5 @@ done | awk '
 		printf( "%s %s\n", $1, $6 )
 	}
 ' | grep -v -- "-1\$"			# dont want entries that have no mac address
-exit $?
+exit 0
 
