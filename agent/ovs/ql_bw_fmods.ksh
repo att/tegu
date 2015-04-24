@@ -14,11 +14,11 @@
 #				side of br-rl which it does not.
 #
 #				Fmods are set up this way:
-#					inbound (shouldn't cause issues with learning)
+#					inbound (modified, no inbound limiting, enabled when orig_inbound=0)
 #						p500 dest == reservation VM			must match before outbound 450
 #							 [strip-vlan], [strip dscp], output to VM port
-##
-#					inbound (this may cause issues with learning; abandoned 2015/04/22)
+#
+#					inbound (original, inbound limiting. enabled by setting orig_inbound=1)
 #						p500 in from br-rl && dest == reservation VM			must match before outbound 450
 #							 [strip-vlan], [strip dscp], output to VM port
 #						p430 dest == reservation VM && src == reservation VM	must match after outbound 450
@@ -169,7 +169,9 @@ operation="add"			# -X allows short time durations for deletes
 ip_type=""
 ex_dest=0				# by default, external address is source; -D sets true, -S sets false
 
-orig_inbound=0			# turn off original inbound flow-mod set and use non-interfering set (cannot be command line overridden)
+orig_inbound=1			# turn on/off original inbound flow-mod set and use non-interfering set (cannot be command line overridden)
+						# original inbound f-mods route all traffic to a reserved VM through br-rl, when off all traffic to a reservation
+						# VM is routed straight to the VM (no normal procssing in either case).
 
 while [[ $1 == -* ]]
 do
@@ -294,6 +296,7 @@ fi
 
 if (( rc ))
 then
+	rm -f /tmp/PID$$.*
 	exit  1
 fi
 
