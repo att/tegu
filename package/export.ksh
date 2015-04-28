@@ -8,11 +8,13 @@
 #
 #	Mods:		30 Jan 2015 - Added support for python
 #				01 Feb 2015 - Ensure that binaries are chmod'd correctly.
+#				28 Apr 2015 - Added auto build of certain binaries.
 # -------------------------------------------------------------------------------------------
 
 function usage
 {
-	echo "$argv0 [-d export-dir] package-name version"
+	echo "$argv0 [-b] [-d export-dir] package-name version"
+	echo "  -b turns off the auto build before export"
 }
 
 function verbose
@@ -22,6 +24,27 @@ function verbose
 		echo "$@"
 	fi
 }
+
+funcction build_it
+{
+	(
+		set -e
+		cd ../main
+		echo "building tegu and agent"
+		go build tegu.go
+		go build tegu_agent.go
+
+		./tegu -?|grep "^tegu"
+		./tegu_agent -?| grep "^tegu"
+	)
+
+	if (( $? != 0 ))
+	then
+		echo "abort: build failed"
+		exit 1
+	fi
+}
+
 # -------------------------------------------------------------------------------------------
 
 ex_root=/tmp/${LOGNAME:=$USER}/export
@@ -29,10 +52,12 @@ argv0="${0##*/}"
 dir=""
 chatty=0
 rebuild=0			# -r sets to mark as a rebuild of a previous package so that last ver is not updated
+build=1				# force a build of binaries before exporting, -b turns off
 
 while [[ $1 == -* ]]
 do
 	case $1 in
+		-b)		build=0;;
 		-d)		dir=$2; shift;;
 		-v)		chatty=1;;
 		-\?)	usage; exit 0;;
