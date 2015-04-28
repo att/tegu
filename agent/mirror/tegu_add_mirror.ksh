@@ -18,13 +18,15 @@
 #                  The ports can be named either by a UUID or MAC.  If a MAC is provided,
 #                  this script translates to a UUID.
 #
-#                  <output> directs where the output of the mirror goes.  There are three possibilities:
+#                  <output> directs where the output of the mirror goes.  There are three
+#                  possibilities:
 #                  1. If <output> is vlan:nnn such that 1 <= n <= 4095, it is the VLAN
 #                  number for the output VLAN.
-#                  2. If <output> is an IPv4 address, then a port is created that acts as
-#                  one end of a GRE tunnel to the IP address.
-#                  3. If <output> is a UUID (or MAC) of an existing port on br-int, then output is
-#                  directed to that port.
+#                  2. If <output> is an IPv4 or IPv6 address, then a port is created that
+#                  acts as one end of a GRE tunnel to the IP address.  IPv6 addresses MUST
+#                  be fully specified (with 7 ":"s) in order to distinguish them from MACs.
+#                  3. If <output> is a UUID (or MAC) of an existing port on br-int,
+#                  then output is directed to that port.
 #
 #                  If <vlan> (optional) is specified, and is a comma-separated list of VLAN
 #                  IDs, it is used to select the VLANs whose traffic should be mirrored.
@@ -38,11 +40,24 @@
 #       Date:      4 February 2015
 #
 #       Mods:      4 Feb 2015 - created
+#                  27 Apr 2015 - allow IPv6 for <output> GRE address
 #
 
-function valid_ip
+function valid_ip4
 {
-	echo "$1." | grep -E -o "([0-9]{1,3}[\.]){4}$"
+	echo "$1." | grep -E -q "^([0-9]{1,3}[\.]){4}$"
+	return $?
+}
+
+function valid_ip6
+{
+	echo "$1:" | grep -E -q "^([0-9a-fA-F]{1,4}:){8}$"
+	return $?
+}
+
+function valid_mac
+{
+	echo "$1:" | grep -E -q "^([0-9a-fA-F]{1,2}:){6}$"
 	return $?
 }
 
@@ -94,7 +109,7 @@ tmp=`$sudo ovs-vsctl --columns=ports list bridge $bridgename 2>/dev/null`
 if [ $? -ne 0 ]
 then
 	echo "tegu_add_mirror: $bridgename is missing on openvswitch." >&2
-	exit 2	
+	exit 2
 fi
 brports=`echo $tmp | sed 's/.*://' | tr -d '[] ' | tr , ' '`
 
@@ -141,12 +156,12 @@ vlan:[0-9]+)
 	;;
 
 *.*.*.*)
-	if valid_ip "$output"
+	if valid_ip4 "$output"
 	then
 		outputtype=gre
 		remoteip=$output
 	else
-		echo "tegu_add_mirror: $output is not a valid IP address." >&2
+		echo "tegu_add_mirror: $output is not a valid IPv4 address." >&2
 		exit 2
 	fi
 	;;
@@ -162,16 +177,29 @@ vlan:[0-9]+)
 	fi
 	;;
 
-*:*:*:*:*:*)
-	# MAC addr
-	uuid=`translatemac $output`
-	if valid_port "$uuid"
+*:*)
+	# Could be either a MAC or IPv6 address
+	if valid_mac "$output"
 	then
-		outputtype=port
-		output="$uuid"
+		# MAC addr
+		uuid=`translatemac $output`
+		if valid_port "$uuid"
+		then
+			outputtype=port
+			output="$uuid"
+		else
+			echo "tegu_add_mirror: there is no port with MAC=$output on $bridgename." >&2
+			exit 2
+		fi
 	else
-		echo "tegu_add_mirror: there is no port with MAC=$output on $bridgename." >&2
-		exit 2
+		if valid_ip6 "$output"
+		then
+			outputtype=gre
+			remoteip=$output
+		else
+			echo "tegu_add_mirror: $output is not a valid IPv6 address." >&2
+			exit 2
+		fi
 	fi
 	;;
 

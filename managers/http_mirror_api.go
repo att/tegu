@@ -18,6 +18,7 @@
 
 	Mods:		17 Feb 2015 - Created.
 				20 Mar 2014 - Added support for specifying ports via MACs
+				27 Apr 2015 - allow IPv6 for <output> GRE address, fixed bug with using label for output spec
 */
 
 package managers
@@ -350,11 +351,11 @@ func validateAllowedOutputIP(port *string) (err error) {
 	if oklist != nil {
 		ip := net.ParseIP(*port)
 		if ip == nil {
-			err = fmt.Errorf("output GRE port %s is not a vlid IP address.", *port)
+			err = fmt.Errorf("output GRE port %s is not a valid IP address.", *port)
 			return
 		}
 		for _, cidr := range strings.Split(*oklist, ",") {
-			if cidrMatches(ip, cidr) {
+			if cidrMatches(ip, strings.TrimSpace(cidr)) {
 				return
 			}
 		}
@@ -363,7 +364,7 @@ func validateAllowedOutputIP(port *string) (err error) {
 	return
 }
 
-func validateOutputPort(port *string) (vm *Net_vm,  err error) {
+func validateOutputPort(port *string) (newport *string, err error) {
 	if port == nil {
 		err = fmt.Errorf("no output port specified.")
 		return
@@ -374,8 +375,8 @@ func validateOutputPort(port *string) (vm *Net_vm,  err error) {
 		mirsect := cfg_data["mirroring"]
 		for k, v := range mirsect {
 			if k == label {
-				port = v
-				err = validateAllowedOutputIP(port)
+				newport = v
+				err = validateAllowedOutputIP(newport)
 				return
 			}
 		}
@@ -383,11 +384,25 @@ func validateOutputPort(port *string) (vm *Net_vm,  err error) {
 		return
 	}
 	if strings.Index(*port, "/") < 0 {
-		// simple name or IP, assumed to be OK
-		err = validateAllowedOutputIP(port)
+		if net.ParseIP(*port) != nil {
+			// simple name or IP, assumed to be OK
+			err = validateAllowedOutputIP(port)
+			if err == nil {
+				newport = port
+			}
+		} else {
+			// need to map DNS name to IP addr
+			addrs, err := net.LookupHost(*port)
+			if addrs != nil && err == nil {
+				err = validateAllowedOutputIP( &addrs[0] )
+				if err == nil {
+					newport = &addrs[0]
+				}
+			}
+		}
 		return
 	}
-	vm, err = validatePort(port)
+	_, err = validatePort(port)
 	return
 }
 
@@ -482,12 +497,13 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 	}
 
 	// 5. Validate output port
-	_, err = validateOutputPort(&req.Output)
+	newport, err := validateOutputPort(&req.Output)
 	if err != nil {
 		code = http.StatusBadRequest
 		msg = err.Error()
 		return
 	}
+	req.Output = *newport
 
 	// 6. Make one pledge per mirror, send to reservation mgr, build JSON return string
 	scheme := "http"
