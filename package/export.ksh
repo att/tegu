@@ -28,6 +28,7 @@ ex_root=/tmp/${LOGNAME:=$USER}/export
 argv0="${0##*/}"
 dir=""
 chatty=0
+rebuild=0			# -r sets to mark as a rebuild of a previous package so that last ver is not updated
 
 while [[ $1 == -* ]]
 do
@@ -55,7 +56,7 @@ if [[ -z $2 ]]
 then
 	echo "missing version number as second parameter"
 	echo "last version was:"
-	cat last_export_ver 2>/dev/null
+	cat last_export_ver.$1 2>/dev/null
 	usage
 	exit 1
 fi
@@ -71,7 +72,10 @@ then
 	exit 1
 fi
 
-echo $ver >last_export_ver
+if (( ! rebuild ))
+then
+	echo $ver >last_export_ver.$1
+fi
 
 
 if [[ -z $dir ]]

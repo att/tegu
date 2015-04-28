@@ -16,7 +16,7 @@
 ../agent/ovs/send_ovs_fmod	usr/bin/
 ../agent/ovs/create_ovs_queues	usr/bin/
 ../agent/ovs/ql_setup_irl	usr/bin/
-../agent/ovs/ql_bw_fmods	/usr/bin/
+../agent/ovs/ql_bw_fmods	usr/bin/
 ../agent/ovs/ql_set_trunks	usr/bin/
 ../agent/ovs/ql_filter_rtr	usr/bin/
 
