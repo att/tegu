@@ -19,6 +19,8 @@
 					pair, then all will be well.  In other words, the caller should
 					not mix things up if values will also contain equal signs.
 				26 Mar 2015 - Added support sussing out port from either ipv6 or v4 addresses.
+				29 Apr 2015 - Correct bug in split port causing stack dump if nil host pointer
+					passed in.
 */
 
 package gizmos
@@ -141,6 +143,10 @@ func Split_port( host *string ) ( name *string, port *string ) {
 	zstr := "0"
 	name = host										// default 
 	port = &zstr
+
+	if host == nil {
+		return
+	}
 
 	if strings.Index( *host, ":" ) < 0 {				// no port at all, not ipv6; default case 
 		return
