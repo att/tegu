@@ -105,6 +105,8 @@
 #						- outward queues (port == -128) are written only to qosirl interfaces unless -A is set
 #				08 Apr 2015 - Corrected typos in error messages, must call ql_set_trunks to set up trunks on 
 #					the qosirl0 interface.
+#				07 Map 2015 - Corrected bug on ql_set_trunks call (set_trukns was the bug). It appears that 
+#					setting trunks isn't needed, so it's been commented out at the moment.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -303,7 +305,9 @@ then
 	sudo="sudo"					# must use sudo for the ovs-vsctl commands
 fi
 
-ql_set_trunsk $noexec_arg		# must set trunks on the qos-irl interface
+# it doesn't seem that it is necessary (any longer) to list all vlan IDs on a trunk, so 
+# for now it's disabled.  Keep it here because if we need to have it this is where it belongs.
+#ql_set_trunks $noexec_arg		# must set trunks on the qos-irl interface
 
 if [[ -z $1 ]]			# assume data on stdin
 then
