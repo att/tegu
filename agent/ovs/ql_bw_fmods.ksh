@@ -56,6 +56,7 @@
 #	Mods:		22 Mar 2015 - Added keep on exit option.
 #				27 Mar 2015 - Added ipv6 support.
 #				20 Apr 2015 - Accept external IP direction
+#				11 May 2015 - Inbound flow-mods must match all types, changed to allow for this.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -65,8 +66,9 @@ function logit
 
 function usage
 {
-	echo "$argv0 v1.0/13205"
+	echo "$argv0 v1.1/15125"
 	echo "usage: $argv0 [-6] [-d dst-mac] [-E external-ip] [-h host] [-k] [-n] [-o] [-p|P proto:port] [-s src-mac] [-T dscp] [-t hard-timeout] [-v]"
+	echo "usage: $argv0 [-X] # delete all"
 	echo ""
 	echo "  -6 forces IPv6 address matching to be set"
 }
@@ -164,19 +166,20 @@ one_switch=0
 set_vlan=1				# default to setting vlan; -v turns it off
 queue=""
 koe=0					# keep dscp value as packet 'exits' our environment. Set if global_* traffic type given to tegu
-timout="15"
+to_value="61"			# value used to check
+timout="-t $to_value"	# timeout parm given on command
 operation="add"			# -X allows short time durations for deletes
-ip_type=""
+ip_type="-4"			# default to forcing an IP type match for outbound fmods; inbound fmods do NOT use this
 ex_dest=0				# by default, external address is source; -D sets true, -S sets false
 
-orig_inbound=1			# turn on/off original inbound flow-mod set and use non-interfering set (cannot be command line overridden)
+orig_inbound=0			# turn on/off original inbound flow-mod set and use non-interfering set (cannot be command line overridden)
 						# original inbound f-mods route all traffic to a reserved VM through br-rl, when off all traffic to a reservation
 						# VM is routed straight to the VM (no normal procssing in either case).
 
 while [[ $1 == -* ]]
 do
 	case $1 in
-		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod.
+		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod (outbound only).
 		-b)		mt_base="$2"; shift;;
 		-d)		rmac="$2"; shift;;
 		-D)		ex_dest=1;;
@@ -185,6 +188,7 @@ do
 		-k)		koe=1;;
 		-n)		forreal="-n";;
 		-o)		one_switch=1;;
+		-O)		orig_inbound=1;;
 		-p)		pri_base=5; proto="-p $2"; shift;;		# source proto:port priority must increase to match over more generic f-mods
 		-P)		pri_base=5; proto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
 		-q)		queue="-q $2"; shift;;
@@ -243,9 +247,10 @@ then
 	# inbound f-mods -- all inbound to the reservation vm must go through br-rl. all traffic inbound coming off of
 	# br-rl for the vm is sent directly to the VM since outbound normal routing taints the learning switch's
 	# view of where the VM really is.
+	# Inbound f-mods MUST match all packet types, not just IPx
 	if would_extend 500 "dst=$lmac" $to_value
 	then
-		send_ovs_fmod $forreal $host -p 500 $timeout --match $ip_type -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
+		send_ovs_fmod $forreal $host -p 500 $timeout --match  -i $rl_port -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from br-rl any source dest is res vm
 		rc=$(( rc + $? ))
 	else
 		logit "timeout $to_value would not extend the current p500 f-mod, not generated"
@@ -253,7 +258,7 @@ then
 
 	if (( one_switch == 0 ))							# both VMs are attached to the same OVS we only need the 400/405 fmod
 	then
-		send_ovs_fmod $forreal $host -p 430 $timeout --match $ip_type -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
+		send_ovs_fmod $forreal $host -p 430 $timeout --match  -d $lmac -s $rmac --action -q 1 -o $rl_port  $operation $cookie $bridge # _always_ onto q1 inbound
 		rc=$(( rc + $? ))
 	else
 		logit "both endpoints on the same switch, outbound p400 fmod skipped"
@@ -261,7 +266,7 @@ then
 
 	if would_extend 425 "dst=$lmac" $to_value			# only write this very generic f-mod if it extends one that is there, or one is not there
 	then
-		send_ovs_fmod $forreal $host -p 425 $timeout --match $ip_type -d $lmac --action -o $rl_port  $operation $cookie $bridge
+		send_ovs_fmod $forreal $host -p 425 $timeout --match -d $lmac --action -o $rl_port  $operation $cookie $bridge
 		rc=$(( rc + $? ))
 	else
 		logit "timeout $to_value would not extend the current p425 f-mod, not generated"
@@ -269,7 +274,7 @@ then
 else
 	if would_extend 500 "dst=$lmac" $to_value
 	then
-		send_ovs_fmod $forreal $host -p 500 $timeout --match $ip_type  -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from any source, dest is res vm
+		send_ovs_fmod $forreal $host -p 500 $timeout --match   -d $lmac --action $idscp $ivopt -o $lmac  $operation $cookie $bridge	# from any source, dest is res vm
 		rc=$(( rc + $? ))
 	else
 		logit "timeout $to_value would not extend the current p500 f-mod, not generated"
