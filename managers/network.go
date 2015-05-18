@@ -54,6 +54,7 @@
 					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
 					as the endpoint 'name'. 
 				25 Mar 2015 - IPv6 changes.
+				18 May 2015 - Added discount support.
 */
 
 package managers
@@ -1379,6 +1380,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence		// user link capacity boundaries
 		phost_suffix *string = nil
+		discount int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
 
 		ip2		*string
 	)
@@ -1410,6 +1412,15 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 														// suss out config settings from our section
 	if cfg_data["network"] != nil {
+		if p := cfg_data["network"]["discount"]; p != nil {
+			d := clike.Atoll( *p ); 			
+			if d < 0 {
+				discount = 0
+			} else {
+				discount = d
+			}
+		}
+
 		if p := cfg_data["network"]["refresh"]; p != nil {
 			refresh = clike.Atoi( *p ); 			
 		}
@@ -1542,6 +1553,26 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
 						net_sheep.Baa( 1,  "network: reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
+
+						suffix := "bps"
+						if discount > 0 {
+							if discount < 101 {
+								bandw_in -=  ((bandw_in * discount)/100)
+								bandw_out -=  ((bandw_out * discount)/100)
+								suffix = "%"
+							} else {
+								bandw_in -= discount
+								bandw_out -= discount
+							}
+
+							if bandw_out < 10 {			// add some sanity, and keep it from going too low
+								bandw_out = 10
+							}
+							if bandw_in < 10 {
+								bandw_in = 10
+							}
+							net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", discount, suffix, bandw_in, bandw_out )
+						}
 
 						ip1, err := act_net.name2ip( h1 )
 						ip2 = nil
@@ -1783,6 +1814,18 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								}
 							}
 						}
+
+						case REQ_SETDISC:
+							req.State = nil;	
+							req.Response_data = "";			// we shouldn't send anything back, but if caller gave a channel, be sucessful
+							if req.Req_data != nil {
+								d := clike.Atoll( *(req.Req_data.( *string )) )
+								if d < 0 {
+									discount = 0
+								} else {
+									discount = d
+								}
+							}
 
 					// --------------------- agent things -------------------------------------------------------------
 					case REQ_MAC2PHOST:

@@ -91,6 +91,7 @@ const (
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
 	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
+	REQ_SETDISC					// set the discount value
 	
 )
 

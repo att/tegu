@@ -62,6 +62,7 @@
 				10 Apr 2015 : Seems some HTTP clients refuse or are unable to send a body on a DELETE.
 					Extended the POST function to include a "cancelres" request. Sheesh.  It would be
 					much simpler to listen on a socket and accept newline terminated messages; rest sucks.
+				18 May 2015 : Added discount support.
 */
 
 package managers
@@ -445,7 +446,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		if accept_requests  ||  tokens[0] == "ping"  || tokens[0] == "verbose" {			// always allow ping/verbose if we are up
 			reason = fmt.Sprintf( "you are not authorised to submit a %s command", tokens[0] )
 
-			http_sheep.Baa( 3, "processing request: %s", tokens[0] )
+			http_sheep.Baa( 3, "processing request: %s %d tokens", tokens[0], ntokens )
 			switch tokens[0] {
 
 				case "cancelres":												// cancel reservation
@@ -743,6 +744,20 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
 						}
 					}
+
+				case "setdiscount":
+					if validate_auth( &auth_data, is_token ) {
+						if ntokens == 2 {						// expect discount amount or percentage
+							req = ipc.Mk_chmsg( )
+							req.Send_req( nw_ch, nil, REQ_SETDISC, &tokens[1], nil )		// set the discount value
+							reason = fmt.Sprintf( "discount amount set to %s", tokens[1] )
+							state = "OK"
+						} else {
+							reason = fmt.Sprintf( "incorrect number of parameters received (%d); amount|percentage", ntokens )
+							nerrors++
+							state = "ERROR"
+						}
+					} 
 
 				case "verbose":									// verbose n [child-bleater]
 					if validate_auth( &auth_data, is_token ) {
