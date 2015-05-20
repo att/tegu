@@ -257,7 +257,6 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 			build_opt( parms["extdir"], "" ) +
 			build_opt( parms["flvlan"],  "-v" ) +
 			build_opt( parms["koe"],  "-k" ) +
-			build_opt( parms["one_switch"],  "-o" ) +
 			build_opt( parms["sproto"],  "-p" ) +
 			build_opt( parms["dproto"],  "-P" ) +
 			build_opt( parms["queue"],  "-q" ) +

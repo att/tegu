@@ -104,6 +104,7 @@
 				10 Apr 2015 : Added ability to delete reservation via post, corrected slice bounds error (tokeniser library fix).
 				16 Apr 2015 : Now supports openstack regions.
 				20 Apr 2015 : Corrected bug -- not passing external address direction to agent.
+				18 May 2015 : Added discount.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -139,7 +140,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.3/14285"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
+		version		string = "v3.1.3/15205"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

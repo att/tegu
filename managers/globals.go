@@ -106,6 +106,7 @@ const (
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
 	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
+	REQ_SETDISC					// set the discount value
 )
 
 const (

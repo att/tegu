@@ -14,6 +14,10 @@
 #				on. Then, unlike curl, formats the resulting json output before writing it
 #				to the tty device. The -j and -d options control the format of the output.
 #
+#				NOTE: this script was dumbed down to work with bash; it may still not 
+#					function correctly with bash and before complaining just install ksh
+#					and use that. 
+#
 #	Date:		01 Jan 2014
 #	Author:		E. Scott Daniels
 #
@@ -36,6 +40,7 @@
 #				31 Mar 2015 - Added support for sending key-value pairs to listhosts and 
 #					graph commands.
 #				01 Apr 2015 - Corrected bug with token passed on steering request.
+#				18 May 2015 - Dumbed down so that bash could run the script.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -77,6 +82,7 @@ function usage {
 	  $argv0 listulcap
 	  $argv0 listres
 	  $argv0 listqueue
+      $argv0 setdiscount value
 	  $argv0 setulcap tenant percentage
 	  $argv0 refresh hostname
 	  $argv0 steer  {[start-]end|+seconds} tenant src-host dest-host mbox-list cookie
@@ -186,11 +192,11 @@ function gen_token
 
 	if (( use_keystone ))			# -K used on the command line
 	then
-		keystone token-get | awk -F \| '{gsub( "[ \t]", "", $2 ) } $2 == "id" {print $3 }' | read token_value
+		token_value=$( keystone token-get | awk -F \| '{gsub( "[ \t]", "", $2 ) } $2 == "id" {print $3 }' )	# now bash compatable
 	else
 		url="$OS_AUTH_URL/tokens"
-		content_type="Content-type: application/json"
-		curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | awk '{ print $0 "},"} ' RS="," | awk '1' RS="{" | awk '
+		content_type="Content-type: application/json" 
+		token_value=$( curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | awk '{ print $0 "},"} ' RS="," | awk '1' RS="{" | awk '
 
 		/"access":/ { snarf = 1; next }				# we want the id that is a part of the access struct
 		/"id":/ && snarf == 1  {					# so only chase id if we have seen access tag
@@ -200,7 +206,7 @@ function gen_token
 			print $NF
 			exit ( 0 );								# stop short; only need one
 		}
-		'  | read token_value
+		' )											# now bash compatable
 	fi
 
 	if [[ -z $token_value ]]
@@ -377,6 +383,10 @@ case $1 in
 			fi
 		fi
 		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/api"
+		;;
+
+	setdiscount)
+		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto://$host/tegu/api"
 		;;
 
 	setulcap)

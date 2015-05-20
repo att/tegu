@@ -66,6 +66,10 @@
 #				27 Mar 2015 - Added IPv6 support.
 #				07 Apr 2015 - Ensure correct behaviour if proto: given as prototype instead of proto:0.
 #				10 Apr 2015 - Correct typo in set address type function.
+#				11 May 2015 - Changes to allow proto to be added only when -D or -S is used, or one of
+#								-4, -6, or -a forces the specific type.
+#							  Corrected bug in -v action when the value supplied is a VLAN ID rather than
+#							  a mac address.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -75,7 +79,7 @@ function logit
 
 function usage
 {
-	echo "$argv0 v1.2/13275"
+	echo "$argv0 v1.3/15125"
 	echo "usage: $argv0 [-h host] [-I] [-n] [-p priority] [-t hard-timeout] [--match match-options] [--action action-options] {add|del} cookie[/mask] switch-name"
 	echo ""
 }
@@ -98,7 +102,9 @@ function help
 
 	Match Options: 
 	Each match option is followed by a single token parameter
-		-6 Match on IPv6 traffic			(deefault is ipv4 traffic, implied if -D or -S supply a v6 address)
+		-a Match on ARP traffic             (ignored if -S or -D is given)
+		-4 Match on IPv4 traffic            (implied if -S or -D is used to supply an IPv4 address)
+		-6 Match on IPv6 traffic            (implied if -S or -D is used to supply an IPv6 address)
 		-d data-layer-destination-address (mac)
 		-D network-layer-dest-address (ip)
 		-i input-switch-port                (late bindign applied if mac address or :ID is given)
@@ -167,10 +173,10 @@ endKat
 function addr_type
 {
 	case $1 in
-		*:*:*)	echo "$ip6_type ipv6";;
-		*.*.*)	echo "$ip4_type nw";;
+		*:*:*)	echo "$ip6_type, ipv6";;
+		*.*.*)	echo "$ip4_type, nw";;
 		*)		logit "WRN: unrecognised address type, assuming ipv4: $1"
-				echo "$ip4_type nw";;
+				echo "$ip4_type, nw";;
 	esac
 }
 
@@ -326,7 +332,7 @@ of_protolist="OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13"
 of_shortprotolist="OpenFlow10,OpenFlow12,OpenFlow13"			# OpenFlow11 not suported on v1.10 
 of_protoopt="-O"
 backlevel_ovs=0
-type="dl_type=0x0800"		# match only IPv4 traffic
+type=""						# no specific type to match (unless -S or -D given) -4, -6 or -a can be used if -S/D is not needed.
 mode="options"
 output="normal"
 match=""
@@ -404,9 +410,9 @@ do
 
 		match)
 			case $1 in 
-				-6) type="$ip6_type";;					# specific types (auto set if -S or -D given)
-				-4) type="$ip4_type";;
-				-a) type="$arp_type";;
+				-6) type="$ip6_type,";;					# specific types (auto set if -S or -D given)
+				-4) type="$ip4_type,";;
+				-a) type="$arp_type,";;
 
 				# WARNING:  these MUST have a trailing space when added to match!
 				-d)	match+="dl_dst=$2 "; shift;;		# ethernet mac change of dest
@@ -516,7 +522,7 @@ do
 							vpri=""
 						fi
 					else
-						action+="mod_vlan_vid:$vid"			# just save it
+						action+="mod_vlan_vid:$vid "		# just save it
 					fi
 					if [[ $2 == *"/"*   &&  -n $vpri ]]		# priority given, and not nixed b/c it's a trunk
 					then
@@ -612,7 +618,7 @@ case $1 in
 			fi
 		fi
 
-		fmod="${hto}${table}cookie=$2,$type,${match}priority=$priority,action=${action// /,}"
+		fmod="${hto}${table}cookie=$2,${type}${match}priority=$priority,action=${action// /,}"
 		tries=5
 		rc=1
 		while (( tries > 0 )) &&  (( rc != 0 ))
@@ -662,9 +668,9 @@ case $1 in
 
 		if (( backlevel_ovs ))
 		then
-			fmod="$type,${match// /,}"		# old ovs cannot handle cookie on delete
+			fmod="${type}${match// /,}"		# old ovs cannot handle cookie on delete
 		else
-			fmod="cookie=$cookie,$type,${match// /,}"
+			fmod="cookie=$cookie,${type}${match// /,}"
 		fi
 
 		timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist del-flows ${lbswitch:-$3} "$fmod"
