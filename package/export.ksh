@@ -25,7 +25,7 @@ function verbose
 	fi
 }
 
-funcction build_it
+function build_it
 {
 	(
 		set -e
@@ -59,6 +59,7 @@ do
 	case $1 in
 		-b)		build=0;;
 		-d)		dir=$2; shift;;
+		-r)		rebuild=1;;
 		-v)		chatty=1;;
 		-\?)	usage; exit 0;;
 		*)		echo "unrecognised parameter: $1"
@@ -100,6 +101,11 @@ fi
 if (( ! rebuild ))
 then
 	echo $ver >last_export_ver.$1
+fi
+
+if (( build ))
+then
+	build_it
 fi
 
 
