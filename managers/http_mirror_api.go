@@ -136,14 +136,14 @@ func getNameAndCookie(in *http.Request) (name string, cookie string) {
 /*
  * Given a name, find the mirror that goes with the name.
  */
-func lookupMirror(name string, cookie string) (mirror *gizmos.Pledge) {
+func lookupMirror(name string, cookie string) (mirror *gizmos.Pledge_mirror) {
 	req := ipc.Mk_chmsg( )
 	my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
 	defer close( my_ch )
 	req.Send_req( rmgr_ch, my_ch, REQ_GET, [] *string { &name, &cookie }, nil )
 	req = <- my_ch
 	if req.State == nil {
-		mirror = req.Response_data.( *gizmos.Pledge )
+		mirror = req.Response_data.( *gizmos.Pledge_mirror )
 	}
 	return
 }
@@ -175,7 +175,7 @@ func safe(s *string) ( string) {
  * Convert a pledge into the JSON form needed by the API, which is not the same as the JSON in pledge.go
  * since that reflects the underlying pledge structure.
  */
-func convertToJSON(mirror *gizmos.Pledge, scheme string, host string) (string) {
+func convertToJSON(mirror *gizmos.Pledge_mirror, scheme string, host string) (string) {
 	// Arrgh!
 	ports, outp, _, _, start, end, _, _ := mirror.Get_values()
 

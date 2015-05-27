@@ -12,6 +12,7 @@
 	Mods:		Fixes after merge with lite (lazy update) changes.
 				27 Feb 2015 - Changes to work with lazy updates, long duration reservations
 					and e*->l* fixes.
+				26 May 2015 - Changes to support pledge as an interface.
 */
 
 package managers
@@ -217,9 +218,16 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 /*
 	Push the fmod requests to fq-mgr for a steering resrvation. 
 */
-func push_st_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg, hto_limit int64 ) {
+func push_st_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chmsg, hto_limit int64 ) {
 
-	if p == nil {												// expired
+	if gp == nil {												// expired
+		return
+	}
+
+	p, ok :=  (*gp).( *gizmos.Pledge_steer )		// generic pledge better be a bw pledge!
+	if ! ok {
+		rm_sheep.Baa( 1, "internal error in push_st_reservation: pledge isn't a steering pledge" )
+		(*gp).Set_pushed()						// prevent looping
 		return
 	}
 

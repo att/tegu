@@ -67,6 +67,8 @@
 					Extended the POST function to include a "cancelres" request. Sheesh.  It would be
 					much simpler to listen on a socket and accept newline terminated messages; rest sucks.
 				18 May 2015 : Added discount support.
+				20 May 2015 : Added ability to specific VLAN as a match on bandwidth reservations.
+				26 May 2015 - Conversion to support pledge as an interface.
 */
 
 package managers
@@ -337,7 +339,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	wants two reason strings and a count of errors in order to report an overall status and a status of
 	each request that was received from the outside world.
 */
-func finalise_reservation( res *gizmos.Pledge, res_paused bool ) ( reason string, jreason string, nerrors int ) {
+func finalise_bwreservation( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
 	nerrors = 0
 	jreason = ""
@@ -446,7 +448,6 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 */
 func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	var (
-		res			*gizmos.Pledge			// reservation that we're working on
 		//res_name	string = "undefined"
 		tokens		[]string
 		ntokens		int
@@ -676,7 +677,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								req.Send_req( rmgr_ch, my_ch, REQ_PLEDGE_LIST, hname, nil )		// get a list of pledges that are associated with the hostname
 								req = <- my_ch
 								if req.Response_data != nil {
-									plist := req.Response_data.( []*gizmos.Pledge )
+									plist := req.Response_data.( []gizmos.Pledge )				// list of all pledges that touch the VM
 									http_sheep.Baa( 1, "refreshing reservations for %s, %d pledge(s)", *hname, len( plist ) )
 
 									for i := range plist {
@@ -684,21 +685,26 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 										req = <- my_ch
 
 										if req.State == nil {
-											h1, h2 := plist[i].Get_hosts( ) 							// get the pldege hosts so we can update the graph
-											update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
-											update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+											switch sp := plist[i].(type) {
+												case *gizmos.Pledge_bw:
+													h1, h2 := sp.Get_hosts( ) 							// get the pldege hosts so we can update the graph
+													update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
+													update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
 
-											plist[i].Reset_pushed()													// it's not pushed at this point
-											reason, jreason, ecount = finalise_reservation( plist[i], res_paused )	// allocate in network and add to res manager inventory
-											if ecount == 0 {
-												http_sheep.Baa( 1, "reservation refreshed: %s", *plist[i].Get_id() )
-											} else {
-												http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
-												state = "ERROR"
-												nerrors += ecount - 1
+													sp.Reset_pushed()													// it's not pushed at this point
+													reason, jreason, ecount = finalise_bwreservation( sp, res_paused )	// allocate in network and add to res manager inventory
+													if ecount == 0 {
+														http_sheep.Baa( 1, "reservation refreshed: %s", *sp.Get_id() )
+													} else {
+														http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
+														state = "ERROR"
+														nerrors += ecount - 1
+													}
+
+												// refresh not supported for other types
 											}
 										} else {
-											http_sheep.Baa( 1, "unable to yank reservation: %s", req.State )
+											http_sheep.Baa( 1, "unable to yank reservation for refresh: %s", req.State )
 										}
 									}
 								} else {
@@ -709,7 +715,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "reserve":
-						key_list := "bandw window hosts cookie dscp"
+					var res *gizmos.Pledge_bw
+
+						key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs
 						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
 						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
 						if !ok {
@@ -755,7 +763,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 							if err == nil {
 								res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-								res, err = gizmos.Mk_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
+								res, err = gizmos.Mk_bw_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
 							}
 						}
 
@@ -764,7 +772,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								res.Set_matchv6( *tmap["ipv6"] == "true" )
 							}
 							
-							reason, jreason, ecount = finalise_reservation( res, res_paused )	// allocate in network and add to res manager inventory
+							reason, jreason, ecount = finalise_bwreservation( res, res_paused )	// allocate in network and add to res manager inventory
 							if ecount == 0 {
 								state = "OK"
 							} else {
@@ -799,6 +807,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 			case "steer":								// parse a steering request and make it happen
+					var res *gizmos.Pledge_steer
+
 					if ntokens < 5  {
 						nerrors++
 						reason = fmt.Sprintf( "incorrect number of parameters supplied: usage: steer [start-]end [token/]tenant ep1 ep2 mblist [cookie]; received: %s", recs[i] )
@@ -845,7 +855,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
 					res_name := mk_resname( )									// name used to track the reservation in the cache and given to queue setting commands for visual debugging
 
-					res, err := gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"], tmap["proto"] )
+					res, err = gizmos.Mk_steer_pledge( &h1, &h2, p1, p2, startt, endt, &res_name, tmap["cookie"], tmap["proto"] )
 					if err != nil {
 						reason = fmt.Sprintf( "unable to create a steering reservation  %s", err )
 						nerrors++

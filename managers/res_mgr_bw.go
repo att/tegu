@@ -10,6 +10,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		
+				26 May 2015 - Changes to support pledge as an interface.
 */
 
 package managers
@@ -47,13 +48,20 @@ import (
 */
 //func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, set_vlan bool, to_limit int64, alt_table int, pref_ip6 bool ) {
 
-func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit int64, alt_table int, pref_v6 bool ) {
+func push_bw_reservations( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit int64, alt_table int, pref_v6 bool ) {
 	var (
 		msg		*ipc.Chmsg
 		ip2		*string					// the ip ad
 	)
 
 	now := time.Now().Unix()
+
+	p, ok :=  (*gp).( *gizmos.Pledge_bw )		// generic pledge better be a bw pledge!
+	if ! ok {
+		rm_sheep.Baa( 1, "internal error in push_bw_reservation: pledge isn't a bandwidth pledge" )
+		(*gp).Set_pushed()						// prevent looping
+		return
+	}
 
 	h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
 
@@ -68,12 +76,12 @@ func push_bw_reservations( p *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, 
 		for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
 			fmod := Mk_fqreq( rname )						// default flow mod request with empty match/actions (for bw requests, we don't need priority or such things)
 
-			fmod.Ipv6 = p.Get_matchv6()						// should we force a match on IPv6 rather than IPv4?
+			fmod.Ipv6 = (*p).Get_matchv6()					// should we force a match on IPv6 rather than IPv4?
 			fmod.Cookie =	0xffff							// should be ignored, if we see this out there we've got problems
 			fmod.Single_switch = false						// path involves multiple switches by default
-			fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
+			fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()		// reservation supplied dscp value that we're to match and maybe preserve on exit
 
-			if p.Is_paused( ) {
+			if (*p).Is_paused( ) {
 				fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
 			} else {
 				if to_limit > 0 && expiry > now + to_limit {

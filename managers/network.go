@@ -57,21 +57,15 @@
 				25 Mar 2015 - IPv6 changes.
 				30 Mar 2014 - Added ability to accept an array of Net_vm blocks.
 				18 May 2015 - Added discount support.
+				26 May 2015 - Conversion to support pledge as an interface.
 */
 
 package managers
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
 	"strings"
-	//"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
 	"codecloud.web.att.com/gopkgs/clike"
@@ -1560,78 +1554,14 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
-						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
-						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-						pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths, false ); 
-						pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths, true ); 	// reverse path
+						p, ok := req.Req_data.( *gizmos.Pledge_bw )
+						if ok {
+							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
+							net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
+							pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths, false ); 
+							pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths, true ); 	// reverse path
 
-						if pcount_out > 0  && pcount_in > 0  {
-							path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
-							pcount := 0
-							for j := 0; j < pcount_out; j++ {
-								path_list[pcount] = path_list_out[j]
-								pcount++
-							}
-							for j := 0; j < pcount_in; j++ {	
-								path_list[pcount] = path_list_in[j]
-							}
-
-							req.Response_data = path_list
-							req.State = nil
-						} else {
-							req.Response_data = nil
-							if i_cap_trip {
-								req.State = fmt.Errorf( "unable to generate a path: no capacity (h1<-h2)" )		// tedious, but we'll break out direction 
-							} else {
-								if o_cap_trip {
-									req.State = fmt.Errorf( "unable to generate a path: no capacity (h1->h2)" )
-								} else {
-									req.State = fmt.Errorf( "unable to generate a path:  no path" )
-								}
-							}
-						}
-
-					case REQ_RESERVE:
-						// host names are expected to have been vetted (if needed) and translated to tenant-id/name if IDs are enabled
-						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
-						net_sheep.Baa( 1,  "network: reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
-
-						suffix := "bps"
-						if discount > 0 {
-							if discount < 101 {
-								bandw_in -=  ((bandw_in * discount)/100)
-								bandw_out -=  ((bandw_out * discount)/100)
-								suffix = "%"
-							} else {
-								bandw_in -= discount
-								bandw_out -= discount
-							}
-
-							if bandw_out < 10 {			// add some sanity, and keep it from going too low
-								bandw_out = 10
-							}
-							if bandw_in < 10 {
-								bandw_in = 10
-							}
-							net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", discount, suffix, bandw_in, bandw_out )
-						}
-
-						ip1, err := act_net.name2ip( h1 )
-						ip2 = nil
-						if err == nil {
-							ip2, err = act_net.name2ip( h2 )
-						}
-
-						if err == nil {
-							net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-							pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths, false ); 	// outbound path
-							pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths, true ); 		// inbound path
-
-							if pcount_out > 0  &&  pcount_in > 0  {
-								net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
-
+							if pcount_out > 0  && pcount_in > 0  {
 								path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
 								pcount := 0
 								for j := 0; j < pcount_out; j++ {
@@ -1640,20 +1570,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								}
 								for j := 0; j < pcount_in; j++ {	
 									path_list[pcount] = path_list_in[j]
-									pcount++
-								}
-
-								qid := p.Get_id()
-								p.Set_qid( qid )											// add the queue id to the pledge
-
-								for i := 0; i < pcount; i++ {								// set the queues for each path in the list (multiple paths if network is disjoint)
-									fence := act_net.get_fence( path_list[i].Get_usr() )
-									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
-									path_list[i].Set_queue( qid, commence, expiry, path_list[i].Get_bandwidth(), fence )		// create queue AND inc utilisation on the link
-									if mlag_paths {
-										net_sheep.Baa( 1, "increasing usage for mlag members" )
-										path_list[i].Inc_mlag( commence, expiry, path_list[i].Get_bandwidth(), fence, act_net.mlags )
-									}
 								}
 
 								req.Response_data = path_list
@@ -1669,27 +1585,118 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 										req.State = fmt.Errorf( "unable to generate a path:  no path" )
 									}
 								}
-								net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
 							}
 						} else {
-							net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
-							req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
+							net_sheep.Baa( 1, "internal mishap: pledge passed to has capacity wasn't a bw pledge: %s", p )
+							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
+						}
+
+					case REQ_RESERVE:
+						// host names are expected to have been vetted (if needed) and translated to tenant-id/name if IDs are enabled
+						p, ok := req.Req_data.( *gizmos.Pledge_bw )
+						if ok {
+							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
+							net_sheep.Baa( 1,  "network: reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
+
+							suffix := "bps"
+							if discount > 0 {
+								if discount < 101 {
+									bandw_in -=  ((bandw_in * discount)/100)
+									bandw_out -=  ((bandw_out * discount)/100)
+									suffix = "%"
+								} else {
+									bandw_in -= discount
+									bandw_out -= discount
+								}
+
+								if bandw_out < 10 {			// add some sanity, and keep it from going too low
+									bandw_out = 10
+								}
+								if bandw_in < 10 {
+									bandw_in = 10
+								}
+								net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", discount, suffix, bandw_in, bandw_out )
+							}
+
+							ip1, err := act_net.name2ip( h1 )
+							ip2 = nil
+							if err == nil {
+								ip2, err = act_net.name2ip( h2 )
+							}
+
+							if err == nil {
+								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
+								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths, false ); 	// outbound path
+								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths, true ); 		// inbound path
+
+								if pcount_out > 0  &&  pcount_in > 0  {
+									net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
+
+									path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
+									pcount := 0
+									for j := 0; j < pcount_out; j++ {
+										path_list[pcount] = path_list_out[j]
+										pcount++
+									}
+									for j := 0; j < pcount_in; j++ {	
+										path_list[pcount] = path_list_in[j]
+										pcount++
+									}
+
+									qid := p.Get_id()
+									p.Set_qid( qid )											// add the queue id to the pledge
+
+									for i := 0; i < pcount; i++ {								// set the queues for each path in the list (multiple paths if network is disjoint)
+										fence := act_net.get_fence( path_list[i].Get_usr() )
+										net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
+										path_list[i].Set_queue( qid, commence, expiry, path_list[i].Get_bandwidth(), fence )		// create queue AND inc utilisation on the link
+										if mlag_paths {
+											net_sheep.Baa( 1, "increasing usage for mlag members" )
+											path_list[i].Inc_mlag( commence, expiry, path_list[i].Get_bandwidth(), fence, act_net.mlags )
+										}
+									}
+
+									req.Response_data = path_list
+									req.State = nil
+								} else {
+									req.Response_data = nil
+									if i_cap_trip {
+										req.State = fmt.Errorf( "unable to generate a path: no capacity (h1<-h2)" )		// tedious, but we'll break out direction 
+									} else {
+										if o_cap_trip {
+											req.State = fmt.Errorf( "unable to generate a path: no capacity (h1->h2)" )
+										} else {
+											req.State = fmt.Errorf( "unable to generate a path:  no path" )
+										}
+									}
+									net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
+								}
+							} else {
+								net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
+								req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
+							}
+						} else {									// pledge wasn't a bw pledge
+							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bw pledge: %s", p )
+							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
 						}
 
 
 
 					case REQ_DEL:									// delete the utilisation for the given reservation
-						p := req.Req_data.( *gizmos.Pledge )
-						net_sheep.Baa( 1,  "network: deleting reservation: %s", *p.Get_id() )
-						commence, expiry := p.Get_window( )
-						path_list := p.Get_path_list( )
-
-						qid := p.Get_qid()							// get the queue ID associated with the pledge
-						for i := range path_list {
-							fence := act_net.get_fence( path_list[i].Get_usr() )
-							net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
-							//path_list[i].Set_queue( qid, commence, expiry, -bandw_in, -bandw_out, fence )				// reduce queues on the path as needed
-							path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
+						p, ok := req.Req_data.( *gizmos.Pledge_bw )
+						if ok {
+							net_sheep.Baa( 1,  "network: deleting reservation: %s", *p.Get_id() )
+							commence, expiry := p.Get_window( )
+							path_list := p.Get_path_list( )
+	
+							qid := p.Get_qid()							// get the queue ID associated with the pledge
+							for i := range path_list {
+								fence := act_net.get_fence( path_list[i].Get_usr() )
+								net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
+								path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
+							}
+						} else {
+							net_sheep.Baa( 1, "internal error: req_del wasn't passed a bandwidth pledge" )
 						}
 
 					case REQ_ADD:							// insert new information into the various vm maps

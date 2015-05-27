@@ -7,6 +7,7 @@
 	Author:		Robert Eby
 
 	Mods:		23 Feb 2015 : Created.
+				26 May 2015 - Changes to support pledge as an interface.
 */
 
 package managers
@@ -21,7 +22,14 @@ import (
 /*
  *	Push an "add mirror" request out to an agent in order to create the mirror.
  */
-func push_mirror_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+func push_mirror_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+
+	p, ok := (*gp).( *gizmos.Pledge_mirror )		// better be a mirroring pledge
+	if ! ok {
+		rm_sheep.Baa( 1, "internal error: pledge passed to push_mirror_reservations wasn't a mirror pledge" )
+		(*gp).Set_pushed() 						// prevent looping until it expires
+		return
+	}
 
 	ports, out, _, _, _, _, _, _ := p.Get_values( )
 	ports2 := strings.Replace(*ports, " ", ",", -1)	// ports must be comma separated
@@ -51,7 +59,14 @@ func push_mirror_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg
 /*
  *	Push a "delete mirror" request out to an agent in order to remove the mirror.
  */
-func undo_mirror_reservation( p *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+func undo_mirror_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chmsg ) {
+
+	p, ok := (*gp).( *gizmos.Pledge_mirror )		// better be a mirroring pledge
+	if ! ok {
+		rm_sheep.Baa( 1, "internal error: pledge passed to undo_mirror_reservations wasn't a mirror pledge" )
+		(*gp).Set_pushed() 						// prevent looping until it expires
+		return
+	}
 
 	id := p.Get_id( )
 	host := p.Get_qid( )
