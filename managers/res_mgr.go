@@ -454,24 +454,26 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 						} else {
 							switch sp := (*p).(type) {
 								case *gizmos.Pledge_mirror:
-									rm_sheep.Baa( 0, "did not restore mirroring reservation from checkpoint; not implemented" )
+									//rm_sheep.Baa( 0, "did not restore mirroring reservation from checkpoint; not implemented" )
+									err = i.Add_res( p )								// assume we can just add it back in as is
 
 								case *gizmos.Pledge_steer:
 									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
 
 								case *gizmos.Pledge_bw:
-									h1, h2 := (*sp).Get_hosts( )						// get the host names, fetch ostack data and update graph
+rm_sheep.Baa( 1, ">>> restoring: %s", sp )
+									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
 									update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
 									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
 			
 									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-									req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
+									req.Send_req( nw_ch, my_ch, REQ_RESERVE, sp, nil )
 									req = <- my_ch										// should be OK, but the underlying network could have changed
 					
 									if req.Response_data != nil {
 										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-										(*sp).Set_path_list( path_list )
-										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(*p).Get_id(), *h1, *h2, len( path_list ) )
+										sp.Set_path_list( path_list )
+										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", sp.Get_id(), *h1, *h2, len( path_list ) )
 										err = i.Add_res( p )
 									} else {
 										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
@@ -607,10 +609,12 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 func (inv *Inventory) Get_mirrorlist() ( string ) {
 	sep := ""
 	bs := bytes.NewBufferString("")
-	for _, p := range inv.cache {
+	for _, gp := range inv.cache {
 		//if (*p).Is_mirroring() && !(*p).Is_expired() {
-		if (*p).Is_ptype( gizmos.PT_MIRRORING ) && (*p).Is_expired() {
-			bs.WriteString(fmt.Sprintf("%s%s", sep, *(*p).Get_id()))
+		//if (*p).Is_ptype( gizmos.PT_MIRRORING ) && !(*p).Is_expired() {
+		p, ok := (*gp).(*gizmos.Pledge_mirror) 
+		if ok  && !p.Is_expired() {
+			bs.WriteString(fmt.Sprintf("%s%s", sep, p.Get_id()))
 			sep = " "
 		}
 	}
@@ -629,28 +633,36 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 	reservation and queue settings.  It is VERY IMPORTANT to delete the reservation from
 	the network perspective BEFORE the expiry time is reset.  If it is reset first then
 	the network splits timeslices based on the new expiry and queues end up dangling.
+			if (*p).Is_expired() {								// some reservations need to be undone at expiry
+				switch (*p).(type) {
+					case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
+						undo_mirror_reservation( p, rname, ch )
+				}
+			} else {
+				if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 
-	p, state := inv.Get_res( name, cookie )
-	if p != nil {
-		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", (*p).To_str() )
+	gp, state := inv.Get_res( name, cookie )
+	if gp != nil {
+		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", (*gp).To_str() )
 		state = nil
 
-		//if (*p).Is_mirroring() {
-		if (*p).Is_ptype( gizmos.PT_MIRRORING ) {
-			(*p).Set_expiry( time.Now().Unix() )					// expire the mirror NOW
-		} else {
-			// don't do this for mirroring pledges
-			ch := make( chan *ipc.Chmsg )	
-			defer close( ch )									// close it on return
-			req := ipc.Mk_chmsg( )
-			req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
-			req = <- ch											// wait for response from network
-			state = req.State
-			(*p).Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
+		switch p := (*gp).(type) {
+			case *gizmos.Pledge_mirror:
+				p.Set_expiry( time.Now().Unix() )					// expire the mirror NOW
+
+			case *gizmos.Pledge_bw:
+				ch := make( chan *ipc.Chmsg )	
+				defer close( ch )									// close it on return
+				req := ipc.Mk_chmsg( )
+				req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
+				req = <- ch											// wait for response from network
+				state = req.State
+				p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
 		}
-		(*p).Reset_pushed()									// force push of flow-mods that reset the expiry
+
+		(*gp).Reset_pushed()									// force push of flow-mods that reset the expiry
 	} else {
 		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
 	}

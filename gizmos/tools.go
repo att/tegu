@@ -21,6 +21,7 @@
 				26 Mar 2015 - Added support sussing out port from either ipv6 or v4 addresses.
 				29 Apr 2015 - Correct bug in split port causing stack dump if nil host pointer
 					passed in.
+				27 May 2015 - Added Split_hpv().
 */
 
 package gizmos
@@ -176,6 +177,36 @@ func Split_port( host *string ) ( name *string, port *string ) {
 	// nothing matched, then it's ip6 and no port; default case works
 	return
 }
+
+/*
+	Given a host string of the form: host{vlan}  where host could be:
+		ipv4
+		ipv4:port
+		ipv6
+		[ipv6]:port
+		name:port
+		name
+
+	and {vlan} is optional (brackets and braces are in the syntax not 
+	meta syntax here), return the three components: host name, port and 
+	vlan. Strings are nil if missing.
+*/
+func Split_hpv( host *string ) ( name *string, port *string, vlan *string ) {
+	v :=  ""
+	vlan = &v
+
+	tokens := strings.Split( *host, "{" )
+	if len( tokens )  < 2 {						// simple case, no {vlan}
+		name, port = Split_port( host )
+	} else {
+		name, port = Split_port( &tokens[0] )			// split out the stuff from the host portion
+		v := strings.TrimRight( tokens[1], "}" )		// ditch the trailing ch assumed to be closing }
+		vlan = &v	
+	}
+	
+	return
+}
+
 
 /*
 	Given a host name of the form token/project/address return with the address string in 

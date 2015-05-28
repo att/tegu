@@ -70,6 +70,7 @@
 #								-4, -6, or -a forces the specific type.
 #							  Corrected bug in -v action when the value supplied is a VLAN ID rather than
 #							  a mac address.
+#				28 May 2015 - Added support for inline meta setting and learn actions.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -122,7 +123,9 @@ function help
 		-d data-layer-destination-address   (mac address)
 		-D network-layer-dest-address       (ip address)
 		-e port:queue                       (enqueue on p:q)
+		-l action-string					(complicated match/action to be learned)
 		-m meta-value/mask                  (0x01/0x01 sets the low order bit)
+		-M meta-value       				(set metadata 'inline' mask NOT allowed)
 		-N                                  (no output action)
 		-o output on port                   (late binding applied if mac address given)
 		-p transport-port-src               (specify as port)
@@ -143,6 +146,12 @@ function help
 	Cookie mask of -1 should be used when deleting and omitted when adding. 
 	Switch name is the OVS name, not the mac address. 
 
+	The -M action allows the metadata value or value/mask to be applied to the 
+	packet 'in line' through a hard field write rather than using the metadata-write
+	OVS option.  This means that it can be set _before_ resubmition and in general
+	should eliminate the need to have specific tables whose sole purpose is to 
+	set a meta value before resubmition to the current table. The -M option is
+	_very_ different than the -m action option!!
 
 	CAUTION:
     The order of actions supplied on the command line can be very significant
@@ -464,13 +473,15 @@ do
 
 		action)
 			case $1 in 
-											# WARNING:  strings MUST have a trailing space when added to action!
+											# WARNING:  strings added to action MUST have a trailing space!
 				-b) output="in_port";;						# bounce back on the port that the packet was recevied
 				-d)	action+="mod_dl_dst:$2 "; shift;;		# ethernet mac change of dest
 				-D)	action+="mod_nw_dst:$2 "; shift;;		# network (ip) address change of dest
 				-e)	action+="enqueue:$2 "; shift;;		# port:queue
 				-g)	warn=1; goto="goto_table:$2 "; shift;;
-				-m)	warn=1; meta+="write_metadata:$2 "; shift;;
+				-l)	action+="learn($2)"; shift;;			# add a prebuilt learn action
+				-m)	warn=1; meta+="write_metadata:$2 "; shift;;		# set a meta value/mask, cannot be done before resub
+				-M) action+="set_field:$2->metadata "; shift;;		# set a metadata value or value/mask without resub
 				-n) output="normal ";;
 				-N)	output="";;							# no output action
 				-o)	late_binding $2 | read p s			# if mac given, suss out the port/swtich, else pick up the port
@@ -550,6 +561,8 @@ do
 					;;
 
 				-X)	output="drop ";;	
+
+				-x)	action+="$2 "; shift;;				# externally supplied action
 		
 				*)	echo "unrecognised action option: $1  [FAIL]"
 					exit 1

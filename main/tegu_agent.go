@@ -33,6 +33,7 @@
 				20 Mar 2015 : Added support for bandwidth flow-mod generation script.
 				09 Apr 2015 : Added ql_set_trunks to list of scripts to rsync.
 				20 Apr 2015 : Now accepts direction of external IP to pass on bw-fmod command.
+				28 May 2015 : Changes to support trinity. (version bump to 2.2)
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -51,19 +52,15 @@ import (
 	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
-	//"codecloud.web.att.com/gopkgs/extcmd"
 	"codecloud.web.att.com/gopkgs/connman"
 	"codecloud.web.att.com/gopkgs/jsontools"
 	"codecloud.web.att.com/gopkgs/ssh_broker"
 	"codecloud.web.att.com/gopkgs/token"
-
-	//"codecloud.web.att.com/gopkgs/clike"
-	//"codecloud.web.att.com/gopkgs/ipc"
 )
 
 // globals
 var (
-	version		string = "v2.1/14105"
+	version		string = "v2.2/15285"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -185,11 +182,13 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 // --------------- request support (command execution) ----------------------------------------------------------
 
 /*
-	Builds an option string of the form -X value if value passed in is not nil, and an empty string if 
-	if the value is nil.  If the value is "true" or "True", then -X is returned, if value is "false"
+	Builds an option string of the form '-X value' if value passed in is not nil, and an empty string if 
+	if the value is nil.  If the value is "true" or "True", then '-X' is returned, if value is "false"
 	or "False", then an empty string is returned.  Opt is the -X or --longname option to use. If
 	opt ends in an equal sign, (e.g. --longname=), then no space will separate the key and value
-	in the resulting string.
+	in the resulting string.  If opt is empty (""), then that results in just the value being placed
+	in the return string such that -x could be sent in the map, or positional paramters sussed out 
+	this way too.
 */
 
 func build_opt( value string, opt string ) ( parm string ) {
@@ -256,6 +255,8 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 			build_opt( parms["extip"], "-E" ) +
 			build_opt( parms["extdir"], "" ) +
 			build_opt( parms["flvlan"],  "-v" ) +
+			build_opt( parms["vlan_match"],  "-V" ) +
+			build_opt( parms["vlan_action"],  "-v" ) +
 			build_opt( parms["koe"],  "-k" ) +
 			build_opt( parms["sproto"],  "-p" ) +
 			build_opt( parms["dproto"],  "-P" ) +
@@ -316,7 +317,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 
 	if msg.State > 0 {
 		sheep.Baa( 1, "bw_fmod (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
-		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
+		sheep.Baa( 0, "ERR: %s unable to execute: %s	[TGUAGN000]", cmd_type, cmd_str )
 	} else {
 		sheep.Baa( 1, "bw_fmod cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
 	}
@@ -520,7 +521,7 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
 				host, _, _ := resp.Get_info()
 				sheep.Baa( 2, "create-q: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 				if err != nil {
-        			sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s:  %s	[TGUAGN004]", host, fname, err )
+        			sheep.Baa( 0, "ERR: unable to execute set queue command on %s: data=%s: %s  [TGUAGN004]", host, fname, err )
 					errcount++
 				}  else {
         			sheep.Baa( 1, "queues adjusted succesfully on: %s", host )
@@ -607,7 +608,7 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 					host, _, _ := resp.Get_info()
 					sheep.Baa( 1, "send-fmod: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 					if err != nil {
-						sheep.Baa( 0, "ERR: unable to execute send-fmod command on %s: data=%s:  %s	[TGUAGN004]", host, cstr, err )
+						sheep.Baa( 0, "ERR: unable to execute send-fmod command on %s: data=%s  %s	[TGUAGN004]", host, cstr, err )  
 						errcount++
 					}  else {
 						sheep.Baa( 1, "flow mod set on: %s", host )

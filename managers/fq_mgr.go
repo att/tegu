@@ -235,7 +235,16 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 /*
 	Send a bandwidth endpoint flow-mod request to the agent manager. 
 	This is little more than a wrapper that converts the fq_req into
-	an agent request. 
+	an agent request. The ultimate agent action is to put in all
+	needed flow-mods on an endpoint host in one go, so no need for
+	individual requests for each and no need for tegu to understand
+	the acutal flow-mod mechanics any more.
+
+	Yes, this probably _could_ be pushed up into the reservation manager
+	and sent from there to the agent manager, but for now, since the 
+	ip2mac information is local to fq-mgr, we'll keep it here.  (That
+	info is local to fq-mgr b/c in the original Tegu it came straight
+	in from skoogi and it was fq-mgr's job to interface with skoogi.)
 */
 func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
 
@@ -251,7 +260,7 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 	}
 
 	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
-	data.Match.Dmac = ip2mac[*data.Match.Ip2]
+	data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
 
 	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
 	msg.Actions = make( []action, 1 )							// just a single action
@@ -274,6 +283,10 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 }
 
 /*
+	WARNING: this should be deprecated.  Still needed by steering, but that should change. Tegu
+		should send generic 'setup' actions to the agent and not try to craft flow-mods. 
+		Thus, do NOT use this from any new code!
+
 	Send a flow-mod to the agent using a generic struct to represnt the match and action criteria.
 
 	The fq_req contains data that are neither match or action specific (priority, expiry, etc) or 

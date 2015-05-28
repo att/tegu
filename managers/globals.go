@@ -209,7 +209,7 @@ type Fq_parms struct {
 	Dscp	int					// dscp mask to match if non-zero
 	Meta	*string				// meta
 	Resub	*string				// list of tables to resubmit to
-	Vlan_id	*string				// probably a mac address for late binding, but could be a number
+	Vlan_id	*string				// either a vlan ID or a mac address; mac is looked up by agent
 }
 
 /*

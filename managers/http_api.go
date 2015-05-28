@@ -119,10 +119,13 @@ func mk_resname( ) ( string ) {
 	address:port, we'll require the syntax [address]:port if a port is to be supplied
 	with an IPv6 address.
 
+	We now support the suffix of {n} to indiate a VLAN id that is to be associated
+	with the host and port.  If not there -1 is returned.
+
 	If the resulting host names match (project/host[:port]) then we return an error
 	as this isn't allowed.
 */
-func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, err error ) {
+func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, v1 *string, v2 *string, err error ) {
 	var ht *string
 	
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
@@ -145,16 +148,8 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
-	ht, p1 = gizmos.Split_port( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	ht, p1, v1 = gizmos.Split_hpv( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
 	h1x = *ht
-	/*
-	h1x = *( req.Response_data.( *string ) )
-	tokens := strings.Split( h1x, ":" )
-	if len( tokens ) > 1 {
-		h1x = tokens[0]
-		p1 = &tokens[1]
-	}
-	*/
 
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
@@ -165,21 +160,12 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
-	ht, p2 = gizmos.Split_port( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	ht, p2, v2 = gizmos.Split_hpv( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
 	h2x = *ht
-	//h2x = *( req.Response_data.( *string ) )
 	if h1x == h2x {
 		err = fmt.Errorf( "host names are the same" )
 		return
 	}
-
-	/*
-	tokens = strings.Split( h2x, ":" )
-	if len( tokens ) > 1 {
-		h2x = tokens[0]
-		p2 = &tokens[1]
-	}
-	*/
 
 	return
 }
@@ -339,7 +325,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	wants two reason strings and a count of errors in order to report an overall status and a status of
 	each request that was received from the outside world.
 */
-func finalise_bwreservation( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, jreason string, nerrors int ) {
+func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
 	nerrors = 0
 	jreason = ""
@@ -692,7 +678,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 													update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
 
 													sp.Reset_pushed()													// it's not pushed at this point
-													reason, jreason, ecount = finalise_bwreservation( sp, res_paused )	// allocate in network and add to res manager inventory
+													reason, jreason, ecount = finalise_bw_res( sp, res_paused )	// allocate in network and add to res manager inventory
 													if ecount == 0 {
 														http_sheep.Baa( 1, "reservation refreshed: %s", *sp.Get_id() )
 													} else {
@@ -735,12 +721,11 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							bandw_out = bandw_in
 						}
 
-
 						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
 						h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
 						res = nil
-						h1, h2, p1, p2, err := validate_hosts( h1, h2 )				// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+						h1, h2, p1, p2, v1, v2, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
 
 						if err == nil {
 							update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
@@ -768,11 +753,12 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						}
 
 						if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+							res.Set_vlan( v1, v2 )							// augment the rest of the reservation
 							if tmap["ipv6"] != nil {
 								res.Set_matchv6( *tmap["ipv6"] == "true" )
 							}
 							
-							reason, jreason, ecount = finalise_bwreservation( res, res_paused )	// allocate in network and add to res manager inventory
+							reason, jreason, ecount = finalise_bw_res( res, res_paused )	// allocate in network and add to res manager inventory
 							if ecount == 0 {
 								state = "OK"
 							} else {
@@ -817,7 +803,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 					tmap := gizmos.Mixtoks2map( tokens[1:], "window usrsp ep1 ep2 mblist cookie" )		// map tokens in order to these names	(not as efficient, but makes code easier to read below)
 
-					h1, h2, p1, p2, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+					h1, h2, p1, p2, _, _, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 					if err != nil {
 						reason = fmt.Sprintf( "invalid endpoints:  %s", err )
 						http_sheep.Baa( 1, "steering reservation rejected: %s", reason )

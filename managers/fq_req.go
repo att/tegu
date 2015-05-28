@@ -129,6 +129,16 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 	} else {
 		fmap["extdir"] = ""
 	}
+	if fq.Match.Vlan_id != nil {												// adds a vlan number to match (should NOT be a mac)
+		fmap["vlan_match"] = *fq.Match.Vlan_id
+	} else {
+		fmap["vlan_match"] = ""
+	}
+	if fq.Action.Vlan_id != nil {												// adds a set vlan action, can be a MAC for late conversion
+		fmap["vlan_action"] = *fq.Action.Vlan_id
+	} else {
+		fmap["vlan_action"] = ""
+	}
 
 	fmap["queue"] =  fmt.Sprintf( "%d", fq.Espq.Queuenum )
 	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )						// shift left 2 bits to match what OVS wants
@@ -146,11 +156,11 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 		}
 	}
 
-/*
-for k, v := range fmap {
-	fmt.Fprintf( os.Stderr, "fq_req to map >>>> %s = %s\n", k, v )
-}
-*/
+	if fq_sheep.Would_baa( 3 ) {
+		for k, v := range fmap {
+			fq_sheep.Baa( 3, "fq_req to action id=%s %s = %s", fq.Id, k, v )
+		}
+	}
 
 	return
 }

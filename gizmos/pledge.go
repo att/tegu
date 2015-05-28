@@ -35,7 +35,6 @@ type Pledge interface {
 	Get_hosts() ( *string, *string )
 	Get_id( ) ( *string )
 	Get_window( ) ( int64, int64 )
-	//Get_ptype( ) ( int )					users should use assertion or type determination in switch
 	Has_host( *string ) ( bool )
 	Is_active( ) ( bool )
 	Is_active_soon( window int64 ) ( bool )
@@ -44,7 +43,6 @@ type Pledge interface {
 	Is_pending( ) ( bool )
 	Is_pushed( ) (bool)
 	Is_paused( ) ( bool )
-	Is_ptype( kind int ) ( bool )					// kind is one of the PT constants
 	Is_valid_cookie( c *string ) ( bool )
 	Nuke()
 	Pause( bool )
@@ -57,6 +55,9 @@ type Pledge interface {
 	To_chkpt( ) ( string )
 	To_json( ) ( string )
 	To_str() ( string )
+
+	//Get_ptype( ) ( int )		users should use assertion or type determination in switch for these
+	//Is_ptype( kind int ) ( bool )					// kind is one of the PT constants
 }
 
 // generic struct to unpack any type of pledge in order to determine the type

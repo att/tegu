@@ -48,7 +48,9 @@
 #				27 Mar 2015 - Added ipv6 support.
 #				20 Apr 2015 - Accept external IP direction
 #				11 May 2015 - Inbound flow-mods must match all types, changed to allow for this.
-#				14 May 2015 - To eliminate the use of br-rl and thus the last HTB queue.
+#				14 May 2015 - To eliminate the use of br-rl and thus the last HTB queue. (flow-mods are
+#								now very simple, one in each direction)
+#				28 May 2015 - Added match vlan support (-V)
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -80,6 +82,7 @@ odscp=""
 host=""
 forreal=""
 pri_base=0				# priority is bumpped up a bit for protocol specific f-mods
+vp_base=0				# priority added if vlan match supplied (outbound)
 one_switch=0			# may need to handle things differently if one switch is involved
 queue=""
 koe=0					# keep dscp value as packet 'exits' our environment. Set if global_* traffic type given to tegu
@@ -109,6 +112,7 @@ do
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		odscp="-T $2"; shift;;
 		-v)		set_vlan=0;;							# ignored -- maintained for backwards compat
+		-V)		vp_base=5; match_vlan="-v $2"; shift;;	# vlan id given on resrvation for match (applies only to outbound)
 		-X)		operation="del";;
 
 		-\?)	usage
@@ -154,13 +158,21 @@ else
 fi
 
 
-# CAUTION: action options are probably order dependent, so be careful.
-# inbound
-send_ovs_fmod $forreal $host $timeout -p $(( 450 + pri_base )) --match $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $proto --action $idscp -R ,$mt_base -R ,0 -N $operation $cookie $bridge
-rc=$?
+# CAUTION: action options to send_ovs_fmods are probably order dependent, so be careful.
+if (( ! one_switch ))
+then
+	# inbound -- only if both are not on the same switch
+	send_ovs_fmod $forreal $host $timeout -p $(( 450 + pri_base )) --match $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $proto --action $idscp -M 0x01 -R ,0 -N $operation $cookie $bridge
+	rc=$?
+else
+	if (( ! koe ))		# one switch and keep is off, no need to set dscp 
+	then
+		odscp=""
+	fi
+fi
 
 #outbound
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $proto --action $odscp -R ,$mt_base -R ,0 -N $operation $cookie $bridge
+send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_vlan $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $proto --action $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
 rc=$(( rc + $? ))
 
 rm -f /tmp/PID$$.*

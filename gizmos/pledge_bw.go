@@ -27,6 +27,8 @@ package gizmos
 import (
 	"encoding/json"
 	"fmt"
+
+	"codecloud.web.att.com/gopkgs/clike"
 )
 
 type Pledge_bw struct {
@@ -35,6 +37,8 @@ type Pledge_bw struct {
 	protocol	*string		// tcp/udp:port
 	tpport1		*string		// transport port number or 0 if not defined
 	tpport2		*string		// thee match h1/h2 respectively
+	vlan1		*string		// vlan id to match with h1 match criteria
+	vlan2		*string		// vlan id to macth with h2
 	window		*pledge_window
 	bandw_in	int64		// bandwidth to reserve inbound to host1
 	bandw_out	int64		// bandwidth to reserve outbound from host1
@@ -74,6 +78,22 @@ type Json_pledge_bw struct {
 
 // ---- private -------------------------------------------------------------------
 
+/*
+	Formats v1 and v2 in the {n} format for adding to a host representation which is 
+	now   token/project/vm:port{vlan}.
+*/
+func ( p *Pledge_bw ) bw_vlan2string( ) (v1 string, v2 string) {
+	v1 = ""
+	v2 = ""
+	if p.vlan1 != nil && clike.Atoi( *p.vlan1 ) > 0 {
+		v1 = "{" + *p.vlan1 + "}"
+	}
+	if p.vlan2 != nil && clike.Atoi( *p.vlan2 ) > 0  {
+		v2 = "{" + *p.vlan2 + "}"
+	}
+
+	return v1, v2
+}
 
 // ---- public -------------------------------------------------------------------
 
@@ -125,6 +145,145 @@ func Mk_bw_pledge(	host1 *string, host2 *string, p1 *string, p2 *string, commenc
 	}
 
 	return
+}
+
+/*
+	Return whether the match on IPv6 flag is true
+*/
+func (p *Pledge_bw) Get_matchv6() ( bool ) {
+	return p.match_v6
+}
+
+/*
+	Returns a pointer to the queue ID
+*/
+func (p *Pledge_bw) Get_qid( ) ( *string ) {
+	if p == nil {
+		return nil
+	}
+
+	return p.qid
+}
+
+/*
+	Returns the current total amount of bandwidth that has been assigned to the pledge.
+*/
+func (p *Pledge_bw) Get_bandw( ) ( int64 ) {
+	if p == nil {
+		return 0
+	}
+
+	return p.bandw_in + p.bandw_out
+}
+
+/*
+	Returns the current amount of bandwidth that has been assigned to the pledge for traffic outbound from host1.
+*/
+func (p *Pledge_bw) Get_bandw_out( ) ( int64 ) {
+	if p == nil {
+		return 0
+	}
+
+	return p.bandw_out
+}
+
+/*
+	Returns the current amount of bandwidth that has been assigned to the pledge for traffic inbound to hsot1.
+*/
+func (p *Pledge_bw) Get_bandw_in( ) ( int64 ) {
+	if p == nil {
+		return 0
+	}
+
+	return p.bandw_in
+}
+
+/*
+	Returns pointers to both host strings that comprise the pledge.
+*/
+func (p *Pledge_bw) Get_hosts( ) ( *string, *string ) {
+	if p == nil {
+		return &empty_str, &empty_str
+	}
+
+	return p.host1, p.host2
+}
+
+/*
+	Returns the set of values that are needed to create a pledge in the network:
+		pointer to host1 name,
+		pointer to host2 name,
+		the h1 transport port number and mask or ""
+		the h2 transport port number and mask or ""
+		the commence time,
+		the expiry time,
+		the inbound bandwidth,
+		the outbound bandwidth
+*/
+func (p *Pledge_bw) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *string, commence int64, expiry int64, bw_in int64, bw_out int64 ) {
+	if p == nil {
+		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
+	}
+
+	c, e := p.window.get_values()
+	return p.host1, p.host2, p.tpport1, p.tpport2, c, e, p.bandw_in, p.bandw_out
+}
+
+/*
+	Return the dscp that was submitted with the reservation, and the state of the keep on
+	exit flag.
+*/
+func (p *Pledge_bw) Get_dscp( ) ( int, bool ) {
+	if p == nil {
+		return 0, false
+	}
+
+	return p.dscp, p.dscp_koe
+}
+
+/*
+	Returns the list of path objects that are needed to fulfill the pledge. Mulitple
+	paths occur if the network is split.
+*/
+func (p *Pledge_bw) Get_path_list( ) ( []*Path ) {
+	if p == nil {
+		return nil
+	}
+	return p.path_list
+}
+
+/*
+	Return the commence and expiry times.
+*/
+func (p *Pledge_bw) Get_window( ) ( int64, int64 ) {
+	if p == nil {
+		return 0, 0
+	}
+
+	return p.window.get_values()
+}
+
+/*
+	Set the vlan IDs associated with the hosts (for matching)
+*/
+func (p *Pledge_bw) Set_vlan( v1 *string, v2 *string ) {
+	if p == nil {
+		return
+	}
+
+	p.vlan1 = v1
+	p.vlan2 = v2	
+}
+
+/*
+	Returns the matching vlan IDs.
+*/
+func (p *Pledge_bw) Get_vlan( ) ( v1 *string, v2 *string ) {
+	if p == nil {
+		return
+	}
+
+	return p.vlan1, p.vlan2
 }
 
 // --------------- interface functions (required) ------------------------------------------------------
@@ -186,8 +345,8 @@ func (p *Pledge_bw) From_json( jstr *string ) ( err error ){
 		return
 	}
 
-	p.host1, p.tpport1 = Split_port( jp.Host1 )		// suss apart host and port
-	p.host2, p.tpport2 = Split_port( jp.Host2 )
+	p.host1, p.tpport1, p.vlan1  = Split_hpv( jp.Host1 )		// suss apart host and port
+	p.host2, p.tpport2, p.vlan2  = Split_hpv( jp.Host2 )
 
 	p.protocol = jp.Protocol
 	p.window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
@@ -207,6 +366,7 @@ func (p *Pledge_bw) From_json( jstr *string ) ( err error ){
 	return
 }
 
+// --- functions that extend the interface -- bw-only functions ---------
 /*
 	Associates a queue ID with the pledge.
 */
@@ -215,17 +375,36 @@ func (p *Pledge_bw) Set_qid( id *string ) {
 }
 
 /*
-	Set match v6 flag based on user input.
-*/
-func (p *Pledge_bw) Set_matchv6( state bool ) {
-	p.match_v6 = state
-}
-
-/*
 	Associates a path list with the pledge.
 */
 func (p *Pledge_bw) Set_path_list( pl []*Path ) {
 	p.path_list = pl
+}
+
+/*
+	Add a protocol reference to the pledge (e.g. tcp:80 or udp:4444)
+*/
+func (p *Pledge_bw) Add_proto( proto *string ) {
+	if p == nil {
+		return
+	}
+
+	p.protocol = proto
+}
+
+/*
+	Return the protocol associated with the pledge.
+*/
+func (p *Pledge_bw) Get_proto( ) ( *string ) {
+	return p.protocol
+}
+
+// --- functions required by the interface ------------------------------
+/*
+	Set match v6 flag based on user input.
+*/
+func (p *Pledge_bw) Set_matchv6( state bool ) {
+	p.match_v6 = state
 }
 
 /*
@@ -270,24 +449,6 @@ func (p *Pledge_bw) Has_host( hname *string ) ( bool ) {
 	return *p.host1 == *hname || *p.host2 == *hname
 }
 
-/*
-	Add a protocol reference to the pledge (e.g. tcp:80 or udp:4444)
-*/
-func (p *Pledge_bw) Add_proto( proto *string ) {
-	if p == nil {
-		return
-	}
-
-	p.protocol = proto
-}
-
-/*
-	Return the protocol associated with the pledge.
-*/
-func (p *Pledge_bw) Get_proto( ) ( *string ) {
-	return p.protocol
-}
-
 
 // --------- humanisation or export functions --------------------------------------------------------
 
@@ -309,10 +470,11 @@ func (p *Pledge_bw) String( ) ( s string ) {
 
 	state, caption, diff := p.window.state_str()
 	commence, expiry := p.window.get_values( )
+	v1, v2 := p.bw_vlan2string( )
 
 	//NEVER put the usrkey into the string!
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=bandwidth koe=%v", state, diff, caption,
-		*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, *p.qid, commence, expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d%s h2=%s:%d%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=bandwidth koe=%v", state, diff, caption,
+		*p.host1, *p.tpport2, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, commence, expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe )
 	return
 }
 
@@ -326,11 +488,15 @@ func (p *Pledge_bw) String( ) ( s string ) {
 	expose the fields publicly that do go into the json output.
 */
 func (p *Pledge_bw) To_json( ) ( json string ) {
+	if p == nil {
+		return "{ }"
+	}
 
 	state, _, diff := p.window.state_str()		// get state as a string
-	
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s", "host2": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`,
-				state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, *p.host2, *p.tpport2, *p.id, *p.qid, p.dscp, p.dscp_koe, PT_BANDWIDTH )
+	v1, v2 := p.bw_vlan2string( )
+
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s%s", "host2": "%s:%s%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`,
+				state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, p.dscp, p.dscp_koe, PT_BANDWIDTH )
 
 	return
 }
@@ -359,20 +525,22 @@ func (p *Pledge_bw) To_chkpt( ) ( chkpt string ) {
 	}
 	
 	commence, expiry := p.window.get_values()
-	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
-			*p.host1, *p.tpport1, *p.host2, *p.tpport2, commence, expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, PT_BANDWIDTH )
+	v1, v2 := p.bw_vlan2string( )
+
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%s%s", "host2": "%s:%s%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
+			*p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, commence, expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, PT_BANDWIDTH )
 
 	return
 }
 
-// ----------- generic functions that satisfiy the interface -------------------------
 
 /*
+DEPRECATED -- use switch p.(type)  or p, ok := x.(*Pledge_bw) instead
 	Returns true if PT_BANDWIDTH passed in; false otherwise.
-*/
 func (p *Pledge_bw) Is_ptype( kind int ) ( bool ) {
 	return kind == PT_BANDWIDTH
 }
+*/
 
 /*
 	Sets the pushed flag to true.
@@ -522,116 +690,4 @@ func (p *Pledge_bw) Get_id( ) ( *string ) {
 	return p.id
 }
 
-// --------------- bandwidth specific functions ------------------------------
 
-/*
-	Return whether the match on IPv6 flag is true
-*/
-func (p *Pledge_bw) Get_matchv6() ( bool ) {
-	return p.match_v6
-}
-
-/*
-	Returns a pointer to the queue ID
-*/
-func (p *Pledge_bw) Get_qid( ) ( *string ) {
-	if p == nil {
-		return nil
-	}
-
-	return p.qid
-}
-
-/*
-	Returns the current total amount of bandwidth that has been assigned to the pledge.
-*/
-func (p *Pledge_bw) Get_bandw( ) ( int64 ) {
-	if p == nil {
-		return 0
-	}
-
-	return p.bandw_in + p.bandw_out
-}
-
-/*
-	Returns the current amount of bandwidth that has been assigned to the pledge for traffic outbound from host1.
-*/
-func (p *Pledge_bw) Get_bandw_out( ) ( int64 ) {
-	if p == nil {
-		return 0
-	}
-
-	return p.bandw_out
-}
-
-/*
-	Returns the current amount of bandwidth that has been assigned to the pledge for traffic inbound to hsot1.
-*/
-func (p *Pledge_bw) Get_bandw_in( ) ( int64 ) {
-	if p == nil {
-		return 0
-	}
-
-	return p.bandw_in
-}
-
-/*
-	Returns pointers to both host strings that comprise the pledge.
-*/
-func (p *Pledge_bw) Get_hosts( ) ( *string, *string ) {
-	if p == nil {
-		return &empty_str, &empty_str
-	}
-
-	return p.host1, p.host2
-}
-
-/*
-	Returns the set of values that are needed to create a pledge in the network:
-		pointer to host1 name,
-		pointer to host2 name,
-		the h1 transport port number and mask or ""
-		the h2 transport port number and mask or ""
-		the commence time,
-		the expiry time,
-		the inbound bandwidth,
-		the outbound bandwidth
-*/
-func (p *Pledge_bw) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *string, commence int64, expiry int64, bw_in int64, bw_out int64 ) {
-	if p == nil {
-		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
-	}
-
-	c, e := p.window.get_values()
-	return p.host1, p.host2, p.tpport1, p.tpport2, c, e, p.bandw_in, p.bandw_out
-}
-
-/*
-	Return the dscp that was submitted with the reservation, and the state of the keep on
-	exit flag.
-*/
-func (p *Pledge_bw) Get_dscp( ) ( int, bool ) {
-	if p == nil {
-		return 0, false
-	}
-
-	return p.dscp, p.dscp_koe
-}
-
-/*
-	Returns the list of path objects that are needed to fulfill the pledge. Mulitple
-	paths occur if the network is split.
-*/
-func (p *Pledge_bw) Get_path_list( ) ( []*Path ) {
-	if p == nil {
-		return nil
-	}
-	return p.path_list
-}
-
-/*
-	Return the commence and expiry times.
-*/
-func (p *Pledge_bw) Get_window( ) ( int64, int64 ) {
-	return p.window.get_values()
-}
