@@ -96,11 +96,12 @@ type Network struct {
 	vmid2ip		map[string]*string			// vmid to ip address	Tegu-lite
 	mac2phost	map[string]*string			// mac to phost map generated from OVS agent data (needed to include gateways in graph)
 	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
-	ip2fip		map[string]*string			// tenant/ip to floating ip address translation
-	fip2ip		map[string]*string			// floating ip address to tenant/ip translation
+	ip2fip		map[string]*string			// projects/ip to floating ip address translation
+	fip2ip		map[string]*string			// floating ip address to projects/ip translation
 	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
 	mlags		map[string]*gizmos.Mlag		// reference to each mlag link group by name
 	hupdate		bool						// set to true only if hosts is updated after gwmap has size (chkpt reload timing)
+	relaxed		bool						// if true, we're in relaxed mode which means we don't path find or do admission control.
 }
 
 type host_pair struct {
@@ -131,6 +132,15 @@ func mk_network( mk_links bool ) ( n *Network ) {
 }
 
 // -------------- map management (mostly tegu-lite) -----------------------------------------------------------
+/*
+	Set the relaxed mode in the network.
+*/
+func (n *Network) Set_relaxed( state bool ) {
+	if n != nil {
+		n.relaxed = state
+	}
+}
+
 /*
 	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
 */
@@ -432,7 +442,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 		return 
 	}
 
-	if (*hname)[0:2] == "!/" {					// special external name (no tenant string following !)
+	if (*hname)[0:2] == "!/" {					// special external name (no project string following !)
 		ip = hname
 		return
 	}
@@ -550,6 +560,25 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 }
 
 /*
+	Find a virtual link between two switches -- used when in relaxed mode and no real path
+	between endpoints is found, but we still need to pretend there is a path. If we don't
+	have a link in the virtual table we'll create one and return that. 
+*/
+func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
+
+	id := fmt.Sprintf( "%s.%s", sw1, sw2 ) 			
+
+	l = n.vlinks[id]
+	if l == nil {
+		l = gizmos.Mk_link( &sw1, &sw2, int64( 10 * ONE_GIG ), 99, nil )		// create the link and add to virtual table
+		l.Set_ports( 1024, 1024 )
+		n.vlinks[id] = l
+	}
+
+	return
+}
+
+/*
 	Build a new graph of the network.
 	Host is the name/ip:port of the host where floodlight is running.
 	Old-net is the reference net that we'll attempt to find existing links in.
@@ -600,6 +629,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		n.links = old_net.links					// might it be wiser to copy this rather than reference and update the 'live' copy?
 		n.vlinks = old_net.vlinks
 		n.mlags = old_net.mlags
+		n.relaxed = old_net.relaxed
 	}
 
 	if links == nil {
@@ -719,7 +749,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 
 /*
 	DEPRECATED
-	Given a tenant id, find the associated gateway.  Returns the whole tenant/ip string. 
+	Given a project id, find the associated gateway.  Returns the whole project/ip string. 
 
 	TODO: return list if multiple gateways
 	TODO: improve performance by maintaining a tid->gw map
@@ -776,11 +806,11 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 
 /*
 	Look at tid/h1 and tid/h2 and split them into two disjoint path endpoints, tid/gw,h1 and tid/gw,h2, if
-	the tenant ids for the hosts differ.  This will allow for reservations between tenant VMs that are both
-	known to Tegu.  If the endpoints are in different tenants, then we require each to have a floating point
+	the project ids for the hosts differ.  This will allow for reservations between project VMs that are both
+	known to Tegu.  If the endpoints are in different project, then we require each to have a floating point
 	IP address that is known to us.
 
-	If the tenant/project/user ID starts with a leading bang (!) then we assume it was NOT validated. If
+	If the project/project/user ID starts with a leading bang (!) then we assume it was NOT validated. If
 	both are not validated we reject the attempt. If one is validated we build the path from the other 
 	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
 	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
@@ -795,13 +825,13 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 */
 func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
 	var (
-		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different tenants
+		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different project
 		h2_auth bool = true
 	)
 
 	err = nil
 
-	if strings.Index( *h1ip, "/" ) < 0 {					// no tenant id in the name we have to assume in the same realm
+	if strings.Index( *h1ip, "/" ) < 0 {					// no project id in the name we have to assume in the same realm
 		pair_list = make( []host_pair, 1 )
 		pair_list[0].h1 = h1ip
 		pair_list[0].h2 = h2ip
@@ -810,10 +840,10 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	}
 
 	nalloc := 2												// number to allocate if both validated
-	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out tenant ids
+	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out project ids
 	t1 := toks[0]
 	f1 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
-	if t1[0:1] == "!" {										// tenant wasn't validated, we use as endpoint, but dont create an end to end path
+	if t1[0:1] == "!" {										// project wasn't validated, we use as endpoint, but dont create an end to end path
 		h1_auth = false
 		t1 =  t1[1:]										// drop the not authorised indicator for fip lookup later
 		ah1 :=  (*h1ip)[1:]									// must also adjust h1 string for fip translation
@@ -824,7 +854,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	toks = strings.SplitN( *h2ip, "/", 2 )
 	t2 := toks[0]
 	f2 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
-	if  t2[0:1] ==  "!" {									// tenant wasn't validated, we use as endpoint, but dont create an end to end path
+	if  t2[0:1] ==  "!" {									// project wasn't validated, we use as endpoint, but dont create an end to end path
 		h2_auth = false
 		t2 =  t2[1:]
 		ah2 :=  (*h2ip)[1:]									// must also adjust h2 string for fip translation
@@ -837,7 +867,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		return
 	}
 
-	if t1 == t2 {									// same tenant, just one pair to deal with and we don't care if one wasn't validated
+	if t1 == t2 {									// same project, just one pair to deal with and we don't care if one wasn't validated
 		pair_list = make( []host_pair, 1 )
 		pair_list[0].h1 = h1ip
 		pair_list[0].h2 = h2ip
@@ -872,7 +902,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		return
 	}
 
-	//g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
+	//g1 := n.gateway4tid( t1 )						// map project id to gateway which become the second endpoint
 	//g2 := n.gateway4tid( t2 )
 	g1 := n.vmip2gw[*h1ip]							// pick up the gateway for each of the VMs
 	g2 := n.vmip2gw[*h2ip]
@@ -979,7 +1009,7 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the 
 	middle switches are NOT maintaine. 
 
-	usr is the name of the user that the reservation is being processed for (tenant in openstack). The usr_max value
+	usr is the name of the user that the reservation is being processed for (project in openstack). The usr_max value
 	is a percentage (1-100)  that defines the maximum of any link that the user may have reservations against or a hard
 	limit if larger than 100. 
 
@@ -999,7 +1029,7 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 	path.Add_switch( ssw )
 	path.Add_switch( epsw )
 
-	lnk := n.find_vlink( *(ssw.Get_id()), h2.Get_port( ssw ), -1, nil, nil )			// add endpoint -- a virtual link out from switch to h1
+	lnk := n.find_vlink( *(ssw.Get_id()), h1.Get_port( ssw ), -1, nil, nil )			// add endpoint -- a virtual link out from switch to h1
 	lnk.Add_lbp( *(h1.Get_mac()) )
 	lnk.Set_forward( ssw )
 	path.Add_endpoint( lnk )
@@ -1012,6 +1042,39 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 	for i := range links {
 		path.Add_link( links[i] )
 	}
+
+	return
+}
+
+/*
+	A helper function for find_paths() that is used when running in 'relaxed' mode. In relaxed mode we don't
+	actually find a path between the endpoints as we aren't doign admission control, but need to simulate
+	a path in order to set up the flow-mods on the endpoints correctly.
+*/
+func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *gizmos.Switch, h2 *gizmos.Host ) ( path *gizmos.Path, err error ) {
+
+	net_sheep.Baa( 1, "find_lax: creating relaxed path between %s and %s", *(h1.Get_mac()), *(h2.Get_mac()) )
+
+	path = gizmos.Mk_path( h1, h2 )
+	path.Set_bandwidth( 0 )
+	path.Add_switch( sw1 )
+	path.Add_switch( sw2 )
+
+
+	lnk := n.find_vlink( *(sw1.Get_id()), h1.Get_port( sw1 ), -1, nil, nil )	// add endpoint -- a virtual from sw1 out to the host h1
+	lnk.Add_lbp( *(h1.Get_mac()) )
+	lnk.Set_forward( sw1 )
+	path.Add_endpoint( lnk )
+
+	lnk = n.find_swvlink( *(sw1.Get_id()), *(sw2.Get_id()) )					// suss out or create a virtual link between the two 
+	lnk.Set_forward( sw2 )
+	lnk.Set_backward( sw1 )
+	path.Add_link( lnk )
+
+	lnk = n.find_vlink( *(sw2.Get_id()), h2.Get_port( sw2 ), -1, nil, nil )		// add endpoint -- a virtual link on sw2 out to the host h2
+	lnk.Add_lbp( *(h2.Get_mac()) )
+	lnk.Set_forward( sw2 )
+	path.Add_endpoint( lnk )
 
 	return
 }
@@ -1091,7 +1154,6 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		}
 
 		ssw, _ = h1.Get_switch_port( swidx )				// get next switch that lists h1 as attached; we'll work 'out' from it toward h2
-		swidx++
 		if ssw == nil {										// no more source switches which h1 thinks it's attached to
 			pcount = plidx
 			if pcount <= 0 || swidx == 0 {
@@ -1103,7 +1165,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		}
 
 		fence := n.get_fence( usr )
-		if ssw.Has_host( h1nm )  &&  ssw.Has_host( h2nm ) {			// if both hosts are on the same switch, there's no path if they both have the same port
+		if ssw.Has_host( h1nm )  &&  ssw.Has_host( h2nm ) {			// if both hosts are on the same switch, there's no path if they both have the same port (both external to our view)
 			p1 := h1.Get_port( ssw )
 			p2 := h2.Get_port( ssw )
 			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
@@ -1111,8 +1173,11 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 				m2 := h2.Get_mac( )
 
 				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, m1, m2 )
-				has_room, err := lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 
-				if has_room {										// room for the reservation
+				has_room := false
+				if ! n.relaxed {
+					has_room, err = lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 	// admission control if not in relaxed mode
+				}
+				if n.relaxed || has_room {										// room for the reservation
 					lnk.Add_lbp( *h1nm )
 					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
 					path = gizmos.Mk_path( h1, h2 )							// empty path
@@ -1146,15 +1211,23 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 			}
 
 			
-			if find_all {																		// find all possible paths not just shortest
-				path, err = n.find_all_paths( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )		// find a 'scramble' path
+			if n.relaxed {				
+				dsw, _ := h2.Get_switch_port( swidx )					// need the switch associated with the second host (dest switch)
+				path, err = n.find_relaxed_path( ssw, h1, dsw, h2 )		// no admissions control we fake a link between the two 
 				if err != nil {
-					net_sheep.Baa( 1, "find_paths: find_all failed: %s", err )
+					net_sheep.Baa( 1, "find_paths: find_relaxed failed: %s", err )
 				}
 			} else {
-				path, cap_trip = n.find_shortest_path( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )
-				if cap_trip {
-					lcap_trip = true
+				if find_all {																		// find all possible paths not just shortest
+					path, err = n.find_all_paths( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )		// find a 'scramble' path
+					if err != nil {
+						net_sheep.Baa( 1, "find_paths: find_all failed: %s", err )
+					}
+				} else {
+					path, cap_trip = n.find_shortest_path( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )
+					if cap_trip {
+						lcap_trip = true
+					}
 				}
 			}
 
@@ -1164,6 +1237,8 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 				plidx++
 			}
 		}
+
+		swidx++
 	}
 
 	pcount = plidx			// shouldn't get here, but safety first
@@ -1173,7 +1248,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 /*
 	Find all paths that are associated with the reservation.  This splits the h1->h2 request into 
-	two paths if h1 and h2 are in different tenants.  The resulting paths in this case are between h1 and 
+	two paths if h1 and h2 are in different projects.  The resulting paths in this case are between h1 and 
 	the gateway, and from the gateway to h2 (to preserve the h1->h2 directional signficance which is 
 	needed if inbound and outbound rates differ.  In order to build a good set of flow-mods for the split
 	reservation, both VMs MUST have an associated floating point address which is then generated as a 
@@ -1203,7 +1278,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	path_list = nil
 	if n == nil { return }
 
-	pair_list, err := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different tenants
+	pair_list, err := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different projects (vm-vm, or vm-rtr vm-rtr)
 	if err != nil {
 		net_sheep.Baa( 1, "unable to build path: %s", err )
 		return
@@ -1419,6 +1494,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		limits map[string]*gizmos.Fence		// user link capacity boundaries
 		phost_suffix *string = nil
 		discount int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
+		relaxed	bool = false				// set with relaxed = true in config
 
 		ip2		*string
 	)
@@ -1459,6 +1535,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 			}
 		}
 
+		if p := cfg_data["network"]["relaxed"]; p != nil {
+			relaxed = *p ==  "true" || *p ==  "True" || *p == "TRUE"
+		}
 		if p := cfg_data["network"]["refresh"]; p != nil {
 			refresh = clike.Atoi( *p ); 			
 		}
@@ -1529,6 +1608,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	} else {
 		net_sheep.Baa( 1, "initial network graph has been built" )
 		act_net.limits = limits
+		act_net.Set_relaxed( relaxed )
 	}
 
 	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network 
@@ -1592,7 +1672,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 					case REQ_RESERVE:
-						// host names are expected to have been vetted (if needed) and translated to tenant-id/name if IDs are enabled
+						// host names are expected to have been vetted (if needed) and translated to projects-id/name if IDs are enabled
 						p, ok := req.Req_data.( *gizmos.Pledge_bw )
 						if ok {
 							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
@@ -1802,7 +1882,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						ts := req.Req_data.( int64 )			// time stamp for generation
 						req.Response_data, req.State = act_net.gen_queue_map( ts, true )
 						
-					case REQ_GETGW:								// given a project ID (tenant ID) map it to the gateway
+					case REQ_GETGW:								// given a project ID (projects ID) map it to the gateway
 						if req.Req_data != nil {
 							tname := req.Req_data.( *string )
 							req.Response_data = act_net.gateway4tid( *tname )
