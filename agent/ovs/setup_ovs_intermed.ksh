@@ -105,6 +105,8 @@
 #								associated with them if that option is taken.
 #				27 Mar 2015 - Defaults to _not_ setting the 180/190 flow-mods on br-int as the flow-mods
 #								now written by ql_bw_fmods do not need them.
+#				29 May 2015 - Remove timeouts since ssh-broker is now used for agent commands.
+#								Added better error checking to the iptables setup commands.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -172,7 +174,7 @@ function setup_iptables
 	typeset nslist="/tmp/PID$$.nslist"		# list of name spaces from the remote host
 	typeset err_file="/tmp/PID$$.ipterr"
 
-	timeout 15 $ssh_host ip netns list >$nslist 2>$err_file
+	$ssh_host ip netns list >$nslist 2>$err_file
 	if (( $? != 0 ))
 	then
 		echo "CRI: unable to get network name space list from target-host: ${thost#* }  [FAIL] [QOSSOM007]"
@@ -187,34 +189,39 @@ function setup_iptables
 	typeset iptables_del_mid="iptables -D POSTROUTING -t mangle -m dscp --dscp"			# reset for the name space specific command
 	typeset iptables_add_mid="iptables -A POSTROUTING -t mangle -m dscp --dscp"
 	
+	echo "ecount=0" >$cmd_file										# we'll count errors and exit the command set with an error if > 0
 	(																# create the commands to send; first the master iptables rules, then rules for each name space
+		echo "echo ====  master ==== >&2"							# add separators to the output when it's run
 		echo "$iptables_del_base 0 $iptables_tail 1:2;" 
 		for d in ${diffserv//,/ }													# d will be 4x the value that iptables needs
 		do
 			echo "$iptables_del_base $((d/4)) $iptables_tail 1:6;"					# add in delete commands
 		done 
 
-		echo "$iptables_add_base 0 $iptables_tail 1:2;" 
+		echo "$iptables_add_base 0 $iptables_tail 1:2 || (( ecount++ ))" 
 		for d in ${diffserv//,/ }
 		do
-			echo "$iptables_add_base $((d/4)) $iptables_tail 1:6;"
+			echo "$iptables_add_base $((d/4)) $iptables_tail 1:6 || (( ecount++ ))"		# we care about errors only on add commands
 		done 
 
-		while read ns 																# for each name space we found
+		while read ns 																		# for each name space we found
 		do
-			echo "$iptables_nsbase $ns $iptables_del_mid 0 $iptables_tail 1:2;" 				# odd ball delete case first
+			echo "echo ==== $ns delete  ==== >&2"											# add separators to the output when it's run
+			echo "$iptables_nsbase $ns $iptables_del_mid 0 $iptables_tail 1:2;" 			# odd ball delete case first
 			for d in ${diffserv//,/ }
 			do
-				echo "$iptables_nsbase $ns $iptables_del_mid $((d/4)) $iptables_tail 1:6;"			# add in delete commands
+				echo "$iptables_nsbase $ns $iptables_del_mid $((d/4)) $iptables_tail 1:6;"	# put in delete commands, one per dscp type
 			done 
 		
-			echo "$iptables_nsbase $ns $iptables_add_mid 0 $iptables_tail 1:2;" 				# odd ball add case
+			echo "echo ==== $ns add  ==== >&2"							# add separators to the output when it's run
+			echo "$iptables_nsbase $ns $iptables_add_mid 0 $iptables_tail 1:2 || (( ecount++ ))" 	# odd ball add case
 			for d in ${diffserv//,/ }
 			do
-				echo "$iptables_nsbase $ns $iptables_add_mid $((d/4)) $iptables_tail 1:6;" 
+				echo "$iptables_nsbase $ns $iptables_add_mid $((d/4)) $iptables_tail 1:6 || (( ecount++ ))"		# one per dscp type
 			done
 		done <$nslist 
-	) >$cmd_file
+	) >>$cmd_file
+	echo 'exit $(( ecount > 0 ))' >>$cmd_file		# cause the command set to finish bad if there was an error (single quotes are REQUIRED!)
 
 	if [[ -z $ssh_host ]]							# local host -- just pump into ksh
 	then
@@ -225,16 +232,16 @@ function setup_iptables
 
 	if [[ -z $no_exec_str ]]								# empty string means we're live
 	then
-		$forreal timeout 15 $cmd_string <$cmd_file >$err_file 2>&1
+		$forreal $cmd_string <$cmd_file >$err_file 2>&1
 		if (( $? != 0 ))
 		then
 			echo "CRI: unable to set iptables on target-host: ${thost#* }  [FAIL] [QOSSOM006]"
 			sed 's/^/setup_iptables:/' $err_file >&2
 		else
-			echo "iptables set up for mangle rules on target-host: ${thosts#* }"
+			echo "iptables successfully set up for mangle rules on target-host: ${thosts#* }"
 			if [[ -n $no_exec_str ]] || (( verbose ))					# if no exec string, then cat out the captured command
 			then
-				sed 's/^/setup_iptables:/' $err_file >&2
+				sed 's/^/setup_iptables: /' $err_file >&2
 			fi
 		fi
 	else
@@ -595,7 +602,7 @@ fi
 # Configure OVS to promote dscp value into gre header
 # Send request to remote ovs for bridge information that we'll suss out gre data from.
 # Then we'll execute the command that we generated back on the same host.
-timeout 15 $ssh_host sudo ovs-vsctl show | awk -v sudo=$sudo '
+$ssh_host sudo ovs-vsctl show | awk -v sudo=$sudo '
 	BEGIN {
 		snarf = 0;
 		pidx = 0
@@ -667,7 +674,9 @@ else
 	logit "no dropping flow-mods written -D was set"
 fi
 
+logit "waiting for asynch commands to complete"
 wait					# hold up for any asynch calls
+logit "finally finished"
 
 rm -f /tmp/PID$$.*
 exit $rc
