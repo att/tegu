@@ -1,4 +1,3 @@
-
 // vi: sw=4 ts=4:
 
 /*
@@ -36,15 +35,18 @@ func new_pw( c int64, e int64 ) ( *pledge_window ) {
 func Test_pwo( t *testing.T ) {
 	failures :=0
 	now := time.Now().Unix()
-	p1 := new_pw( now + 3600, now + 7200 )
-	p2 := new_pw( now + 3, now + 600 )			// completely before p1 (expect false)
-	p3 := new_pw( now + 8000, now + 9800 )		// completely after p1 (expect false)
-	p4 := new_pw( now + 600, now + 4800 )		// commence overlap		(expect true)
-	p5 := new_pw( now + 800, now + 3800 )		// expiry overlap		(expect true)
-	p6 := new_pw( now + 3 , now + 9800 )		// completely engulf	(expect true)
-	p7 := new_pw( now + 3 , now + 3600 )		// before ending where p1 starts (expect false)
+	p1_start := now + 3600				// ensure all start times are in future so window creates
+	p1_end := now + 7200
+	p1 := new_pw( p1_start, p1_end )					// master window to compare others with
 
-	fmt.Fprintf( os.Stderr, "------- pledge window tests ---------\n" );
+	p2 := new_pw( p1_start - 600, p1_start - 300 )		// completely before p1 (expect false)
+	p3 := new_pw( p1_end + 800, p1_end + 900 )			// completely after p1 (expect false)
+	p4 := new_pw( p1_start + 300, p1_end + 800 )		// commence overlap		(expect true)
+	p5 := new_pw( p1_start - 800, p1_start + 300 )		// expiry overlap		(expect true)
+	p6 := new_pw( p1_start - 300, p1_end + 800 )		// completely engulf	(expect true)
+	p7 := new_pw( p1_start -300 , p1_start )			// ending exactly where p1 starts (expect false)
+
+	fmt.Fprintf( os.Stderr, "\n------- pledge window tests ---------\n" );
 	if p1.overlaps( p2 ) {
 		fmt.Fprintf( os.Stderr, "FAIL:  pwindow1 reports overlap with pwindow 2\n" )
 		failures++
@@ -83,5 +85,79 @@ func Test_pwo( t *testing.T ) {
 		t.Fail()
 	}
 
+	fmt.Fprintf( os.Stderr, "\n" )
+}
+
+func Test_bw_equals( t *testing.T ) {
+	h1 := "host1"
+	h2 := "host2"
+	h3 := "host3"
+	p1 := "4360"
+	p2 := ""
+	v1 := "1"
+	v2 := "2"
+	v3 := "3"
+	key := "cookie"
+	id1 := "r1"
+
+
+	failures := 0
+	now := time.Now().Unix()
+
+	fmt.Fprintf( os.Stderr, "\n----------- pledge equality tests --------------\n" )
+	bp1, _ := Mk_bw_pledge( &h1, &h2, &p1, &p2, now+300, now+600, 10000, 10000, &id1, &key, 42, false )
+	bp1.Set_vlan( &v1, &v2 )
+
+	bp2, _ := Mk_bw_pledge( &h1, &h2, &p1, &p2, now+400, now+800, 10000, 10000, &id1, &key, 42, false )		// different times, but overlap (expect equal)
+	bp2.Set_vlan( &v1, &v2 )
+
+	bp3, _ := Mk_bw_pledge( &h1, &h2, &p1, &p2, now+800, now+1800, 10000, 10000, &id1, &key, 42, false )		// time window after p1 (expect not equal)
+	bp3.Set_vlan( &v1, &v2 )
+
+	bp4, _ := Mk_bw_pledge( &h3, &h2, &p1, &p2, now+300, now+600, 10000, 10000, &id1, &key, 42, false )		// different name (expect not equal)
+	bp4.Set_vlan( &v1, &v2 )
+
+	bp5, _ := Mk_bw_pledge( &h2, &h1, &p2, &p1, now+300, now+600, 10000, 10000, &id1, &key, 42, false )		// names, proto reversed (expect equal)
+	bp5.Set_vlan( &v2, &v1 )
+
+	bp6, _ := Mk_bw_pledge( &h2, &h1, &p2, &p1, now+300, now+600, 10000, 10000, &id1, &key, 42, false )		// names, proto reversed different vlans (expect not equal)
+	bp6.Set_vlan( &v3, &v1 )
+
+
+	gp2 := Pledge(bp2)			// convert to generic pledge for calls
+	gp3 := Pledge(bp3)
+	gp4 := Pledge(bp4)
+	gp5 := Pledge(bp5)
+	gp6 := Pledge(bp6)
+	if !bp1.Equals( &gp2 ) {
+		failures++
+		fmt.Fprintf( os.Stderr, "FAIL:   bp1 reporeted not equal to bp2 (overlapping time)\n" )
+	}
+
+	if bp1.Equals( &gp3 ) {
+		failures++
+		fmt.Fprintf( os.Stderr, "FAIL:   bp1 reporeted equal to bp3 (non overlap time)\n" )
+	}
+
+	if bp1.Equals( &gp4 ) {
+		failures++
+		fmt.Fprintf( os.Stderr, "FAIL:   bp1 reporeted equal to bp4 (different name)\n" )
+	}
+
+	if !bp1.Equals( &gp5 ) {
+		failures++
+		fmt.Fprintf( os.Stderr, "FAIL:   bp1 reporeted not equal to bp5 (names reversed)\n" )
+	}
+	
+	if bp1.Equals( &gp6 ) {
+		failures++
+		fmt.Fprintf( os.Stderr, "FAIL:   bp1 reporeted equal to bp6 (names reversed, vlan different)\n" )
+	}
+	
+	if failures > 0 {
+		t.Fail()
+	} else {
+		fmt.Fprintf( os.Stderr, "OK:     all bandwidth pledge equal tests passed\n" )
+	}
 	fmt.Fprintf( os.Stderr, "\n" )
 }
