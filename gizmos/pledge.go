@@ -61,6 +61,8 @@ type Pledge interface {
 }
 
 // generic struct to unpack any type of pledge in order to determine the type
+// This must only contain fields that exist in all pledge types, and only 
+// the fields that are needed to determine the type.
 type J2p struct {
 	Ptype	*int
 }

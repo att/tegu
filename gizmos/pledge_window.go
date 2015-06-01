@@ -18,6 +18,7 @@
 package gizmos
 
 import (
+	"os"
 	"fmt"
 	"time"
 )
@@ -245,4 +246,42 @@ func (p *pledge_window) is_extinct( window int64 ) ( bool ) {
 
 	now := time.Now().Unix()
 	return p.expiry <= now - window
+}
+
+/*
+	Test this window (p) against a second window (p2) to see if they overlap.
+	Windows where commence is equal to expiry, or expiry is equal to commence
+	(6, and 8 below) are not considered overlapping.
+
+             pc|---------------------------------|pe
+               .                                 .
+   T   p2c|----.------|p2e                       .             (1)
+   T           .p2c|-----------|p2e              .             (2)
+   T           .                        p2c|-----.-----|p2e    (3)
+   T   p2c|----.---------------------------------.----|p2e     (4)
+   T        p2c|---------------------------------|p2e          (5)
+   F           .                              p2c|--------|p2e (6)
+   F  p2c|--|  .                                 .             (7)
+   F  p2c|-----|                                 .             (8)
+   F           .                                 .  p2c|--|p2e (9)
+*/
+func (p *pledge_window) overlaps( p2 *pledge_window ) ( bool ) {
+	if p == nil || p2 == nil {
+fmt.Fprintf( os.Stderr, ">>>> one/both are nil %v | %v\n", p, p2 )
+		return false
+	}
+
+	if p2.commence >= p.commence  &&  p2.commence < p.expiry {	//(2,3)
+		return true;
+	}
+
+	if p2.expiry > p.commence  &&  p2.expiry <= p.expiry {		//(1,2)
+		return true;
+	}
+
+	if p2.commence <= p.commence  &&  p2.expiry >= p.expiry {	//(4,5)
+		return true;
+	}
+
+	return false
 }

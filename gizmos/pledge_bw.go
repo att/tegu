@@ -286,7 +286,6 @@ func (p *Pledge_bw) Get_vlan( ) ( v1 *string, v2 *string ) {
 	return p.vlan1, p.vlan2
 }
 
-// --------------- interface functions (required) ------------------------------------------------------
 /*
 	Create a clone of the pledge.  The path is NOT a copy, but just a reference to the list
 	from the original.
@@ -312,6 +311,63 @@ func (p *Pledge_bw) Clone( name string ) ( *Pledge_bw ) {
 	return newpbw
 }
 
+/*
+	Accepts another pledge (op) and compairs the two returning true if the following values are 
+	the same:
+		hosts, protocol, transport ports, vlan match value, window
+
+	The test for window involves whether the reservation overlaps. If there is any
+	overlap they are considerd equal windows, otherwise not.
+
+	It gets messy.... if p1.h1 == p2.h2 (hosts reversed), then we must match the 
+	reverse of port since port and host must align.
+*/
+func (p *Pledge_bw) Equals( op *Pledge ) ( state bool ) {
+	
+	if p == nil {
+		return
+	}
+
+	obw, ok := (*op).( *Pledge_bw )			// convert from generic type to specific
+	if ok {
+		if ! Strings_equal( p.protocol, obw.protocol ) { return false } // simple tests that don't swap if hosts are reversed
+
+															// more complicated when only diff is h1 and h2 are swapped
+		if Strings_equal( p.host1, obw.host1 ) {			// if hosts matche 1:1 and 2:2
+			if !Strings_equal( p.host2, obw.host2 ) {		// then expect vlan and port to match the same
+				return false
+			}
+
+			if ! Strings_equal( p.tpport1, obw.tpport1 ) { return false }
+			if ! Strings_equal( p.tpport2, obw.tpport2 ) { return false }
+			if ! Strings_equal( p.vlan1, obw.vlan1 ) { return false }
+			if ! Strings_equal( p.vlan2, obw.vlan2 ) { return false }
+		} else {
+			if Strings_equal( p.host1, obw.host2 ) {			// if hosts are swapped and match
+				if !Strings_equal( p.host2, obw.host1 ) {		// then expect the port and vlan vlues to match swapped
+					return false
+				}
+
+				if ! Strings_equal( p.tpport1, obw.tpport2 ) { return false }
+				if ! Strings_equal( p.tpport2, obw.tpport1 ) { return false }
+				if ! Strings_equal( p.vlan1, obw.vlan2 ) { return false }
+				if ! Strings_equal( p.vlan2, obw.vlan1 ) { return false }
+			} else {
+				return false
+			}
+		}
+
+		if !p.window.overlaps( obw.window ) {
+			return false;
+		}
+
+		return true							// get here, all things are the same
+	}
+
+	return false
+}
+
+// --------------- interface functions (required) ------------------------------------------------------
 /*
 	Destruction
 */

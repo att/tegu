@@ -327,3 +327,21 @@ func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
 
 	return state, missing
 }
+
+/*
+	Accepts two string pointers and returns true if both strings are the same
+	(could be pointed at different strings, true means that they are identical
+	in value). If both pointers are nil, then true is returned. False otherwise. 
+*/
+func Strings_equal( s1 *string, s2 *string ) ( bool ) {
+	if s1 == nil  {
+		if s2 == nil {
+			return true
+		}
+
+		return false
+	}
+
+	return *s1 == *s2	
+}
+
