@@ -95,3 +95,9 @@ func TestHasKey( t *testing.T ) {
 		t.Fail()
 	}
 }
+
+/*
+func TestPledgeWindowOverlap( t *testing.T ) {
+	gizmos.Test_pwo( t )
+}
+*/

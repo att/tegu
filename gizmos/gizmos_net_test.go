@@ -68,12 +68,12 @@ func TestNet( t *testing.T ) {			// must use bloody camel case to be recognised 
 			sw_list[links[i].Dst_switch] = dsw
 		}
 
-		l := gizmos.Mk_link( ssw.Get_id(), dsw.Get_id(), 100000000, 95 );		// link in forward direction
+		l := gizmos.Mk_link( ssw.Get_id(), dsw.Get_id(), 100000000, 95, nil );		// link in forward direction
 		l.Set_forward( dsw )
 		l.Set_backward( ssw ) 
 		ssw.Add_link( l )
 
-		l = gizmos.Mk_link( dsw.Get_id(), ssw.Get_id(), 100000000, 95 );		// link in backward direction
+		l = gizmos.Mk_link( dsw.Get_id(), ssw.Get_id(), 100000000, 95, nil );		// link in backward direction
 		l.Set_forward( ssw )
 		l.Set_backward( dsw ) 
 		dsw.Add_link( l )
