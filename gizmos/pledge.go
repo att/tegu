@@ -32,6 +32,7 @@ import (
 type Pledge interface {
 	Concluded_recently( window int64 ) ( bool )
 	Commenced_recently( window int64 ) ( bool )
+	Equals( *Pledge ) ( bool )
 	Get_hosts() ( *string, *string )
 	Get_id( ) ( *string )
 	Get_window( ) ( int64, int64 )

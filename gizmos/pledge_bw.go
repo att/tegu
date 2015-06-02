@@ -20,6 +20,7 @@
 				17 Feb 2015 - Added mirroring
 				24 Feb 2015 - Corrected to_json reference of tpport values (pointers, not strings)
 				21 May 2015 - Converted from generic pledge type.
+				01 Jun 2015 - Addded equal() support
 */
 
 package gizmos

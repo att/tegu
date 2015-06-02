@@ -20,6 +20,7 @@
 				17 Feb 2015 - Added mirroring
 				24 Feb 2015 - Corrected to_json reference of tpport values (pointers, not strings)
 				26 May 2015 - Broken out of pledge with conversion to interface
+				01 Jun 2015 - Addded equal() support
 */
 
 package gizmos
@@ -583,4 +584,13 @@ func (p *Pledge_steer) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *s
 */
 func (p *Pledge_steer) Get_window( ) ( commmence int64, expiry int64 ) {
 	return p.window.get_values( )
+}
+
+/*
+	Returns true if the pledge passed in equals this pledge
+	
+	NOT IMPLEMENTED!!
+*/
+func (p *Pledge_steer) Equals( p2 *Pledge ) ( bool ) {
+	return false
 }

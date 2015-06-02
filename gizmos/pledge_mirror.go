@@ -12,6 +12,7 @@
 	Mods:		
 				17 Feb 2015 - Added mirroring
 				26 May 2015 - Broken out of main pledge to allow for pledge to become an interface.
+				01 Jun 2015 - Addded equal() support
 */
 
 package gizmos
@@ -28,7 +29,7 @@ type Pledge_mirror struct {
 	host2		*string		// destination of mirrors
 	//protocol	*string		//
 	tpport1		*string		//
-	tpport2		*string		// thee match h1/h2 respectively
+	tpport2		*string		// these match h1/h2 respectively
 	window		*pledge_window
 	//bandw_in	int64		// bandwidth to reserve inbound to host1
 	//bandw_out	int64		// bandwidth to reserve outbound from host1
@@ -532,4 +533,29 @@ func (p *Pledge_mirror) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *
 */
 func (p *Pledge_mirror) Get_window( ) ( int64, int64 ) {
 	return p.window.get_values( )
+}
+
+/*
+	Return true if the pledge passed in duplicates this pledge.
+*/
+func (p *Pledge_mirror) Equals( p2 *Pledge ) ( bool ) {
+	
+	if p == nil {
+		return false
+	}
+
+	p2m, ok := (*p2).( *Pledge_mirror )			// convert from generic type to specific
+	if ok {
+		if ! Strings_equal( p.host1, p2m.host1 ) { return false }
+		if ! Strings_equal( p.host2, p2m.host2 ) { return false }
+		if ! Strings_equal( p.qid, p2m.qid ) { return false }
+
+		if !p.window.overlaps( p2m.window ) {
+			return false;
+		}
+
+		return true
+	}
+
+	return false
 }
