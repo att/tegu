@@ -41,6 +41,8 @@
 #					graph commands.
 #				01 Apr 2015 - Corrected bug with token passed on steering request.
 #				18 May 2015 - Dumbed down so that bash could run the script.
+#				02 Jun 2015 - Added optional request name to *-mirror commands to make
+#					consistant with others (no dash).
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -405,7 +407,7 @@ case $1 in
 		esac
 		;;
 
-	add-mirror)
+	add-mirror|addmirror)
 		shift
 		if (( $# < 3 ))
 		then
@@ -443,7 +445,7 @@ case $1 in
 		rjprt $opts -m POST -D "$json" -t "$proto://$host/tegu/mirrors/"
 		;;
 
-	del-mirror)
+	del-mirror|delmirror)
 		shift
 		case $# in
 			1)
@@ -460,11 +462,11 @@ case $1 in
 		esac
 		;;
 
-	list-mirrors)
+	list-mirrors|listmirror)
 		rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/"
 		;;
 
-	show-mirror)
+	show-mirror|showmirror)
 		shift
 		case $# in
 			1)
