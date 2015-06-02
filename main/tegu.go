@@ -106,6 +106,7 @@
 				20 Apr 2015 : Corrected bug -- not passing external address direction to agent.
 				18 May 2015 : Added discount.
 				26 May 2015 : Converted to using the new pledge as an interface.
+				01 Jun 2015 : Added reservation dup checking.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -141,7 +142,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.3/15265"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror)
+		version		string = "v3.1.3/16025"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
