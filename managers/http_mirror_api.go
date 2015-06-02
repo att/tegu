@@ -523,18 +523,30 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 				req := ipc.Mk_chmsg( )
 				my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
 				defer close( my_ch )								// close it on return
-				req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
-				req = <- my_ch										// wait for completion
 
-				if req.State == nil {
-					ckptreq := ipc.Mk_chmsg( )
-					ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+				gp := gizmos.Pledge( res )								// convert to generic pledge to pass
+				req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
+				req = <- my_ch											// get response from the network thread
+				if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
+					rp := req.Response_data.( *string )
+					if rp != nil {
+						err = fmt.Errorf( "reservation duplicates existing reservation: %s",  *rp )
+					}
 				} else {
-					err = fmt.Errorf( "%s", req.State )
+					req = ipc.Mk_chmsg( )
+					req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+					req = <- my_ch										// wait for completion
+	
+					if req.State == nil {
+						ckptreq := ipc.Mk_chmsg( )
+						ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+					} else {
+						err = fmt.Errorf( "%s", req.State )
+					}
 				}
 
 				if res_paused {
-					rm_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
+					http_sheep.Baa( 1, "reservations are paused, accepted reservation will not be pushed until resumed" )
 					res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
 					res.Set_pushed( )
 				}

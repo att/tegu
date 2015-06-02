@@ -68,7 +68,8 @@
 					much simpler to listen on a socket and accept newline terminated messages; rest sucks.
 				18 May 2015 : Added discount support.
 				20 May 2015 : Added ability to specific VLAN as a match on bandwidth reservations.
-				26 May 2015 - Conversion to support pledge as an interface.
+				26 May 2015 : Conversion to support pledge as an interface.
+				01 Jun 2015 : Added duplicate reservation checking.
 */
 
 package managers
@@ -324,6 +325,9 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	etc.)  The return values may seem odd, but are a result of breaking this out of the main parser which
 	wants two reason strings and a count of errors in order to report an overall status and a status of
 	each request that was received from the outside world.
+
+	This function will also check for a duplicate pledge aloready in the inventory and reject it 
+	if a dup is found.
 */
 func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
@@ -335,6 +339,19 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 	defer close( my_ch )									// close it on return
 
 	req := ipc.Mk_chmsg( )
+	gp := gizmos.Pledge( res )								// convert to generic pledge to pass
+	req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
+	req = <- my_ch											// get response from the network thread
+	if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
+		rp := req.Response_data.( *string )
+		if rp != nil {
+			nerrors = 1
+			reason = fmt.Sprintf( "reservation duplicates existing reservation: %s",  *rp )
+			return
+		}
+	}
+
+	req = ipc.Mk_chmsg( )
 	req.Send_req( nw_ch, my_ch, REQ_RESERVE, res, nil )		// send to network to verify a path
 	req = <- my_ch											// get response from the network thread
 
@@ -758,7 +775,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								res.Set_matchv6( *tmap["ipv6"] == "true" )
 							}
 							
-							reason, jreason, ecount = finalise_bw_res( res, res_paused )	// allocate in network and add to res manager inventory
+							reason, jreason, ecount = finalise_bw_res( res, res_paused )	// check for dup, allocate in network, and add to res manager inventory
 							if ecount == 0 {
 								state = "OK"
 							} else {

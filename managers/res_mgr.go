@@ -73,7 +73,8 @@
 						and sent to fq-mgr. The exception is if the hard swtich timeout pops where reservations
 						are pushed straight away (assumption is that queues don't change).
 				20 Apr 2015 : Ensured that reservations are pushed following a cancel request.
-				26 May 2015 - Conversion to support pledge as an interface.
+				26 May 2015 : Conversion to support pledge as an interface.
+				01 Jun 2015 : Corrected bug in delete all which was atttempting to delete expired reservations.
 */
 
 package managers
@@ -430,7 +431,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	if err != nil {
 		return
 	}
-	defer	f.Close( )
+	defer f.Close( )
 
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
@@ -454,14 +455,12 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 						} else {
 							switch sp := (*p).(type) {
 								case *gizmos.Pledge_mirror:
-									//rm_sheep.Baa( 0, "did not restore mirroring reservation from checkpoint; not implemented" )
 									err = i.Add_res( p )								// assume we can just add it back in as is
 
 								case *gizmos.Pledge_steer:
 									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
 
 								case *gizmos.Pledge_bw:
-rm_sheep.Baa( 1, ">>> restoring: %s", sp )
 									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
 									update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
 									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
@@ -606,6 +605,31 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 	return
 }
 
+/*
+	Accept a reservation (pledge) and see if it matches any existing reservation in 
+	the inventory. If it does, return the reservation id as data, set error if
+	we encounter problems.
+*/
+func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error ) {
+	rid = nil
+	state = nil
+
+	if inv == nil {
+		state = fmt.Errorf( "inventory is nil" )
+		return
+	}
+
+	for _, r := range inv.cache {
+		if !(*r).Is_expired()  && (*p).Equals( r ) {
+			rid = (*r).Get_id( )
+			return
+		}
+	}
+
+	return 
+}
+
+
 func (inv *Inventory) Get_mirrorlist() ( string ) {
 	sep := ""
 	bs := bytes.NewBufferString("")
@@ -633,13 +657,6 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 	reservation and queue settings.  It is VERY IMPORTANT to delete the reservation from
 	the network perspective BEFORE the expiry time is reset.  If it is reset first then
 	the network splits timeslices based on the new expiry and queues end up dangling.
-			if (*p).Is_expired() {								// some reservations need to be undone at expiry
-				switch (*p).(type) {
-					case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
-						undo_mirror_reservation( p, rname, ch )
-				}
-			} else {
-				if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 
@@ -683,11 +700,14 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 
 	ndel = 0
 	
-	plist = make( []*string, len( inv.cache ) )
+	plist = make( []*string, len( inv.cache ) )			// build a list so we can safely remove from the map
 	for _, pledge := range inv.cache {
-		plist[i] = (*pledge).Get_id()
-		i++
+		if ! (*pledge).Is_expired( ) {
+			plist[i] = (*pledge).Get_id()
+			i++
+		}
 	}
+	plist = plist[:i]									// slice down to what was actually filled in
 
 	for _, pname := range plist {
 		rm_sheep.Baa( 2, "delete all attempt to delete: %s", *pname )
@@ -868,8 +888,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_NOOP:			// just ignore
 
 			case REQ_ADD:
-				//var p gizmos.Pledge
-				switch sp := msg.Req_data.(type) {		// convert to one of our specific types
+				switch sp := msg.Req_data.(type) {		// convert to one of our specific pledge types
 					case *gizmos.Pledge_bw:
 						icp := gizmos.Pledge( sp )							// must convert to a pledge interface
 						msg.State = inv.Add_res( &icp )
@@ -883,8 +902,6 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 						msg.State = inv.Add_res( &icp )
 				}
 
-				//p := msg.Req_data.( *gizmos.Pledge )	
-				//msg.State = inv.Add_res( p )
 				msg.Response_data = nil
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
@@ -909,6 +926,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// must force a push to push augmented (shortened) reservations
 				msg.Response_data = nil
+
+			case REQ_DUPCHECK:
+				if msg.Req_data != nil {
+					msg.Response_data, msg.State = inv.dup_check(  msg.Req_data.( *gizmos.Pledge ) )
+				}
 
 			case REQ_GET:											// user initiated get -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
