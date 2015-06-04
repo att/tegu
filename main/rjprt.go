@@ -6,6 +6,8 @@
 	Abstract:	Send an http oriented post or get request that results in json output and 
 				then format the output in a human readable fashion to stdout. 
 				is returned.  Input command line:
+					-a token	Authorisation token related to the privlege of executing the command
+								such as listhost (not VM related tokens for a reservation).
 					-d 			Display result in 'dotted' notaion rather than indented hiarchy
 					-D			POST request "body of data"
 					-j			No formatting, outputs raw json
@@ -23,13 +25,13 @@
 	Mod:		07 Jun 2014 - Added ability to ignore invalid certs (-T option added to force tight security)
 				09 Jul 3014 - Added -J capability
 				14 Dec 2014 - Formally moved to tegu code.
+				03 Jun 2015 - To accept an authorisation token to send as X-Tegu-Auth in the header.
 */
 
 package main
 
 import (
 	"bytes"
-	//"encoding/json"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -46,14 +48,15 @@ var (
 
 func usage( version string ) {
 	fmt.Printf( "%s\n", version );
-	fmt.Printf( "usage: rjprt [-D post-data-string] [-d] [-t target-url] [-l dot-string] [-m GET|POST|DELETE] [-r root-string] [-T] [-v] -t target url\n" )
-	fmt.Printf( `	If -m POST is supplied, and -D "string" is omitted, rjprt will read the POST data from stdin` )
+	fmt.Printf( "usage: rjprt [-a auth-string] [-D data-string] [-d] [-t target-url] [-j] [-J] [-l dot-string] [-m GET|POST|DELETE] [-r root-string] [-T] [-v] -t target url\n" )
+	fmt.Printf( `	If -m POST or -m DELETE is supplied, and -D "string" is omitted, rjprt will read the POST data from stdin` )
 	fmt.Printf( "\n\n" )
 }
 
 func main() {
 	var (
-		version		string = "rjprt v1.2/16074"
+		version		string = "rjprt v1.3/16045"
+		auth		*string
 		err			error
 		resp		*http.Response
 		verbose 	*bool
@@ -70,10 +73,11 @@ func main() {
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
+	auth = flag.String( "a", "", "authorisation token" )
 	dot_fmt = flag.Bool( "d", false, "dotted named output" )
 	request_data = flag.String( "D", "", "post data" )
 	raw_json = flag.Bool( "j", false, "raw-json" )
-	appl_json := flag.Bool( "J", false, "appltype-json" )
+	appl_json := flag.Bool( "J", false, "data type is json" )
 	look4 = flag.String( "l", "", "look4 string in hashtab" )
 	method = flag.String( "m", "GET", "request method" )
 	root = flag.String( "r", "", "top level root name" )
@@ -82,9 +86,9 @@ func main() {
 	verbose = flag.Bool( "v", false, "verbose" )
 	flag.Parse();									// actually parse the commandline
 
-	appl_type := "text"
+	input_type := "text"			// type of data being sent in body
 	if *appl_json {
-		appl_type = "json"
+		input_type = "json"
 	}
 
 	if *needs_help {
@@ -108,6 +112,7 @@ func main() {
 	trparms := &http.Transport{				// override default transport parms to skip the verify
         TLSClientConfig: &tls.Config{ InsecureSkipVerify: !*tight_sec },
     }
+
 	client := &http.Client{ Transport: trparms }		// default client except with our parms
 	
 	switch( *method ) {
@@ -116,16 +121,26 @@ func main() {
 
 		case "POST", "post":
 			if *request_data == "" {
-				resp, err = client.Post( *target_url, "application/" + appl_type, os.Stdin )
+				req, err = http.NewRequest( "POST", *target_url, os.Stdin )
 			} else {
-				resp, err = client.Post( *target_url, "application/" + appl_type, bytes.NewBufferString( *request_data ) )
+				req, err = http.NewRequest( "POST", *target_url, bytes.NewBufferString( *request_data ) )
 			}
+
+			req.Header.Set( "Content-Type", input_type )
+			if auth != nil && *auth != "" {
+				req.Header.Set( "X-Auth-Tegu", *auth )
+			}
+
+			resp, err = client.Do( req )
 
 		case "DELETE", "del", "delete":
 			if *request_data == "" {
 				req, err = http.NewRequest( "DELETE", *target_url, os.Stdin )
 			} else {
 				req, err = http.NewRequest( "DELETE", *target_url, bytes.NewBufferString( *request_data ) )
+			}
+			if auth != nil && *auth != "" {
+				req.Header.Add( "X-Auth-Tegu", *auth )
 			}
 			resp, err = client.Do( req )
 

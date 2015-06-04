@@ -43,6 +43,7 @@
 #				18 May 2015 - Dumbed down so that bash could run the script.
 #				02 Jun 2015 - Added optional request name to *-mirror commands to make
 #					consistant with others (no dash).
+#				04 Jun 2015 - Added token to -a call.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -58,8 +59,8 @@ function usage {
 	  -j causes raw json to be spilled to the standard out device
 	  -k k=v Supplies a key/value pair that is necessary on some requests. Multiple -k options
 	     can be supplied when needed.
-      -K Use keystone command line interface, rather than direct API, to generate a token
-         (ignored unless -T is used)
+	  -K Use keystone command line interface, rather than direct API, to generate a token
+	     (ignored unless -T is used)
 	  -r allows a 'root' name to be supplied for the json output when humanised
 	  -s enables secure TLS (https://) protocol for requests to Tegu.
 	  -t allows a keystone token to be supplied for privileged commands; -T causes a token to
@@ -84,7 +85,7 @@ function usage {
 	  $argv0 listulcap
 	  $argv0 listres
 	  $argv0 listqueue
-      $argv0 setdiscount value
+	  $argv0 setdiscount value
 	  $argv0 setulcap tenant percentage
 	  $argv0 refresh hostname
 	  $argv0 steer  {[start-]end|+seconds} tenant src-host dest-host mbox-list cookie
@@ -145,6 +146,24 @@ function str2expiry
 	echo $expiry
 }
 
+# given a raw token, or nothing, generate the proper rjprt option to set
+# it in the header. 
+# CAUTION: error messages MUST go to &2
+function set_xauth
+{
+	if [[ -n $1 ]]
+	then
+		if ! rjprt -?|grep -q -- -a
+		then
+			echo "" >&2
+			echo "WARNING: the version of rjprt installed in $(which rjprt) is old, some information might not be sent to tegu" >&2
+			echo "         install a new version of rjprt, or remove the old one" >&2
+			echo "" >&2
+		fi
+
+		echo " -a '$1' "
+	fi
+}
 
 function gen_token
 {
@@ -248,6 +267,12 @@ do
 		-T)		prompt4token=1;;
 		-\?)	usage
 				exit 1
+				;;
+
+		*)		echo "ERROR: unrecognised option: $1"
+				usage
+				exit 1
+				;;
 	esac
 
 	shift
@@ -278,6 +303,7 @@ then
 fi
 
 
+opts+=$( set_xauth $raw_token )
 case $1 in
 	ping)
 		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token ping"
@@ -481,6 +507,11 @@ case $1 in
 				exit 1
 				;;
 		esac
+		;;
+
+	test)
+		shift
+		echo "test: options: ($opts)"
 		;;
 
 	*)
