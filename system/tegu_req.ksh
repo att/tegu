@@ -252,11 +252,16 @@ prompt4token=0
 force=0
 use_keystone=0
 
+bandwidth="bandwidth"		# http api collections
+steering="steering"
+default="api"
+
 while [[ $1 == -* ]]
 do
 	case $1 in
 		-d)		opts+=" -d";;
 		-f)		force=1;;
+		-F)		bandwidth="api"; steering="api";;		# force collection to old single set style
 		-h) 	host=$2; shift;;
 		-j)		opts+=" -j";;
 		-k)		kv_pairs+="$2 "; shift;;
@@ -306,23 +311,23 @@ fi
 opts+=$( set_xauth $raw_token )
 case $1 in
 	ping)
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token ping"
+		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" -D "$token ping"
 		;;
 
 	listq*|qdump|dumpqueue*)
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token qdump"
+		rjprt  $opts -m POST -t "$proto://$host/tegu/$bandwidth" -D "$token qdump"
 		;;
 
-	listr*)						# list reservations
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listres $kv_pairs"
+	listr*)
+		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" -D "$token listres $kv_pairs"
 		;;
 
 	listh*)						# list hosts
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listhosts $kv_pairs"
+		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" -D "$token listhosts $kv_pairs"
 		;;
 
 	listul*)						# list user link caps
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" -D "$token listulcaps"
+		rjprt  $opts -m POST -t "$proto://$host/tegu/$bandwidth" -D "$token listulcaps"
 		;;
 
 	listc*)						# list connections
@@ -337,12 +342,12 @@ case $1 in
 			done >/tmp/PID$$.data
 		fi
 
-		rjprt  $opts -m POST -t "$proto://$host/tegu/api" </tmp/PID$$.data
+		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" </tmp/PID$$.data
 		rm -f /tmp/PID$$.data
 		;;
 
 	graph)
-		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto://$host/tegu/$default"
 		;;
 
 
@@ -356,19 +361,19 @@ case $1 in
 				;;
 		esac
 
-		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto://$host/tegu/api"
+		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto://$host/tegu/$bandwidth"
 		;;
 
 	pause)
-		rjprt $opts -m POST -D "$token pause" -t "$proto://$host/tegu/api"
+		rjprt $opts -m POST -D "$token pause" -t "$proto://$host/tegu/$default"
 		;;
 
 	refresh)
-		rjprt  $opts -m POST -D "$token refresh $2" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "$token refresh $2" -t "$proto://$host/tegu/$default"
 		;;
 
 	resume)
-		rjprt $opts -m POST -D "$token resume" -t "$proto://$host/tegu/api"
+		rjprt $opts -m POST -D "$token resume" -t "$proto://$host/tegu/$default"
 		;;
 
 	reserve)
@@ -410,26 +415,26 @@ case $1 in
 				exit 1
 			fi
 		fi
-		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/$bandwidth"
 		;;
 
 	setdiscount)
-		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto://$host/tegu/$bandwidth"
 		;;
 
 	setulcap)
-		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto://$host/tegu/$default"
 		;;
 
 	steer)
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto://$host/tegu/api"
+		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto://$host/tegu/$steering"
 		;;
 
 	verbose)
 		case $2 in
-			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto://$host/tegu/api";;		# assume tegu way: level subsystem
-			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto://$host/tegu/api";;		# assume entered backwards: subsystem level
+			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto://$host/tegu/$default";;		# assume tegu way: level subsystem
+			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto://$host/tegu/$default";;		# assume entered backwards: subsystem level
 		esac
 		;;
 
