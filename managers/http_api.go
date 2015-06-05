@@ -70,6 +70,7 @@
 				20 May 2015 : Added ability to specific VLAN as a match on bandwidth reservations.
 				26 May 2015 : Conversion to support pledge as an interface.
 				01 Jun 2015 : Added duplicate reservation checking.
+				05 Jun 2015 : Minor typo fixes.
 */
 
 package managers
@@ -255,7 +256,7 @@ func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed
 
 		case "token":
 			if valid_roles == nil {
-				http_sheep.Baa( 1, "internal misap: validate auth called with nil role list" )
+				http_sheep.Baa( 1, "internal mishap: validate auth called with nil role list" )
 				return false
 			}
 			return token_has_osroles( data, *valid_roles ) 
@@ -1171,7 +1172,9 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		msg = fmt.Sprintf( "%d errors processing requests in %d requests", nerrors, req_count )
 	}
 
-	return } 
+	return 
+} 
+
 func parse_get( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	http_sheep.Baa( 1, "get received and ignored -- GET is not supported" )
 	state = "ERROR"
@@ -1262,11 +1265,11 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	dup_str := "localhost"
 	priv_auth = &dup_str
 
-	ar_str := "admin,tegu_admin"						// default roles which are allowed to run privledged requests (ulcap etc)
+	ar_str := "admintegu_admin"						// default roles which are allowed to run privledged requests (ulcap etc)
 	admin_roles = &ar_str
 	sp_str := ",tegu_sysproc"							// default roles which for system processes (limited set of privledged requests, e.g. listhosts)
 	sysproc_roles = &ar_str
-	mr_str := ",tegu_mirror"
+	mr_str := "tegu_mirror"
 	mirror_roles =  &mr_str
 
 	tclass2dscp = make( map[string]int, 5 )			// TODO: these need to come from the config file
@@ -1327,9 +1330,9 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 
 	enable_mirroring := false										// off if section is missing all together
 	if cfg_data["mirroring"] != nil {
-		enable_mirroring = true										// on by default if sectio is presernt
+		enable_mirroring = true										// on by default if section is presernt
 		if p := cfg_data["mirroring"]["enable"]; p != nil {			// allow explicit disable with enable=no
-			if *p == "no" || *p == "No" {
+			if *p == "no" || *p == "No" || *p == "false" || *p == "False" {
 				enable_mirroring = false
 			}
 		}
