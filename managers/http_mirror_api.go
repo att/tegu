@@ -647,7 +647,7 @@ func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code 
 		}
 		if ! mirror.Is_valid_cookie(&cookie) {
 			code = http.StatusUnauthorized
-			msg = "Unauthorized."
+			msg = "Unauthorized: cookie not valid."
 			return
 		}
 		code = http.StatusOK
@@ -663,30 +663,48 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 	code := http.StatusOK	// response code to return
 	msg  := ""				// data to go in response (assumed to be JSON, if code = StatusOK or StatusCreated)
 
-	data := dig_data( in )
-	if data == nil {						// missing data -- punt early
-		http_sheep.Baa( 1, "http: mirror_handler called without data: %s", in.Method )
-		code = http.StatusBadRequest
-		msg = "missing data"
+	authorised := false 				// all mirror commands must have an authentication token
+	if accept_requests  {
+		code = http.StatusMethodNotAllowed
+		msg = "A valid token with a tegu_admin or tegu_mirror role is required to execute mirroring commands"
+
+		if in.Header != nil && in.Header["X-Auth-Tegu"] != nil {
+			auth := in.Header["X-Auth-Tegu"][0]
+			if token_has_osroles( &auth, *mirror_roles ) {	// if token has one of the roles listed in config file
+				authorised = true
+			}
+		} 
 	} else {
-		http_sheep.Baa( 1, "Request from %s: %s %s", in.RemoteAddr, in.Method, in.RequestURI )
-		switch in.Method {
-			case "PUT":
-				code, msg = mirror_put( out, data )
+		code = http.StatusMethodNotAllowed
+		msg = "Tegu is running but not accepting requests; try again later"
+	}
 
-			case "POST":
-				code, msg = mirror_post( in, out, data )
+	if authorised {
+		data := dig_data( in )
+		if data == nil {						// missing data -- punt early
+			http_sheep.Baa( 1, "http: mirror_handler called without data: %s", in.Method )
+			code = http.StatusBadRequest
+			msg = "missing data"
+		} else {
+			http_sheep.Baa( 1, "Request from %s: %s %s", in.RemoteAddr, in.Method, in.RequestURI )
+			switch in.Method {
+				case "PUT":
+					code, msg = mirror_put( out, data )
 
-			case "DELETE":
-				code, msg = mirror_delete( in, out, data )
+				case "POST":
+					code, msg = mirror_post( in, out, data )
 
-			case "GET":
-				code, msg = mirror_get( in, out, data )
+				case "DELETE":
+					code, msg = mirror_delete( in, out, data )
 
-			default:
-				http_sheep.Baa( 1, "mirror_handler called for unrecognised method: %s", in.Method )
-				code = http.StatusMethodNotAllowed
-				msg = fmt.Sprintf( "unrecognised method: %s", in.Method )
+				case "GET":
+					code, msg = mirror_get( in, out, data )
+
+				default:
+					http_sheep.Baa( 1, "mirror_handler called for unrecognised method: %s", in.Method )
+					code = http.StatusMethodNotAllowed
+					msg = fmt.Sprintf( "unrecognised method: %s", in.Method )
+			}
 		}
 	}
 
@@ -696,7 +714,7 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 		hdr := out.Header()
 		hdr.Add("Content-type", "application/json")
 	} else {
-		http_sheep.Baa( 1, "Response: " + msg)
+		http_sheep.Baa( 2, "Response: " + msg)
 	}
 	out.WriteHeader(code)
 	out.Write([]byte(msg))

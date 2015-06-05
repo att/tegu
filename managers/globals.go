@@ -187,9 +187,13 @@ var (
 		http manager needs globals because the http callback doesn't allow private data to be passed
 	*/
 
-	priv_auth *string;					// type of authorisation needed for privledged commands (pause, resume, etc.)
+	admin_roles *string					// roles which are allowed to submit privledged requests (pause, resume etc.)
+	sysproc_roles *string				// list of roles that are valid for requests allowed for either system procs or admins (e.g. listhost)
+	mirror_roles *string				// list of openstack roles that are valid for mirroring commands
+	priv_auth *string					// type of authorisation needed for privledged commands 
 	accept_requests bool = false		// until main says we can, we don't accept requests
 	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value	
+	isSSL bool							// mirroring flag to know if ssl is on
 )
 
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------

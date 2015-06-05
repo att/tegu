@@ -96,9 +96,6 @@ import (
 	"codecloud.web.att.com/tegu/gizmos"
 )
 
-var (
-	isSSL bool
-)
 
 /* ---- validation and authorisation functions ---------------------------------------------------------- */
 
@@ -230,13 +227,16 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 
 /*
 	This function will validate the requestor is authorised to make the request based on the setting
-	of priv_auth. When localhost, the request must have originated from the localhost. When token
-	the user must have sent a valid token for the admin user defined in the config file. When none,
-	we just return true.
+	of priv_auth. When localhost, the request must have originated from the localhost or have a
+	valid token. When token the user _must_ have sent a valid token (regardless of where the 
+	request originated). A valid token is a token which contains a role name that is listed
+	in the for the roles string passed in. The valid_roles string is a comma separated list
+	(e.g. admin,tegu_admin).  If 'none' is inicated in the config file, then we always return
+	true without doing any validation.
 
 	Returns true if the command can be allowed; false if not.
 */
-func validate_auth( data *string, is_token bool ) ( allowed bool ) {
+func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed bool ) {
 	if priv_auth == nil {
 		return true
 	}
@@ -254,7 +254,12 @@ func validate_auth( data *string, is_token bool ) ( allowed bool ) {
 			fallthrough
 
 		case "token":
-			return is_admin_token( data )
+			if valid_roles == nil {
+				http_sheep.Baa( 1, "internal misap: validate auth called with nil role list" )
+				return false
+			}
+			return token_has_osroles( data, *valid_roles ) 
+			//return is_admin_token( data )
 	}
 
 	return false
@@ -514,7 +519,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "chkpt":
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 						state = "OK"
@@ -522,7 +527,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "graph":
-					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" )) || validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, sysproc_roles ) {
 						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 						if tmap["project"] != nil {
 							http_sheep.Baa( 1, "graph is forcing update of all VMs for the project: %s", *tmap["project"] )
@@ -552,7 +557,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "listulcaps":											// list user link capacities known to network manager
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( nw_ch, my_ch, REQ_LISTULCAP, nil, nil )
 						req = <- my_ch
@@ -566,7 +571,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "listhosts":											// list known host information
-					if (is_token && token_has_osroles( &auth_data, "admin,sys_app" ))  ||  validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, sysproc_roles ) {
 						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 						if tmap["project"] != nil {
 							http_sheep.Baa( 1, "listhosts is forcing update of all VMs for the project: %s", *tmap["project"] )
@@ -625,7 +630,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "pause":
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						if res_paused {							// already in a paused state, just say so and go on
 							jreason = fmt.Sprintf( `"reservations already in a paused state; use resume to return to normal operation"` )
 							state = "WARN"
@@ -651,7 +656,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					state = "OK"
 
 				case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
 						req = <- my_ch															// get response from the network thread
@@ -668,7 +673,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 					
 				case "refresh":								// refresh reservations for named VM(s)
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						state = "OK"
 						reason = ""
 						for i := 1; i < ntokens; i++ {
@@ -789,7 +794,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						}
 
 				case "resume":
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						if ! res_paused {							// not in a paused state, just say so and go on
 							jreason = fmt.Sprintf( `"reservation processing already in a normal state"` )
 							state = "WARN"
@@ -907,7 +912,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					http_sheep.Baa( 1, "steering reservation %s; errors: %s", state, reason )
 
 				case "setulcap":									// set a user link cap; expect user-name limit
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						if ntokens == 3 {
 							req = ipc.Mk_chmsg( )
 							req.Send_req( osif_ch, my_ch, REQ_PNAME2ID, &tokens[1], nil )		// translate the name to virtulisation assigned ID
@@ -934,7 +939,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "setdiscount":
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						if ntokens == 2 {						// expect discount amount or percentage
 							req = ipc.Mk_chmsg( )
 							req.Send_req( nw_ch, nil, REQ_SETDISC, &tokens[1], nil )		// set the discount value
@@ -948,7 +953,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					} 
 
 				case "verbose":									// verbose n [child-bleater]
-					if validate_auth( &auth_data, is_token ) {
+					if validate_auth( &auth_data, is_token, admin_roles ) {
 						if ntokens > 1 {
 							state = "OK"
 							reason = ""
@@ -1166,9 +1171,7 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		msg = fmt.Sprintf( "%d errors processing requests in %d requests", nerrors, req_count )
 	}
 
-	return
-}
-
+	return } 
 func parse_get( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	http_sheep.Baa( 1, "get received and ignored -- GET is not supported" )
 	state = "ERROR"
@@ -1177,7 +1180,9 @@ func parse_get( out http.ResponseWriter, recs []string, sender string ) (state s
 }
 
 /*
-	Deal with input from the other side; this is invoked directly by the http listener.
+	Deal with input from the other side sent to tegu/api. See http_mirror_api.go for
+	the mirror api handler and related functions.
+	this is invoked directly by the http listener.
 	Because we are driven as a callback, and cannot controll the parameters passed in, we
 	must (sadly) rely on globals for some information; sigh. (There might be a way to deal
 	with this using a closure, but I'm not taking the time to go down that path until
@@ -1191,7 +1196,7 @@ func parse_get( out http.ResponseWriter, recs []string, sender string ) (state s
 	plus a final overall status; all are collected in square brackets and thus
 	should be parsable as json.
 */
-func deal_with( out http.ResponseWriter, in *http.Request ) {
+func api_deal_with( out http.ResponseWriter, in *http.Request ) {
 	var (
 		data 	[]byte
 		recs	[]string
@@ -1201,13 +1206,20 @@ func deal_with( out http.ResponseWriter, in *http.Request ) {
 
 	data = dig_data( in )
 	if( data == nil ) {						// missing data -- punt early
-		http_sheep.Baa( 1, "http: deal_with called without data: %s", in.Method )
+		http_sheep.Baa( 1, "http: api_deal_with called without data: %s", in.Method )
 		fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )	// error stuff back to user
 		return
 	} else {
 		_, recs = token.Tokenise_drop( string( data ), ";\n" )		// split based on ; or newline
 		fmt.Fprintf( out, "{ " )									// open the overall object for output
 	}
+
+	/*
+	auth := ""
+	if in.Header != nil && in.Header["X-Auth-Tegu"] != nil {
+		auth = in.Header["X-Auth-Tegu"][0]
+	} 
+	*/
 
 	switch in.Method {
 		case "PUT":
@@ -1223,7 +1235,7 @@ func deal_with( out http.ResponseWriter, in *http.Request ) {
 			state, msg = parse_get( out, recs, in.RemoteAddr )
 
 		default:
-			http_sheep.Baa( 1, "deal_with called for unrecognised method: %s", in.Method )
+			http_sheep.Baa( 1, "api_deal_with called for unrecognised method: %s", in.Method )
 			state = "ERROR"
 			msg = fmt.Sprintf( "unrecognised method: %s", in.Method )
 	}
@@ -1249,6 +1261,13 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 
 	dup_str := "localhost"
 	priv_auth = &dup_str
+
+	ar_str := "admin,tegu_admin"						// default roles which are allowed to run privledged requests (ulcap etc)
+	admin_roles = &ar_str
+	sp_str := ",tegu_sysproc"							// default roles which for system processes (limited set of privledged requests, e.g. listhosts)
+	sysproc_roles = &ar_str
+	mr_str := ",tegu_mirror"
+	mirror_roles =  &mr_str
 
 	tclass2dscp = make( map[string]int, 5 )			// TODO: these need to come from the config file
 	tclass2dscp["voice"] = 46
@@ -1294,15 +1313,50 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 					http_sheep.Baa( 0, `WRN: invalid local authorisation type (%s), defaulting to "localhost"  [TGUHTP000]`, *p )
 			}
 		}
+
+		p = cfg_data["httpmgr"]["admin_roles"]
+		if p != nil {
+			admin_roles = p;
+		}
+
+		p = cfg_data["httpmgr"]["sysproc_roles"]
+		if p != nil {
+			sysproc_roles = p
+		}
 	}
-	http.HandleFunc( "/tegu/api", deal_with )				// define callback
+
+	enable_mirroring := false										// off if section is missing all together
 	if cfg_data["mirroring"] != nil {
-		// Only enabled if defined in the configuration file
+		enable_mirroring = true										// on by default if sectio is presernt
+		if p := cfg_data["mirroring"]["enable"]; p != nil {			// allow explicit disable with enable=no
+			if *p == "no" || *p == "No" {
+				enable_mirroring = false
+			}
+		}
+		if p := cfg_data["mirroring"]["mirror_roles"]; p != nil {
+			mirror_roles = p
+		} 
+	} 
+
+	sp_str = *sysproc_roles + "," + *admin_roles					// add admin roles to sysproc and mirror role lists
+	sysproc_roles = &sp_str
+	mr_str = *mirror_roles + "," + *admin_roles
+	mirror_roles = &mr_str
+
+	http_sheep.Baa( 1, "admin roles: %s", *admin_roles )
+	http_sheep.Baa( 1, "sysproc roles: %s", *sysproc_roles )
+	http_sheep.Baa( 1, "mirror roles: %s", *mirror_roles )
+
+	http.HandleFunc( "/tegu/api", api_deal_with )					// reserve/delete etc should eventually be removed from this
+	http.HandleFunc( "/tegu/bandwidth", api_deal_with )				// define bandwidth callback TODO: add a callback specifically for bandwidth things
+
+	if enable_mirroring {
 		http.HandleFunc( "/tegu/mirrors/", mirror_handler )
-		http_sheep.Baa( 1, "Tegu mirroring URLs are ENABLED" )
+		http_sheep.Baa( 1, "mirroring URLs are ENABLED" )
 	} else {
-		http_sheep.Baa( 1, "Tegu mirroring URLs are DISABLED" )
+		http_sheep.Baa( 1, "mirroring is disabled" )
 	}
+
 	isSSL = (ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "")
 	if isSSL {
 		if  create_cert {

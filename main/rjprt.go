@@ -200,8 +200,9 @@ func main() {
 			}
 		} else {
 			_, err = jsontools.Json2blob( data, root, true );			// normal hiarchy can be printed as it blobs, so ignore jif coming back
-			if  err != nil {
-				fmt.Fprintf( os.Stderr, "ERR: %s \n", err );
+			if  err != nil {											// assume mirroring which doesn't put out json in all cases (boo)
+				//fmt.Fprintf( os.Stderr, "ERR: %s \n", err );
+				fmt.Fprintf( os.Stdout, "%s\n", data );
 			}
 		}
 	}
