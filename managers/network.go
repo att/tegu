@@ -618,7 +618,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		links, err = gizmos.Read_json_links( *flhost )
 		if err != nil || len( links ) <= 0 {
 			if host_list != nil {
-				net_sheep.Baa( 2, "generating a dummy star topology: json file empty, or non-existant: %s", *flhost )
+				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existant: %s", *flhost )
 				links = gizmos.Gen_star_topo( *host_list )				// generate a dummy topo based on the host list
 			} else {
 				net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
