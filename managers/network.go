@@ -58,6 +58,7 @@
 				30 Mar 2014 - Added ability to accept an array of Net_vm blocks.
 				18 May 2015 - Added discount support.
 				26 May 2015 - Conversion to support pledge as an interface.
+				08 Jun 2015 - Added support for dummy star topo.
 */
 
 package managers
@@ -589,7 +590,7 @@ func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 	does _not_ contain a ':'. 
 	
 */
-func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int ) (n *Network) {
+func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
@@ -615,12 +616,16 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 	} else {
 		hlist = old_net.build_hlist()						// simulate output from floodlight by building the host list from openstack maps
 		links, err = gizmos.Read_json_links( *flhost )
-		if err != nil {
-			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
-			links = nil										// kicks us out later, but must at least create an empty network first
+		if err != nil || len( links ) <= 0 {
+			if host_list != nil {
+				net_sheep.Baa( 2, "generating a dummy star topology: json file empty, or non-existant: %s", *flhost )
+				links = gizmos.Gen_star_topo( *host_list )				// generate a dummy topo based on the host list
+			} else {
+				net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
+				links = nil										// kicks us out later, but must at least create an empty network first
+			}
 		}
 	}
-
 
 	n = mk_network( old_net == nil )			// new network, need links and mlags only if it's the first network
 	if old_net == nil {
@@ -1484,19 +1489,19 @@ func (net *Network) xfer_maps( old_net *Network ) {
 func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	var (
 		act_net *Network
-		req		*ipc.Chmsg
+		req				*ipc.Chmsg
 		max_link_cap	int64 = 0
-		refresh	int = 30
+		refresh			int = 30
 		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
 		mlag_paths 		bool = true			// can be set to false in config (mlag_paths); overrides find_all_paths
-		link_headroom int = 0				// percentage that each link capacity is reduced by
-		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
+		link_headroom 	int = 0				// percentage that each link capacity is reduced by
+		link_alarm_thresh int = 0			// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence		// user link capacity boundaries
-		phost_suffix *string = nil
-		discount int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
-		relaxed	bool = false				// set with relaxed = true in config
+		phost_suffix 	*string = nil
+		discount 		int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
+		relaxed			bool = false				// set with relaxed = true in config
+		hlist			*string = &empty_str		// host list we'll give to build should we need to build a dummy star topo
 
-		ip2		*string
 	)
 
 	if *sdn_host  == "" {
@@ -1602,7 +1607,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
+	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, &empty_str )
 	if act_net == nil {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!  [TGUNET011]" )		// this is bad and WILL cause a core dump
 	} else {
@@ -1611,6 +1616,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		act_net.Set_relaxed( relaxed )
 	}
 
+	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 						// tickle once, very soon after starting, to get a host list
+	tklr.Add_spot( int64( refresh ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// tickles us every once in a while to update host list
 	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network 
 	
 	for {
@@ -1672,6 +1679,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 					case REQ_RESERVE:
+						var ip2		*string = nil					// tmp pointer for this block 
+
 						// host names are expected to have been vetted (if needed) and translated to projects-id/name if IDs are enabled
 						p, ok := req.Req_data.( *gizmos.Pledge_bw )
 						if ok {
@@ -1699,7 +1708,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							}
 
 							ip1, err := act_net.name2ip( h1 )
-							ip2 = nil
 							if err == nil {
 								ip2, err = act_net.name2ip( h2 )
 							}
@@ -1793,7 +1801,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									}
 							}
 
-							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 								act_net = new_net							// and finally use it
@@ -1933,7 +1941,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 					case REQ_NETUPDATE:											// build a new network graph
 						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
-						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
+						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
 						if new_net != nil {
 							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
 							act_net = new_net
@@ -1943,7 +1951,28 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
 						}
 
-						
+
+					case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
+																	// this is similar, yet different, than the code in fq_mgr (we don't need phost suffix here)
+						req.Response_ch = nil;						// regardless of source, we should not reply to this request
+
+						if req.State != nil || req.Response_data != nil {				// response from ostack if with list or error
+							if  req.Response_data.( *string ) != nil {
+								hls := strings.TrimLeft( *(req.Response_data.( *string )), " \t" )		// ditch leading whitespace
+								hl := &hls
+								if *hl != ""  {
+									hlist = hl										// ok to use it
+									net_sheep.Baa( 2, "host list received from osif: %s", *hlist )
+								} else {
+									net_sheep.Baa( 1, "empty host list received from osif was discarded" )
+								}
+							} else {
+								net_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
+							}
+						} else {
+							req_hosts( nch, net_sheep )					// send requests to osif for data
+						}
+								
 					//	------------------ user api things ---------------------------------------------------------
 					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
 						data := req.Req_data.( []*string )
@@ -1960,7 +1989,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_NETGRAPH:							// dump the current network graph
 						req.Response_data = act_net.to_json()
 
-					case REQ_LISTHOSTS:							// json list of hosts with name, ip, switch id and port
+					case REQ_LISTHOSTS:							// spew out a json list of hosts with name, ip, switch id and port
 						req.Response_data = act_net.host_list( )
 
 					case REQ_LISTULCAP:							// user link capacity list

@@ -61,7 +61,7 @@ const (
 	REQ_LIST					// generic list depending on receiver
 	REQ_GETLMAX					// get max link allocation across the network
 	REQ_SETQUEUES				// fqmgr - tickle to cause queues to be set if needed
-	REQ_CHOSTLIST				// osif - get a list of compute hosts
+	REQ_CHOSTLIST				// get a list of compute hosts, or 'here is' a host list (network, fqmgr)
 	REQ_LISTHOSTS				// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
 	REQ_GEN_QMAP				// network - generate queue info needed by external process to set queues
 	REQ_IE_RESERVE				// fq-manager send ingress/egress reservations to skoogi

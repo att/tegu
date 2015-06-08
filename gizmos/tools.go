@@ -345,3 +345,31 @@ func Strings_equal( s1 *string, s2 *string ) ( bool ) {
 	return *s1 == *s2	
 }
 
+/*
+	Given a string with a list of host names, this function generates
+	an array of floodlight link structures in a star arrangement as 
+	though wwe received the json from floodlight.
+
+	CAUTION: we are making flood-light style links, _not_ our link object
+		links.
+*/
+
+func Gen_star_topo( hosts string ) ( links []FL_link_json ) {
+	toks := strings.Split( hosts, " " )
+
+	links = make( []FL_link_json, len( toks ) )			// one link per host in the list
+	for i, t := range toks {
+		links[i] = FL_link_json {
+			Src_switch:		"star.switch",				// switch name cannot have a dash
+			Src_port:		i+1,						// port should be 1 based
+			Dst_switch:		t + "@em1",
+			Dst_port:		-128,
+			Type:			"internal",
+			Direction:		"bidirectional",
+			Capacity:		10000000000,
+		}
+	}
+
+	return 
+}
+

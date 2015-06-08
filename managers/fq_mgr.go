@@ -521,16 +521,6 @@ func send_hlist_agent( hlist *string ) {
 	tmsg.Send_req( am_ch, nil, REQ_CHOSTLIST, hlist, nil )			// push the list; does not expect response back
 }
 
-/*
-	Send a request to openstack interface for a host list. We will _not_ wait on it 
-	and will handle the response in the main loop. 
-*/
-func req_hosts(  rch chan *ipc.Chmsg ) {
-	fq_sheep.Baa( 2, "requesting host list from osif" )
-
-	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, rch, REQ_CHOSTLIST, nil, nil )
-}
 
 /*
 	Send a request to openstack interface for an ip to mac map. We will _not_ wait on it 
@@ -648,8 +638,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	//tklr.Add_spot( qcheck_freq, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER );  	// tickle us every few seconds to adjust the ovs queues if needed
 
 	if switch_hosts == nil {
-		tklr.Add_spot( 2, my_chan, REQ_CHOSTLIST, nil, 1 );  						// tickle once, very soon after starting, to get a host list
-		tklr.Add_spot( hcheck_freq, my_chan, REQ_CHOSTLIST, nil, ipc.FOREVER );  	// tickles us every once in a while to update host list
+		tklr.Add_spot( 2, my_chan, REQ_CHOSTLIST, nil, 1 )  						// tickle once, very soon after starting, to get a host list
+		tklr.Add_spot( hcheck_freq, my_chan, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// tickles us every once in a while to update host list
 		fq_sheep.Baa( 2, "host list will be requested from openstack every %ds", hcheck_freq )
 	} else {
 		host_list = switch_hosts
@@ -771,7 +761,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					adjust_queues_agent( qlist, host_list, phost_suffix )		// if sending json to an agent
 				}
 
-			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
+			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
 				msg.Response_ch = nil;						// regardless of source, we should not reply to this request
 
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
@@ -793,9 +783,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
 					}
 				} else {
-					fq_sheep.Baa( 2, "requesting lists from osif" )
-					req_hosts( my_chan )					// send requests to osif for data
-					//req_ip2mac( my_chan )
+					req_hosts( my_chan, fq_sheep )					// send requests to osif for data
 				}
 
 			case REQ_IP2MACMAP:								// a new map from osif
