@@ -853,7 +853,8 @@ func main() {
 
 					case connman.ST_DISC:
 						sheep.Baa( 1, "session to tegu was lost" )
-						connect2tegu( smgr, tegu_host, sess_mgr )
+						connect2tegu( smgr, tegu_host, sess_mgr )			// blocks until connected and reports on the conn_ch channel when done
+						broker.Reset( )				// reset the broker each time we pick up a new tegu connection
 
 					case connman.ST_DATA:
 						sheep.Baa( 3, "data: [%s]  %d bytes received", sreq.Id, len( sreq.Buf ) )
