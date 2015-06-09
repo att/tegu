@@ -59,6 +59,7 @@
 				18 May 2015 - Added discount support.
 				26 May 2015 - Conversion to support pledge as an interface.
 				08 Jun 2015 - Added support for dummy star topo.
+					Added support for 'one way' reservations (non-virtual router so no real endpoint)
 */
 
 package managers
@@ -1676,6 +1677,15 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						} else {
 							net_sheep.Baa( 1, "internal mishap: pledge passed to has capacity wasn't a bw pledge: %s", p )
 							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
+						}
+
+					case REQ_OWRESERVE:								// one way bandwidth reservation
+						p, ok := req.Req_data.( *gizmos.Pledge_bw )
+						if ok {
+							h1, h2 := p.Get_values( )
+						} else {									// pledge wasn't a bw pledge
+							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bwow pledge: %s", p )
+							req.State = fmt.Errorf( "unable to create oneway reservation in network, internal data corruption." )
 						}
 
 					case REQ_RESERVE:
