@@ -1679,14 +1679,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
 						}
 
-					case REQ_OWRESERVE:								// one way bandwidth reservation
-						p, ok := req.Req_data.( *gizmos.Pledge_bw )
-						if ok {
-							h1, h2 := p.Get_values( )
-						} else {									// pledge wasn't a bw pledge
-							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bwow pledge: %s", p )
-							req.State = fmt.Errorf( "unable to create oneway reservation in network, internal data corruption." )
-						}
 
 					case REQ_RESERVE:
 						var ip2		*string = nil					// tmp pointer for this block 
