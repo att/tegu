@@ -34,6 +34,7 @@
 				09 Apr 2015 : Added ql_set_trunks to list of scripts to rsync.
 				20 Apr 2015 : Now accepts direction of external IP to pass on bw-fmod command.
 				28 May 2015 : Changes to support trinity. (version bump to 2.2)
+				15 Jun 2015 : Added support for oneway bandwidth reservations (bump 2.3)
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -60,7 +61,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.2/15285"
+	version		string = "v2.3/16155"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -279,7 +280,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
 	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// for now, there will only ever be one host for these commands
 	if err != nil {
-		sheep.Baa( 1, "WRN: error submitting wa command  to %s: %s", act.Hosts[0], err )
+		sheep.Baa( 1, "WRN: error submitting bandwidth command  to %s: %s", act.Hosts[0], err )
 		jout, _ = json.Marshal( msg )
 		return
 	}
@@ -320,6 +321,95 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 		sheep.Baa( 0, "ERR: %s unable to execute: %s	[TGUAGN000]", cmd_type, cmd_str )
 	} else {
 		sheep.Baa( 1, "bw_fmod cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+	}
+
+	jout, err = json.Marshal( msg )
+	return
+}
+
+/*	
+	Oneway bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which 
+	eliminates the need for Tegu to understand/know things like command line parms, bridge names and
+	such.  Parms in the map are converted to script command line options.
+ */
+func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
+    var (
+		cmd_str string  
+    )
+	
+	pstr := ""
+	if path != nil {
+		pstr = fmt.Sprintf( "PATH=%s:$PATH ", *path )		// path to add if needed
+	}
+
+	parms := act.Data
+	cmd_str = fmt.Sprintf( `%sql_bwow_fmods `, pstr ) +
+			build_opt( parms["smac"], "-s" ) +
+			build_opt( parms["dmac"], "-d" ) +
+			build_opt( parms["extip"], "-E" ) +
+			build_opt( parms["sproto"],  "-p" ) +
+			build_opt( parms["dproto"],  "-P" ) +
+			build_opt( parms["queue"],  "-q" ) +
+			build_opt( parms["timeout"],  "-t" ) +
+			build_opt( parms["dscp"],  "-T" ) +
+			build_opt( parms["vlan_match"],  "-V" ) +
+			build_opt( parms["ipv6"], "-6" ) 
+
+
+	sheep.Baa( 1, "via broker on %s: %s", act.Hosts[0], cmd_str )
+
+	msg := agent_msg{}				// build response to send back
+	msg.Ctype = "response"
+	msg.Rtype = cmd_type
+	msg.Rid = act.Aid				// response id so tegu can map back to requestor
+	msg.Vinfo = version
+	msg.State = 0					// assume success
+
+	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
+	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// oneway fmods are only ever applied to one host so [0] is ok
+	if err != nil {
+		sheep.Baa( 1, "WRN: error submitting bwow command  to %s: %s", act.Hosts[0], err )
+		jout, _ = json.Marshal( msg )
+		return
+	}
+
+	// TODO: this can be moved to a function 
+	rdata := make( []string, 8192 )								// response output converted to strings
+	edata := make( []string, 8192 )
+	ridx := 0													// index of next insert point into rdata
+	wait4 := 1
+	timer_pop := false
+	for wait4 > 0 && !timer_pop {								// wait for response back on the channel or the timer to pop
+		select {
+			case <- time.After( timeout * time.Second ):		// timeout if we don't get something back soonish
+				sheep.Baa( 1, "WRN: timeout waiting for response from %s; cmd: %s", act.Hosts[0], cmd_str )
+				timer_pop = true
+
+			case resp := <- ssh_rch:					// response from broker
+				wait4--
+				stdout, stderr, _, err := resp.Get_results()
+				host, _, _ := resp.Get_info()
+				eidx := buf_into_array( stderr, edata, 0 )			// capture error messages, if any
+				msg.Edata = edata[0:eidx]
+				if err != nil {
+					msg.State = 1
+					sheep.Baa( 1, "WRN: error running command: host=%s: %s", host, err )
+				} else {
+					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
+				}
+				if err != nil || sheep.Would_baa( 2 ) {
+					dump_stderr( stderr, "bw_fmod " + host )			// always dump stderr on error, or in chatty mode
+				}
+		}
+	}
+
+	msg.Rdata = rdata[0:ridx]										// return just what was filled in
+
+	if msg.State > 0 {
+		sheep.Baa( 1, "bwow_fmod (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+		sheep.Baa( 0, "ERR: %s unable to execute: %s	[TGUAGN000]", cmd_type, cmd_str )
+	} else {
+		sheep.Baa( 1, "bwow_fmod cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
 	}
 
 	jout, err = json.Marshal( msg )
@@ -715,6 +805,13 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 			case "bw_fmod":									// new bandwidth flow-mod
 					p, err := req.Actions[i].do_bw_fmod( req.Actions[i].Atype, broker, path, 15 )
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
+
+			case "bwow_fmod":									// generate oneway bandwidth flow-mods
+					p, err := req.Actions[i].do_bwow_fmod( req.Actions[i].Atype, broker, path, 15 )
 					if err == nil {
 						resp[ridx] = p
 						ridx++

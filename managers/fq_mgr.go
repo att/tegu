@@ -273,13 +273,63 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 	if err != nil {
 		fq_sheep.Baa( 0, "unable to build json to set flow mod" )
 	} else {
-		fq_sheep.Baa( 2, "json: %s", json )
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 	}
 
 	fq_sheep.Baa( 2, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
 	
+}
+
+/*
+	Send a bandwidth endpoint flow-mod request for a oneway set of 
+	flow-mods.  This is little more than a wrapper that converts 
+	the fq_req into an agent request. The ultimate agent action is 
+	to put in all needed flow-mods on the endpoint host in one go,
+	so no need for individual requests for each.
+
+	Yes, this probably _could_ be pushed up into the reservation manager;
+	see comments above.
+*/
+func send_bwow_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
+	if data == nil {
+		fq_sheep.Baa( 1, "fq_req: internal mishap: unable to send bwow-fmods data to bwow function was nil" )
+		return
+	}
+
+	if data.Espq == nil || data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
+		fq_sheep.Baa( 1, "unable to send bwow-fmods request to agent: no switch defined in input data" )
+		return
+	}
+
+	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
+	if phost_suffix != nil {									// we need to add the physical host suffix
+		host = add_phost_suffix( host, phost_suffix )
+	}
+
+	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	if data.Match.Ip2 != nil {
+		data.Match.Dmac = ip2mac[*data.Match.Ip2]					// this may come up nil and that's ok
+	} else {
+		data.Match.Dmac = nil
+	}
+
+	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
+	msg.Actions = make( []action, 1 )							// just a single action
+	msg.Actions[0].Atype = "bwow_fmod"							// operation to invoke on agent
+	msg.Actions[0].Hosts = make( []string, 1 )					// oneway flow-mods created on just one host
+	msg.Actions[0].Hosts[0] = *host
+	msg.Actions[0].Data = data.To_bwow_map()					// convert useful data from caller into parms for agent
+
+	json, err := json.Marshal( msg )						// bundle into a json string
+	if err != nil {
+		fq_sheep.Baa( 0, "unable to build json to set bwow flow mod" )
+	} else {
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+	}
+
+	fq_sheep.Baa( 2, "oneway bandwidth flow-mod request sent to agent manager: %s", json )
 }
 
 /*
@@ -663,6 +713,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					send_gfmod_agent( fdata,  ip2mac, host_list, phost_suffix )
 				}
 
+			case REQ_BWOW_RESERVE:						// oneway bandwidth flow-mod generation
+				msg.Response_ch = nil					// nothing goes back from this
+				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
+				send_bwow_fmods( fdata, ip2mac, phost_suffix )
+
 			case REQ_BW_RESERVE:						// bandwidth endpoint flow-mod creation; single agent script creates all needed fmods
 				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
 				send_bw_fmods( fdata, ip2mac, phost_suffix )
@@ -744,7 +799,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					fq_sheep.Baa( 0, "CRI: missing data on st-reserve request to fq-mgr" )
 				}
 
-			case REQ_RESERVE:								// send a reservation to skoogi
+			case REQ_SK_RESERVE:							// send a reservation to skoogi
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, queue h1/2 must be IP addresses
 				if uri_prefix != "" {
 					fq_sheep.Baa( 2,  "msg to reserve: %s %s %s %d %d",  uri_prefix, data[0].(string), data[1].(string), data[2].(int64), data[3].(int) )

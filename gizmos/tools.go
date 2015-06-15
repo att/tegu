@@ -373,3 +373,16 @@ func Gen_star_topo( hosts string ) ( links []FL_link_json ) {
 	return 
 }
 
+/*
+	Given a pointer to string, return the string or "null". We use null so this can 
+	be used to generate legit json.
+*/
+func Safe_string( p interface{} ) ( string ) {
+
+	sp, ok := p.( *string )
+	if !ok || sp  == nil {
+		return "null"
+	}
+
+	return *sp
+}

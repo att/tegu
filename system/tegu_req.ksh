@@ -44,6 +44,7 @@
 #				02 Jun 2015 - Added optional request name to *-mirror commands to make
 #					consistant with others (no dash).
 #				04 Jun 2015 - Added token to -a call.
+#				10 Jun 2015 - Added one way reservation support
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -71,7 +72,8 @@ function usage {
 	     token into the host name specification.
 
 	commands and parms are one of the following:
-	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie [dscp]
+	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
+	  $argv0 owreserve bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
 	  $argv0 cancel reservation-id [cookie]
 	  $argv0 listconns {name[ name]... | <file}
 	  $argv0 add-mirror [start-]end port1[,port2...] output [cookie] [vlan]
@@ -385,18 +387,19 @@ case $1 in
 			usage >&2
 			exit 1
 		fi
-		if [[ $2 == "+"* ]]
-		then
-			expiry=$(( $(date +%s) $2 ))
-		else
-			if [[ $2 == -* ]]
-			then
-				echo "start-end timestamp seems wrong: $2  [FAIL]" >&2
-				usage >&2
-				exit 1
-			fi
-			expiry=$2
-		fi
+		#if [[ $2 == "+"* ]]
+		#then
+		#	expiry=$(( $(date +%s) $2 ))
+		#else
+		#	if [[ $2 == -* ]]
+		#	then
+		#		echo "start-end timestamp seems wrong: $2  [FAIL]" >&2
+		#		usage >&2
+		#		exit 1
+		#	fi
+		#	expiry=$2
+		#fi
+		expiry=$( str2expiry $2 )
 		if [[ $3 != *"-"* ]] && [[ $3 != *","* ]]
 		then
 			echo "host pair must be specified as host1-host2 OR host1,host2   [FAIL]" >&2
@@ -416,6 +419,19 @@ case $1 in
 			fi
 		fi
 		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/$bandwidth"
+		;;
+
+	owres*|ow_res*)
+		shift
+			#teg command is: owreserve <bandwidth>[K|M|G] [<start>-]<end>  <host1-host2> [cookie [dscp]]
+		if (( $# < 4 ))
+		then
+			echo "bad number of positional parms for owreserve  [FAIL]" >&2
+			usage >&2
+			exit 1
+		fi
+		expiry=$( str2expiry $2 )
+		rjprt  $opts -m POST -D "ow_reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/$bandwidth"
 		;;
 
 	setdiscount)

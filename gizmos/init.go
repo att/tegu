@@ -27,10 +27,12 @@ const (
 	PT_BANDWIDTH	int = iota				// pledge types
 	PT_STEERING
 	PT_MIRRORING
+	PT_OWBANDWIDTH							// one way bandwidth
 )
 
 var (
-	empty_str	string = ""					// makes &"" possible since that's not legal in go
+	empty_str	string = ""					// these make &"" possible since that's not legal in go
+	zero_str	string = "0"
 
 	obj_sheep	*bleater.Bleater			// sheep that objeects have reference to when needing to bleat
 )

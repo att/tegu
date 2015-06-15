@@ -40,11 +40,15 @@ import (
 )
 
 const (
-	// message types (requests) that are placed into channel messages. Primary reciver of each type is
+	// request types placed into channel messages. Primary reciver of each type is
 	// indicated in parens (except for the more generic types).
 	REQ_NOOP		int = -1	// no operation
 	_				int = iota	// skip 0
-	REQ_RESERVE					// reservation request
+	REQ_SK_RESERVE				// bandwidth reservation request for skoogie -- qfull (network)
+	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request -- qlite
+	REQ_BWOW_RESERVE			// create a one way bandwidth reservation
+	REQ_IE_RESERVE				// fq-manager send ingress/egress reservations to skoogi
+	REQ_ST_RESERVE				// fq-manager send traffic steering reservation fmods to agent
 	REQ_NETGRAPH				// return the network graph as a jThing (json)
 	REQ_HASCAP					// check for reservation capacity
 	REQ_ADD						// generic requests may mean slightly different things based on the go-routine receiving the request
@@ -64,8 +68,6 @@ const (
 	REQ_CHOSTLIST				// get a list of compute hosts, or 'here is' a host list (network, fqmgr)
 	REQ_LISTHOSTS				// network - build a host list that includes vm name, ip, switch(es) and port(s) for each host
 	REQ_GEN_QMAP				// network - generate queue info needed by external process to set queues
-	REQ_IE_RESERVE				// fq-manager send ingress/egress reservations to skoogi
-	REQ_ST_RESERVE				// fq-manager send traffic steering reservation fmods to agent
 	REQ_GEN_FMOD				// send generic flow-mod
 	REQ_VM2IP					// xlate map VM name | VM ID to IP map is in the request
 	REQ_VMID2IP					// xlate map VM-ID to ip is in request
@@ -104,7 +106,6 @@ const (
 	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
 	REQ_GET_PHOST_FROM_MAC		// used by mirroring to find the phost that goes with a MAC
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
-	REQ_BW_RESERVE				// bandwidth endpoint reservation oriented request
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 	REQ_SETDISC					// set the discount value
 	REQ_DUPCHECK				// check for duplicate (resmgr)

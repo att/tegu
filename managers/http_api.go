@@ -358,13 +358,14 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 	}
 
 	req = ipc.Mk_chmsg( )
-	req.Send_req( nw_ch, my_ch, REQ_RESERVE, res, nil )		// send to network to verify a path
+	req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, res, nil )	// send to network to verify a path and reserve bw on the link(s)
 	req = <- my_ch											// get response from the network thread
 
 	if req.Response_data != nil {
 		path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 		res.Set_path_list( path_list )
 
+		//ip := gizmos.Pledge( res )							// must pass an interface to resmgr
 		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
 		req = <- my_ch										// wait for completion
 
@@ -391,46 +392,65 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 	return
 }
 
-
 /*
-	Gathers information about the host from openstack, and if known inserts the information into
-	the network graph. If block is true, then we will block on a repl from network manager.
-	If update_fqmgr is true, then we will also send osif a request to update the fqmgr with
-	data that might ahve changed as a result of lazy gathering of info by the get_hostinfo
-	request.  If block is set, then we block until osif acks the request. This ensures
-	that the request has been given to fq-mgr which is single threaded and thus will process
-	the update before attempting to process any flow-mods that result from a later reservation.
+	Complete a one-way bandwdith reservation.
 */
-func update_graph( hname *string, update_fqmgr bool, block bool ) {
+func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
-	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	nerrors = 0
+	jreason = ""
+	reason = ""
+
+	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
 
 	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, hname, nil )				// request data
-	req = <- my_ch
-	if req.Response_data != nil {												// if returned send to network for insertion
-		if ! block {
-			my_ch = nil															// turn off if not blocking
+	gp := gizmos.Pledge( res )								// convert to generic pledge to pass
+	req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
+	req = <- my_ch											// get response from the network thread
+	if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
+		rp := req.Response_data.( *string )
+		if rp != nil {
+			nerrors = 1
+			reason = fmt.Sprintf( "oneway reservation duplicates existing reservation: %s",  *rp )
+			return
+		}
+	}
+
+	req = ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, res, nil )	// validate and approve from a network perspective
+	req = <- my_ch											// get response from the network thread
+
+	if req.Response_data != nil {
+		gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
+		res.Set_gate( gate )
+
+		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+		req = <- my_ch										// wait for completion
+
+		if req.State == nil {
+			ckptreq := ipc.Mk_chmsg( )
+			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+			reason = fmt.Sprintf( "one way reservation accepted" )
+			jreason =  res.To_json()
+		} else {
+			nerrors++
+			reason = fmt.Sprintf( "%s", req.State )
 		}
 
-		req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )			// add information to the graph
-		if block {
-			_ = <- my_ch															// wait for response -- at the moment we ignore
+		if res_paused {
+			rm_sheep.Baa( 1, "reservations are paused, accepted one way reservation will not be pushed until resumed" )
+			res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+			res.Set_pushed( )
 		}
 	} else {
-		if req.State != nil {
-			http_sheep.Baa( 2, "unable to get host info for %s: %s", *hname, req.State )		// this is probably ok as it's likely a !//ipaddress hostname, but we'll log it anyway
-		}
+		reason = fmt.Sprintf( "one way reservation rejected: %s", req.State )
+		nerrors++
 	}
 
-	if update_fqmgr {
-		req := ipc.Mk_chmsg( )
-		req.Send_req( osif_ch, my_ch, REQ_IP2MACMAP, hname, nil )				// cause osif to push changes into fq-mgr (caution: we give osif fq-mgr's channel for response)
-		if block {
-			_ = <- my_ch
-		}
-	}
+	return
 }
+
 
 
 
@@ -794,6 +814,73 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							reason = fmt.Sprintf( "reservation rejected: %s", err )
 						}
 
+				case "ow_reserve":												// one way (outbound) reservation (marking and maybe rate limiting)
+					var res *gizmos.Pledge_bwow
+
+					key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs
+					tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
+					ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
+					if !ok {
+						nerrors++
+						reason = fmt.Sprintf( "missing parameters: (%s); usage: ow_reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] );
+						break
+					}
+
+					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth	(we'll sliently ignore inbound)
+						subtokens := strings.Split( *tmap["bandw"], "," )
+						bandw_out = int64( clike.Atof( subtokens[1] ) )
+					} else {
+						bandw_out = int64( clike.Atof( *tmap["bandw"] ) )		// no comma, so single value applied to each
+					}
+
+					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
+					h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+
+					res = nil
+					h1, h2, p1, p2, v1, _, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+
+					if err == nil {
+						update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
+						update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+
+						dscp := tclass2dscp["voice"]							// default to using voice traffic class
+
+						if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
+							if strings.HasPrefix( *tmap["dscp"], "global_" ) {			// for a one way, we don't set a keep on exit flag, but allow global_* markings
+								dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
+							} else {
+								dscp = tclass2dscp[*tmap["dscp"]]
+							}
+							if dscp <= 0 {
+								err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
+							}
+						}
+
+						if err == nil {
+							res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+							res, err = gizmos.Mk_bwow_pledge( &h1, &h2, p1, p2, startt, endt, bandw_out, &res_name, tmap["cookie"], dscp )
+						}
+					}
+
+					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+						res.Set_vlan( v1 )													// augment the rest of the reservation
+						if tmap["ipv6"] != nil {
+							res.Set_matchv6( *tmap["ipv6"] == "true" )
+						}
+						
+						reason, jreason, ecount = finalise_bwow_res( res, res_paused )		// check for dup, allocate in network, and add to res manager inventory
+						if ecount == 0 {
+							state = "OK"
+						} else {
+							nerrors += ecount - 1 												// number of errors added to the pile by the call
+						}
+					} else {
+						if err == nil {
+							err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
+						}
+						reason = fmt.Sprintf( "reservation rejected: %s", err )
+					}
+
 				case "resume":
 					if validate_auth( &auth_data, is_token, admin_roles ) {
 						if ! res_paused {							// not in a paused state, just say so and go on
@@ -894,6 +981,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 					if req.State == nil {											// all middle boxes were validated
+						//ip := gizmos.Pledge( res )									// must pass an interface to resmgr
 						req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )			// push it into the reservation manager which will drive flow-mods etc
 						req = <- my_ch										
 					} else {

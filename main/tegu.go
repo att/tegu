@@ -108,6 +108,7 @@
 				26 May 2015 : Converted to using the new pledge as an interface.
 				01 Jun 2015 : Added reservation dup checking.
 				04 Jun 2015 : Added authentication to mirror request processing.
+				09 Jun 2015 : Added oneway bandwidth reservations.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -143,7 +144,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.3/16045"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.4/16095"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

@@ -10,6 +10,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		27 Feb 2015 - changes to deal with lazy update and to correct l* bug.
+				15 Jun 2015 - Cleaned up commented out lines a bit.
 */
 
 package managers
@@ -17,13 +18,9 @@ package managers
 import (
 	"encoding/json"
 	"fmt"
-	//"os"
 	"strings"
 
-	//"codecloud.web.att.com/gopkgs/bleater"
-	//"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/ipc"
-	//"codecloud.web.att.com/tegu/gizmos"
 )
 
 
@@ -206,7 +203,6 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 
 	//base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-//--------------------
 	tmsg := ipc.Mk_chmsg( )
 
 	msg := &agent_cmd{ Ctype: "action_list" }				// create an agent message
@@ -224,30 +220,4 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		fq_sheep.Baa( 2, "stfmod json: %s", json )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 	}
-
-//--------------------
-/*
-original pre broker code
-
-	if on_all {											// blast the fmod to all switches
-		for i := range hosts {
-
-			json := base_json
-			json += fmt.Sprintf( `"-h %s %s -t %d -p %d %s %s add 0xe5d br-int"`, hosts[i], table, data.Expiry, data.Pri, match_opts, action_opts )
-			json += ` ] } ] }`
-			fq_sheep.Baa( 1, ">>> json: %s", json )
-			tmsg := ipc.Mk_chmsg( )						// must have one per since we dont wait for an ack
-			tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
-		}
-	} else {															// fmod goes only to the named switch
-		json := base_json
-		json += fmt.Sprintf( `"-h %s -t %d -p %d %s %s add 0xe5d br-int"`, *data.Swid, data.Expiry, data.Pri, match_opts, action_opts )
-		json += ` ] } ] }`
-		fq_sheep.Baa( 1, ">>> json: %s", json )
-
-		tmsg := ipc.Mk_chmsg( )
-		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send as a short request to one agent
-	}
-*/
-	
 }

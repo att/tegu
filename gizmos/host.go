@@ -45,7 +45,7 @@ type Host struct {
 }
 
 /*
-	constructor
+	Create the object setting defaults and adding user supplied IP address strings.
 */
 func Mk_host( mac string, ip4 string, ip6 string ) (h *Host) {
 
@@ -190,7 +190,7 @@ func( h *Host ) Get_address( pref_v6 bool ) ( *string ) {
 }
 
 /*
-	Return the number of connections
+	Return the number of connections.
 */
 func ( h *Host ) Get_nconns( ) ( int ) {
 	if h == nil {
@@ -201,7 +201,7 @@ func ( h *Host ) Get_nconns( ) ( int ) {
 }
 
 /*
-	return a pointer to the string that has the mac address
+	Return a pointer to the string that has the mac address.
 */
 func (h *Host) Get_mac( ) (s *string) {
 	if h == nil {
@@ -212,11 +212,19 @@ func (h *Host) Get_mac( ) (s *string) {
 }
 
 /*
-	generate a string of the basic info
+	Generate a string of the basic info
+	Deprecated in favour of stringer interface method.
 */
 func (h *Host) To_str( ) ( s string ) {
+	return h.String()
+}
+
+/*
+	Generate a string of the basic info
+*/
+func (h *Host) String( ) ( s string ) {
 	if h == nil {
-		return ""
+		return "--nil--"
 	}
 
 	s = fmt.Sprintf( "{ host: %s ",  h.mac )
@@ -246,7 +254,7 @@ func (h *Host) To_str( ) ( s string ) {
 }
 
 /*
-	jsonise the whole object
+	Jsonise the whole object.
 */
 func (h *Host) To_json( ) ( s string ) {
 	var (

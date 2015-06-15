@@ -85,6 +85,11 @@ func Json2pledge( jstr *string ) ( p *Pledge, err error ) {
 					bp := new( Pledge_bw )
 					bp.From_json( jstr )
 					pi = Pledge( bp )			// convert to interface type
+
+				case PT_OWBANDWIDTH:			// one way bandwidth
+					obp := new( Pledge_bwow )
+					obp.From_json( jstr) 
+					pi = Pledge( obp )
 	
 				case PT_MIRRORING:
 					mp := new( Pledge_mirror )

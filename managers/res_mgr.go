@@ -307,9 +307,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 	rm_sheep.Baa( 4, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
 		if p != nil  &&  ! (*p).Is_pushed() {
-			//if p.Is_mirroring() && p.Is_expired() {
-			//if (*p).Is_ptype( gizmos.PT_MIRRORING ) && (*p).Is_expired() {
-			if (*p).Is_expired() {								// some reservations need to be undone at expiry
+			if (*p).Is_expired() {								// some reservations need to be explicitly undone at expiry
 				switch (*p).(type) {
 					case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
 						undo_mirror_reservation( p, rname, ch )
@@ -317,9 +315,13 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 			} else {
 				if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
 					switch (*p).(type) {
+						case *gizmos.Pledge_bwow:
+							bwow_push_res( p, &rname, ch, hto_limit, pref_v6 )
+							(*p).Set_pushed( )
+
 						case *gizmos.Pledge_bw:
 							bw_push_count++
-							push_bw_reservations( p, &rname, ch, hto_limit, alt_table, pref_v6 )
+							bw_push_res( p, &rname, ch, hto_limit, alt_table, pref_v6 )
 	
 						case *gizmos.Pledge_steer:
 							st_push_count++
@@ -447,18 +449,39 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 					}
 
 				default:
-					p, err = gizmos.Json2pledge( &rec )			// convert any pledge json to a Pledge
+					p, err = gizmos.Json2pledge( &rec )			// convert any type of json pledge to Pledge
 		
 					if err == nil {
 						if  (*p).Is_expired() {
-							rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", (*p).To_str() )
+							rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", (*p).String() )
 						} else {
-							switch sp := (*p).(type) {
+							switch sp := (*p).(type) {									// work on specific pledge type, but pass the Pledge interface to add()
 								case *gizmos.Pledge_mirror:
 									err = i.Add_res( p )								// assume we can just add it back in as is
 
 								case *gizmos.Pledge_steer:
 									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
+
+								case *gizmos.Pledge_bwow:
+									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
+									push_block := h2 == nil
+									update_graph( h1, push_block, push_block )			// dig h1 info; push to netmgr if h2 isn't known and block on response
+									if h2 != nil {
+										update_graph( h2, true, true )					// dig h2 data and push to netmgr blocking for a netmgr response
+									}
+			
+									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
+									req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, sp, nil )
+									req = <- my_ch										// should be OK, but the underlying network could have changed
+					
+									if req.Response_data != nil {
+										gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
+										sp.Set_gate( gate )
+										rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
+										err = i.Add_res( p )
+									} else {
+										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
+									}
 
 								case *gizmos.Pledge_bw:
 									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
@@ -466,18 +489,19 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
 			
 									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-									req.Send_req( nw_ch, my_ch, REQ_RESERVE, sp, nil )
+									req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
 									req = <- my_ch										// should be OK, but the underlying network could have changed
 					
 									if req.Response_data != nil {
 										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 										sp.Set_path_list( path_list )
-										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", sp.Get_id(), *h1, *h2, len( path_list ) )
+										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
 										err = i.Add_res( p )
 									} else {
 										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
 									}
-							}
+
+							}						// end switch on specific pledge type
 						}
 					} else {
 						rm_sheep.Baa( 0, "CRI: %s", err )
@@ -563,13 +587,33 @@ func Mk_inventory( ) (inv *Inventory) {
 
 /*
 	Stuff the pledge into the cache erroring if the pledge already exists.
+	Expeect either a Pledge, or a pointer to a pledge.
 */
-func (inv *Inventory) Add_res( p *gizmos.Pledge ) (state error) {
-	state = nil
+func (inv *Inventory) Add_res( pi interface{} ) (err error) {
+	var (
+		p *gizmos.Pledge
+	)
+
+	err = nil
+
+	px, ok := pi.( gizmos.Pledge )
+	if ok {
+		p = &px
+	} else {
+		py, ok := pi.( *gizmos.Pledge )
+		if ok {
+			p = py
+		} else {
+			err = fmt.Errorf( "internal mishap in Add_res: expected Pledge or *Pledge, got neither" )
+			rm_sheep.Baa( 1, "%s", err )
+			return
+		}
+	}
+
 	id := (*p).Get_id()
 	if inv.cache[*id] != nil {
 		rm_sheep.Baa( 2, "reservation not added to inventory, already exists: %s", *id )
-		state = fmt.Errorf( "reservation already exists: %s", *id )
+		err = fmt.Errorf( "reservation already exists: %s", *id )
 		return
 	}
 
@@ -888,21 +932,10 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_NOOP:			// just ignore
 
 			case REQ_ADD:
-				switch sp := msg.Req_data.(type) {		// convert to one of our specific pledge types
-					case *gizmos.Pledge_bw:
-						icp := gizmos.Pledge( sp )							// must convert to a pledge interface
-						msg.State = inv.Add_res( &icp )
-
-					case *gizmos.Pledge_steer:
-						icp := gizmos.Pledge( sp )							// must convert to a pledge interface
-						msg.State = inv.Add_res( &icp )
-
-					case *gizmos.Pledge_mirror:
-						icp := gizmos.Pledge( sp )							// must convert to a pledge interface
-						msg.State = inv.Add_res( &icp )
-				}
-
+				//msg.State = inv.Add_res( msg.Req_data.( *gizmos.Pledge ) )		// we require an interface pointer
+				msg.State = inv.Add_res( msg.Req_data )
 				msg.Response_data = nil
+
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
 				all_sys_up = true

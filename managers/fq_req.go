@@ -164,3 +164,67 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 
 	return
 }
+
+
+/*
+	Build a map suitable for use as parms for a oneway bandwidth request to the agent manager.
+	The agent bandwidth flow-mod generator takes a more generic set of parameters
+	and the match/action information is "compressed".
+
+	OVS doesn't accept DSCP values, but shifted values (e.g. 46 == 184), so we shift
+	the DSCP value given to be what OVS might want as a parameter.
+*/
+func ( fq *Fq_req ) To_bwow_map( ) ( fmap map[string]string ) {
+	fmap = make( map[string]string )
+
+	if fq == nil {
+		return
+	}
+
+	if fq.Match.Smac != nil {
+		fmap["smac"] = *fq.Match.Smac
+	} else {
+		fmap["smac"] = ""
+	}
+	if fq.Match.Dmac != nil {					// likely nil as oneways are usually x-project when router is not a neutron device
+		fmap["dmac"] = *fq.Match.Dmac
+	} else {
+		fmap["dmac"] = ""
+	}
+	if fq.Extip != nil {
+		fmap["extip"] = *fq.Extip												// external IP if supplied
+	} else {
+		fmap["extip"] = ""
+	}
+	if fq.Match.Vlan_id != nil {												// adds a vlan number to match (should NOT be a mac)
+		fmap["vlan_match"] = *fq.Match.Vlan_id
+	} else {
+		fmap["vlan_match"] = ""
+	}
+	if fq.Action.Vlan_id != nil {												// adds a set vlan action, can be a MAC for late conversion
+		fmap["vlan_action"] = *fq.Action.Vlan_id
+	} else {
+		fmap["vlan_action"] = ""
+	}
+
+	fmap["queue"] =  fmt.Sprintf( "%d", fq.Espq.Queuenum )
+	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )						// shift left 2 bits to match what OVS wants
+	fmap["ipv6"] =  fmt.Sprintf( "%v", fq.Ipv6 )							// force ipv6 fmods is on
+	fmap["timeout"] =  fmt.Sprintf( "%d", fq.Expiry - time.Now().Unix() )
+	if fq.Tptype != nil && *fq.Tptype != "none" {
+		if fq.Match.Tpsport != nil && *fq.Match.Tpsport != "0" {
+			fmap["sproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpsport )
+		}
+		if fq.Match.Tpdport != nil && *fq.Match.Tpdport != "0" {
+			fmap["dproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpdport )
+		}
+	}
+
+	if fq_sheep.Would_baa( 1 ) {
+		for k, v := range fmap {
+			fq_sheep.Baa( 3, "fq_req to action id=%s %s = %s", fq.Id, k, v )
+		}
+	}
+
+	return
+}

@@ -534,7 +534,8 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 					}
 				} else {
 					req = ipc.Mk_chmsg( )
-					req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+					ip := gizmos.Pledge( res )							// must pass an interface pointer to resmgr
+					req.Send_req( rmgr_ch, my_ch, REQ_ADD, &ip, nil )	// network OK'd it, so add it to the inventory
 					req = <- my_ch										// wait for completion
 	
 					if req.State == nil {
