@@ -106,7 +106,7 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 *string, p2 *string, commence
 
 	p.window = window
 
-	if *usrkey != "" {
+	if usrkey != nil && *usrkey != "" {
 		p.usrkey = usrkey
 	} else {
 		p.usrkey = &empty_str
