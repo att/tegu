@@ -163,7 +163,7 @@ function set_xauth
 			echo "" >&2
 		fi
 
-		echo " -a '$1' "
+		echo " -a $1 "
 	fi
 }
 
@@ -387,18 +387,7 @@ case $1 in
 			usage >&2
 			exit 1
 		fi
-		#if [[ $2 == "+"* ]]
-		#then
-		#	expiry=$(( $(date +%s) $2 ))
-		#else
-		#	if [[ $2 == -* ]]
-		#	then
-		#		echo "start-end timestamp seems wrong: $2  [FAIL]" >&2
-		#		usage >&2
-		#		exit 1
-		#	fi
-		#	expiry=$2
-		#fi
+		
 		expiry=$( str2expiry $2 )
 		if [[ $3 != *"-"* ]] && [[ $3 != *","* ]]
 		then
