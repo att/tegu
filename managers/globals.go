@@ -233,7 +233,7 @@ type Fq_req struct {
 	Spq		int					// switch's port for queue
 	Extip	*string				// exterior IP address necessary for inter-tenant reservations
 	Exttyp	*string				// external IP type (either -D or -S)
-	Protocol	*string			// protocol (steering) udp:port or tcp:port, port may be 0
+	Protocol	*string			// protocol (steering) udp[4|6]:port or tcp[4|6]:port, port may be 0
 
 	Tptype	*string				// transport type (i.e. protocol: tcp, udp, etc)
 	Resub	*string				// list of tables (space sep numbers) to resubmit to
