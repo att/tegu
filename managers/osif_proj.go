@@ -18,6 +18,7 @@
 				26 Feb 2014 - Added support to dig out the default gateway for a project.
 				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 				01 Apr 2015 - Added ipv6 support for finding gateway/routers.
+				16 Jun 2015 - Turned down some of the bleat messages.
 */
 
 package managers
@@ -235,7 +236,7 @@ func (p *osif_project) ip2gw( ip *string ) ( *string ) {
 		if len( k_toks ) == 1  ||  k_toks[0] ==  project || project == "" {		// safe to check the cidr
 			c_toks := strings.Split( *v, "/" )
 			if in_subnet( *ip, c_toks[0], c_toks[1]  ) {
-				osif_sheep.Baa( 1, "mapped ip to gateway for: %s  %s", *ip, k )
+				osif_sheep.Baa( 2, "mapped ip to gateway for: %s  %s", *ip, k )
 				return &k
 			}
 		}
