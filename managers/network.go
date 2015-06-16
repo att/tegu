@@ -792,7 +792,7 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 	mac = n.ip2mac[*ip]
 	if mac != nil {
 		if h, ok = n.hosts[*mac]; !ok {
-			err = fmt.Errorf( "cannot find host (representation) for host %s based on IP and MAC: %s %s", *host, *ip, *mac )
+			err = fmt.Errorf( "cannot find host (representation) for host %s based on IP and MAC: %s %s", *name, *ip, *mac )
 			return
 		}
 	} else {
