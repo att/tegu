@@ -272,7 +272,7 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 func has_any_role( admin *ostack.Ostack, token *string, roles *string ) ( found bool, err error ) {
 
 	stuff, err := admin.Crack_token( token ) 						// return a stuff struct with details about the token
-	
+
 	found = false													// assume the worst
 	if err == nil {
 		err = fmt.Errorf( "role not defined; %s", *roles )			// asume not
