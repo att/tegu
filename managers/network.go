@@ -60,6 +60,8 @@
 				26 May 2015 - Conversion to support pledge as an interface.
 				08 Jun 2015 - Added support for dummy star topo.
 					Added support for 'one way' reservations (non-virtual router so no real endpoint)
+				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
+
 */
 
 package managers
@@ -776,6 +778,11 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 
 	mac = nil
 
+	if name == nil {
+		err = fmt.Errorf( "cannot translate nil name" )
+		return
+	}
+
 	if ip, ok = n.vm2ip[*name]; !ok {		// assume that IP was given instead of name (gateway)	
 		//err = fmt.Errorf( "cannot translate vm to an IP address: %s", *name )
 		//return
@@ -790,6 +797,7 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 		}
 	} else {
 		err = fmt.Errorf( "cannot translate IP to MAC: %s", *ip )
+		return
 	}
 
 	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network 
