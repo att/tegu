@@ -71,6 +71,8 @@
 #							  Corrected bug in -v action when the value supplied is a VLAN ID rather than
 #							  a mac address.
 #				28 May 2015 - Added support for inline meta setting and learn actions.
+#				16 Jun 2015 - Allows udp4, udp6, tcp4 and tcp6 to avoid both -P|p and -4|6 options
+#								(steering where there is no IP address to suss type from).
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -110,8 +112,8 @@ function help
 		-D network-layer-dest-address (ip)
 		-i input-switch-port                (late bindign applied if mac address or :ID is given)
 		-m meta-value/mask                  (0x0/0x01 matches if low order bit is off)
-		-p transport-port-src               (specify as udp:port or tcp:port)
-		-P transport-port-dest              (specify as udp:port or tcp:port)
+		-p transport-port-src               (specify as udp[4|6]:port or tcp[4|6]:port)
+		-P transport-port-dest              (specify as udp[4|6]:port or tcp[4|6]:port)
 		-s data-layer-src                   (mac)
 		-S network-layer-src                (ip)
 		-t tunnel-id[/mask]
@@ -282,7 +284,11 @@ function str2nwproto
 	case $1 in 
 		icmp|ICMP)	echo "1";;
 		tcp|TCP)	echo "6";;
+		tcp4|TCP4)	echo "6 $ip4_type";;
+		tcp6|TCP6)	echo "6 $ip6_type";;
 		udp|UDP)	echo "17";;
+		udp4|UDP4)	echo "17 $ip4_type";;
+		udp6|UDP6)	echo "17 $ip6_type";;
 		gre|GRE)	echo "47";;
 		[1-9]*)		echo "$1";;
 		*)			echo "WRN: protcol string $1 isn't recognised"
