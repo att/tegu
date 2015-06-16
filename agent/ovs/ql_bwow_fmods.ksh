@@ -66,7 +66,7 @@ odscp=""
 host=""
 forreal=""
 pri_base=0				# priority is bumpped up a bit for protocol specific f-mods
-queue=""
+queue="0"
 to_value="61"			# value used to check (without option flag)
 timout="-t $to_value"	# timeout parm given on command
 operation="add"			# -X sets delete action
@@ -82,7 +82,7 @@ do
 		-n)		forreal="-n";;
 		-p)		pri_base=5; sproto="-p $2"; shift;;		# source proto:port priority must increase to match over more generic f-mods
 		-P)		pri_base=5; dproto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
-		-q)		queue="-q $2"; shift;;					# ignored until HTB replacedment is found
+		-q)		queue="$2"; shift;;						# ignored until HTB replacedment is found
 		-s)		smac="$2"; shift;;						# source (local) mac address
 		-S)		sip="-S $2"; shift;;					# local IP needed if local port (-p) is given
 		-t)		to_value=$2; timeout="-t $2"; shift;;
@@ -132,10 +132,14 @@ then
 	exit 1
 fi
 
+if (( queue > 0 ))
+then
+	queue="-q $queue"
+fi
 
 # CAUTION: action options to send_ovs_fmods are probably order dependent, so be careful.
 set -x
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match  $match_vlan $ip_type -m 0x0/0x7 $sip $exip -s $smac $dmac $dproto $sproto --action $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match  $queue $match_vlan $ip_type -m 0x0/0x7 $sip $exip -s $smac $dmac $dproto $sproto --action $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
 rc=$(( rc + $? ))
 set +x
 

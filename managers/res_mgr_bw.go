@@ -181,7 +181,6 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 
 	src, dest, src_tpport, dest_tpport, _, expiry  := p.Get_values( )		// hosts, transport ports, and expiry time
 	vlan := p.Get_vlan( )													// vlan match criteria for source
-rm_sheep.Baa( 1, ">>>> vlan=%s", vlan )
 
 	ip_src := name2ip( src )
 	ip_dest := name2ip( dest )
