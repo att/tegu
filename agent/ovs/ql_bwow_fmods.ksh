@@ -33,7 +33,7 @@
 #	Date:		15 June 2015
 # 	Author: 	E. Scott Daniels
 #
-#	Mods:
+#	Mods:		17 Jun 2015 - Corrected handling of queue value when 0.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -134,12 +134,16 @@ fi
 
 if (( queue > 0 ))
 then
-	queue="-q $queue"
+	echo "-q $queue was ignored: no htb queuing allowed  [OK]"
+	queue=""
+	#queue="-q $queue"
+else
+	queue=""
 fi
 
 # CAUTION: action options to send_ovs_fmods are probably order dependent, so be careful.
 set -x
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match  $queue $match_vlan $ip_type -m 0x0/0x7 $sip $exip -s $smac $dmac $dproto $sproto --action $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $match_vlan $ip_type -m 0x0/0x7 $sip $exip -s $smac $dmac $dproto $sproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
 rc=$(( rc + $? ))
 set +x
 
