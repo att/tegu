@@ -39,6 +39,7 @@
 				18 Aug 2014 - Has_capacity now passes back error message.
 				05 Sep 2014 - Pick up late binding port info if port is <0 rather than 0.
 				19 Oct 2014 - Comment change
+				18 Jun 2015 - Added nil pointer check.
 */
 
 package gizmos
@@ -305,6 +306,10 @@ func (l *Link) Connects( sw *Switch ) ( bool ) {
 	we provide the mechanism to bleat that information here.
 */
 func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( able bool, err error ) {
+	if l == nil {
+		return false, fmt.Errorf( "nil pointer" )
+	}
+
 	able = false
 	if usr_max < 101 {
 		if amt > (l.allotment.Get_max_capacity() * int64( usr_max ))/100 {

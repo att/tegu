@@ -10,11 +10,11 @@
 				endpoint and a nova router isn't used to NAT.
 
 				We can make use of some of the bandwidth pledge functions
-				like conversion of vlan to string. 
+				like conversion of vlan to string.
 	Date:		08 June 2015
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		18 Jun 2015 : Added set_qid() function.
 */
 
 package gizmos
@@ -71,7 +71,7 @@ type Json_pledge_bwow struct {
 // ---- private -------------------------------------------------------------------
 
 /*
-	Formats vlan in the {n} format for adding to a host representation which is 
+	Formats vlan in the {n} format for adding to a host representation which is
 	now   token/project/vm:port{vlan}. If vlan is < 0 then the empty string is returned.
 */
 func ( p *Pledge_bwow ) vlan2string( ) ( v string ) {
@@ -82,7 +82,7 @@ func ( p *Pledge_bwow ) vlan2string( ) ( v string ) {
 		}
 	}
 
-	return "" 
+	return ""
 }
 
 // ---- public -------------------------------------------------------------------
@@ -156,7 +156,7 @@ func (p *Pledge_bwow) Get_qid( ) ( *string ) {
 /*
 	Returns the current total amount of bandwidth that has been assigned to the pledge.
 */
-func (p *Pledge_bwow) Get_bandw( ) ( int64 ) {
+func (p *Pledge_bwow) Get_bandwidth( ) ( int64 ) {
 	if p == nil {
 		return 0
 	}
@@ -228,6 +228,17 @@ func (p *Pledge_bwow) Set_vlan( v1 *string ) {
 }
 
 /*
+	Set the queue ID associated with the pledge.
+*/
+func (p *Pledge_bwow) Set_qid( id *string ) {
+	if( p == nil ) {
+		return
+	}
+
+	p.qid = id
+}
+
+/*
 	Returns the matching vlan IDs.
 */
 func (p *Pledge_bwow) Get_vlan( ) ( v1 *string ) {
@@ -239,7 +250,7 @@ func (p *Pledge_bwow) Get_vlan( ) ( v1 *string ) {
 }
 
 /*
-	Create a clone of the pledge.  
+	Create a clone of the pledge. 
 */
 func (p *Pledge_bwow) Clone( name string ) ( *Pledge_bwow ) {
 	newp := &Pledge_bwow {
@@ -264,7 +275,7 @@ func (p *Pledge_bwow) Clone( name string ) ( *Pledge_bwow ) {
 }
 
 /*
-	Accepts another pledge (op) and compairs the two returning true if the following values are 
+	Accepts another pledge (op) and compairs the two returning true if the following values are
 	the same:
 		hosts, protocol, transport ports, vlan match value, window
 
@@ -486,12 +497,12 @@ func (p *Pledge_bwow) String( ) ( s string ) {
 }
 
 /*
-	Generate a json representation of the pledge. This is different than the checkpoint 
-	string as it is safe to use this in a reservation list that will be presented to 
-	some user -- no cookie or other 'private' information should be exposed in the 
+	Generate a json representation of the pledge. This is different than the checkpoint
+	string as it is safe to use this in a reservation list that will be presented to
+	some user -- no cookie or other 'private' information should be exposed in the
 	json generated here.
-	We do NOT use the json package because we don't put the object directly in; we render 
-	useful information, which excludes some of the raw data, and we don't want to have to 
+	We do NOT use the json package because we don't put the object directly in; we render
+	useful information, which excludes some of the raw data, and we don't want to have to
 	expose the fields publicly that do go into the json output.
 */
 func (p *Pledge_bwow) To_json( ) ( json string ) {
@@ -530,7 +541,7 @@ func (p *Pledge_bwow) To_chkpt( ) ( chkpt string ) {
 	commence, expiry := p.window.get_values()
 	v1 := p.vlan2string( )
 
-	chkpt = fmt.Sprintf( `{ "src": "%s:%s%s", "dest": "%s:%s", "commence": %d, "expiry": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "ptype": %d }`, 
+	chkpt = fmt.Sprintf( `{ "src": "%s:%s%s", "dest": "%s:%s", "commence": %d, "expiry": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "ptype": %d }`,
 			*p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport,  commence, expiry, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, PT_OWBANDWIDTH )
 
 	return

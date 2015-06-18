@@ -61,6 +61,7 @@
 				08 Jun 2015 - Added support for dummy star topo.
 					Added support for 'one way' reservations (non-virtual router so no real endpoint)
 				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
+				18 Jun 2015 - Added oneway rate limiting and delete support.
 
 */
 
@@ -1140,26 +1141,55 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						// host names are expected to have been vetted (if needed) and translated to project-id/IPaddr if IDs are enabled
 						var ipd *string
 
+						req.Response_data = nil
 						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
 						if ok {
 							src, dest := p.Get_hosts( )									// we assume project/host-name
 							net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
+
 							if src != nil && dest != nil {
+								usr := "nobody"											// default dummy user if not project/host
+								toks := strings.SplitN( *src, "/", 2 )					// suss out project name
+								if len( toks ) > 1 {
+									usr = toks[0]										// the 'user' for queue setting
+								}
+	
 								ips, err := act_net.name2ip( src )
 								if err == nil {
 									ipd, err = act_net.name2ip( dest )
 								}
+
 								sh := act_net.hosts[*ips]
 								dh := act_net.hosts[*ipd]						// this will be nil for an external IP
 								ssw, _ := sh.Get_switch_port( 0 )
-								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandw() )
+								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
 								if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address
 									gate.Set_extip( dest )
 								}
-								req.Response_data = gate
-								req.State = nil
+
+								c, e := p.Get_window( )														// commence/expiry times
+								fence := act_net.get_fence( &usr ) 
+								max := int64( -1 )
+								if fence != nil {
+									max = fence.Get_limit_max()
+								}
+								if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
+									qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
+									p.Set_qid( qid ) 												// and add the queue id to the pledge
+
+									if gate.Add_queue( c, e, p.Get_bandwidth(), qid, fence ) {		// create queue AND inc utilisation on the link
+										req.Response_data = gate									// finally safe to set gate as the return data
+										req.State = nil												// and nil state to indicate OK
+									} else {
+										net_sheep.Baa( 1, "owreserve: internal mishap: unable to set queue for gate: %s", gate )
+										req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
+									}
+								} else {
+									net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reesrvation of %s", p.Get_bandwidth() )
+									req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
+								}
 							} else {
-								net_sheep.Baa( 1, "owreserve: one/both host names were invalide" )
+								net_sheep.Baa( 1, "owreserve: one/both host names were invalid" )
 								req.State = fmt.Errorf( "unable to create oneway reservation in network one or both host names invalid" )
 							}
 						} else {									// pledge wasn't a bw pledge
@@ -1220,8 +1250,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 										pcount++
 									}
 
-									qid := p.Get_id()
-									p.Set_qid( qid )											// add the queue id to the pledge
+									qid := p.Get_id()											// for now, the queue id is just the reservation id, so fetch
+									p.Set_qid( qid )											// and add the queue id to the pledge
 
 									for i := 0; i < pcount; i++ {								// set the queues for each path in the list (multiple paths if network is disjoint)
 										fence := act_net.get_fence( path_list[i].Get_usr() )
@@ -1260,20 +1290,29 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 
 					case REQ_DEL:									// delete the utilisation for the given reservation
-						p, ok := req.Req_data.( *gizmos.Pledge_bw )
-						if ok {
-							net_sheep.Baa( 1,  "network: deleting reservation: %s", *p.Get_id() )
-							commence, expiry := p.Get_window( )
-							path_list := p.Get_path_list( )
-	
-							qid := p.Get_qid()							// get the queue ID associated with the pledge
-							for i := range path_list {
-								fence := act_net.get_fence( path_list[i].Get_usr() )
-								net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
-								path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
-							}
-						} else {
-							net_sheep.Baa( 1, "internal error: req_del wasn't passed a bandwidth pledge" )
+						switch p := req.Req_data.( type ) {
+							case *gizmos.Pledge_bw:
+								net_sheep.Baa( 1,  "network: deleting bandwidth reservation: %s", *p.Get_id() )
+								commence, expiry := p.Get_window( )
+								path_list := p.Get_path_list( )
+		
+								qid := p.Get_qid()							// get the queue ID associated with the pledge
+								for i := range path_list {
+									fence := act_net.get_fence( path_list[i].Get_usr() )
+									net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
+									path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
+								}
+
+							case *gizmos.Pledge_bwow:
+								net_sheep.Baa( 1,  "network: deleting oneway reservation: %s", *p.Get_id() )
+								commence, expiry := p.Get_window( )
+								gate := p.Get_gate()
+								fence := act_net.get_fence( gate.Get_usr() )
+								gate.Set_queue( p.Get_qid(), commence, expiry, -p.Get_bandwidth(), fence )				// reduce queues 
+
+							default:
+								net_sheep.Baa( 1, "internal mishap: req_del wasn't passed a bandwidth or oneway pledge; nothing done by network" )
+							
 						}
 
 					case REQ_ADD:							// insert new information into the various vm maps

@@ -12,6 +12,7 @@
 	Mods:		
 				26 May 2015 - Changes to support pledge as an interface.
 				11 Jun 2015 - Added bwow support and renamed bw push function.
+				18 Jun 2015 - Added oneway rate limiting support.
 */
 
 package managers
@@ -210,7 +211,7 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 
 			freq.Match.Ip1 = gate.Get_src().Get_address( pref_v6 )		// should match pledge, but gate is the ultimate authority
 			freq.Match.Ip2 = gate.Get_dest().Get_address( pref_v6 )
-			freq.Espq = gate.Get_spq( )									// switch port queue
+			freq.Espq = gate.Get_spq( rname, now + 16 )					// switch port queue
 			freq.Extip = gate.Get_extip( )								// returns nil if not an external and that's what we need
 
 

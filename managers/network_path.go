@@ -240,7 +240,7 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 	The resulting path is a "scramble" meaning that the set of links is a unique set of links that are traversed by 
 	one or more paths. The list of links can be traversed without the need to dup check which is beneficial for 
 	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the 
-	middle switches are NOT maintaine. 
+	middle switches are NOT maintained. 
 
 	usr is the name of the user that the reservation is being processed for (project in openstack). The usr_max value
 	is a percentage (1-100)  that defines the maximum of any link that the user may have reservations against or a hard

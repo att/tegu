@@ -75,6 +75,8 @@
 				20 Apr 2015 : Ensured that reservations are pushed following a cancel request.
 				26 May 2015 : Conversion to support pledge as an interface.
 				01 Jun 2015 : Corrected bug in delete all which was atttempting to delete expired reservations.
+				15 Jun 2015 : Added oneway support.
+				18 Jun 2015 : Added oneway delete support.
 */
 
 package managers
@@ -650,7 +652,7 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 }
 
 /*
-	Accept a reservation (pledge) and see if it matches any existing reservation in 
+	Accept a reservation (pledge) and see if it matches any existing reservation in
 	the inventory. If it does, return the reservation id as data, set error if
 	we encounter problems.
 */
@@ -670,7 +672,7 @@ func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error )
 		}
 	}
 
-	return 
+	return
 }
 
 
@@ -680,7 +682,7 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 	for _, gp := range inv.cache {
 		//if (*p).Is_mirroring() && !(*p).Is_expired() {
 		//if (*p).Is_ptype( gizmos.PT_MIRRORING ) && !(*p).Is_expired() {
-		p, ok := (*gp).(*gizmos.Pledge_mirror) 
+		p, ok := (*gp).(*gizmos.Pledge_mirror)
 		if ok  && !p.Is_expired() {
 			bs.WriteString(fmt.Sprintf("%s%s", sep, p.Get_id()))
 			sep = " "
@@ -713,7 +715,7 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 			case *gizmos.Pledge_mirror:
 				p.Set_expiry( time.Now().Unix() )					// expire the mirror NOW
 
-			case *gizmos.Pledge_bw:
+			case *gizmos.Pledge_bw, *gizmos.Pledge_bwow:			// network handles either type
 				ch := make( chan *ipc.Chmsg )	
 				defer close( ch )									// close it on return
 				req := ipc.Mk_chmsg( )
@@ -795,7 +797,7 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 				cp := pldg.Clone( *name + ".yank" )				// clone but DO NOT set conclude time until after network delete!
 
 				icp := gizmos.Pledge(cp)							// must convert to a pledge interface
-				inv.cache[*name + ".yank"] = &icp					// and then insert the address of the interface 
+				inv.cache[*name + ".yank"] = &icp					// and then insert the address of the interface
 
 				inv.cache[*name] = nil								// yank original from the list
 				delete( inv.cache, *name )
@@ -840,7 +842,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
 		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
 		rr_rate		int = 3600			// refresh rate (1 hour)
-		favour_v6 bool = true			// favour ipv6 addresses if a host has both defined. 
+		favour_v6 bool = true			// favour ipv6 addresses if a host has both defined.
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -950,7 +952,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_DEL:											// user initiated delete -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
-				if *data[0] == "all" {
+				if data[0] != nil  &&  *data[0] == "all" {
 					inv.Del_all_res( data[1] )
 					msg.State = nil
 				} else {

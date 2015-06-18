@@ -27,6 +27,7 @@
 	Mods:		29 Jun 2014 - Changes to support user link limits.
 				07 Jul 2014 - Now generates queue strings if the bandwidth amount is 
 					greater than zero.
+				18 Jun 2015 - Allow a queue to be added only if the amount is positive.
 */
 
 package gizmos
@@ -250,8 +251,10 @@ func (ts *Time_slice) Add_queue( qnum int, id *string, swdata *string, amt int64
 	if q := ts.queues[*id]; q != nil {
 		q.Inc( amt )
 	} else {
-		if qnum > 0 {						// we allow a queue num of zero as the means to incr an existing queue, but we never create one with 0
-			ts.queues[*id] = Mk_queue( amt, id, qnum, 200, swdata )
+		if amt > 0 {							// allow it to be adjusted by negative amount, but don't create this way
+			if qnum > 0 {						// we allow a queue num of zero as the means to incr an existing queue, but we never create one with 0
+				ts.queues[*id] = Mk_queue( amt, id, qnum, 200, swdata )
+			}
 		}
 	}
 }
