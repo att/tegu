@@ -3,8 +3,8 @@
 /*
 
 	Mnemonic:	rjprt.go
-	Abstract:	Send an http oriented post or get request that results in json output and 
-				then format the output in a human readable fashion to stdout. 
+	Abstract:	Send an http oriented post or get request that results in json output and
+				then format the output in a human readable fashion to stdout.
 				is returned.  Input command line:
 					-a token	Authorisation token related to the privlege of executing the command
 								such as listhost (not VM related tokens for a reservation).
@@ -17,7 +17,7 @@
 					-r			returns raw json (debugging mostly)
 					-t url		Target url
 					-T			tight security (does not trust host certificates that cannot be validated)
-					-v			verbose 
+					-v			verbose
 
 	Date:		01 January 2014
 	Author:		E. Scott Daniels
@@ -26,6 +26,8 @@
 				09 Jul 3014 - Added -J capability
 				14 Dec 2014 - Formally moved to tegu code.
 				03 Jun 2015 - To accept an authorisation token to send as X-Tegu-Auth in the header.
+				19 Jun 2015 - Added support to dump headers in order to parse out the token that openstack
+					identity v3 sends back in the bloody header of all places.
 */
 
 package main
@@ -55,7 +57,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "rjprt v1.3/16045"
+		version		string = "rjprt v1.4/16195"
 		auth		*string
 		err			error
 		resp		*http.Response
@@ -77,6 +79,7 @@ func main() {
 	dot_fmt = flag.Bool( "d", false, "dotted named output" )
 	request_data = flag.String( "D", "", "post data" )
 	raw_json = flag.Bool( "j", false, "raw-json" )
+	show_headers := flag.Bool( "h", false, "show http response headers" )
 	appl_json := flag.Bool( "J", false, "data type is json" )
 	look4 = flag.String( "l", "", "look4 string in hashtab" )
 	method = flag.String( "m", "GET", "request method" )
@@ -88,7 +91,7 @@ func main() {
 
 	input_type := "text"			// type of data being sent in body
 	if *appl_json {
-		input_type = "json"
+		input_type = "application/json"
 	}
 
 	if *needs_help {
@@ -160,6 +163,12 @@ func main() {
 		}
 		resp.Body.Close( )
 
+		if *show_headers {
+			for k, v := range resp.Header {
+				fmt.Printf( "header: %s = %s\n", k, v )
+			}
+		}
+
 		if data == nil {
 			os.Exit( 0 );					// maybe not what they were expecting, but nothing isn't an error
 		}
@@ -176,16 +185,16 @@ func main() {
 					result := m[*look4]
 					if result != nil {
 						switch result.( type ) {
-							case string: 
+							case string:
 								fmt.Printf( "%s = %s\n", *look4, result.(string) )
 
-							case int: 
+							case int:
 								fmt.Printf( "%s = %d\n", *look4, result.(int) )
 
-							case float64: 
+							case float64:
 								fmt.Printf( "%s = %.2f\n", *look4, result.(float64) )
 
-							default: 
+							default:
 								fmt.Printf( "found %s, but its in an unprintable format\n", *look4 )
 						}
 

@@ -14,9 +14,9 @@
 #				on. Then, unlike curl, formats the resulting json output before writing it
 #				to the tty device. The -j and -d options control the format of the output.
 #
-#				NOTE: this script was dumbed down to work with bash; it may still not 
+#				NOTE: this script was dumbed down to work with bash; it may still not
 #					function correctly with bash and before complaining just install ksh
-#					and use that. 
+#					and use that.
 #
 #	Date:		01 Jan 2014
 #	Author:		E. Scott Daniels
@@ -37,7 +37,7 @@
 #					and substituted a curl command since it seems keystone isn't installed
 #					everyplace (sigh).
 #				25 Feb 2015 - Added mirror commands
-#				31 Mar 2015 - Added support for sending key-value pairs to listhosts and 
+#				31 Mar 2015 - Added support for sending key-value pairs to listhosts and
 #					graph commands.
 #				01 Apr 2015 - Corrected bug with token passed on steering request.
 #				18 May 2015 - Dumbed down so that bash could run the script.
@@ -45,6 +45,7 @@
 #					consistant with others (no dash).
 #				04 Jun 2015 - Added token to -a call.
 #				10 Jun 2015 - Added one way reservation support
+#				19 Jun 2015 - Added support for v3 token generation.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -128,6 +129,52 @@ function usage {
 endKat
 }
 
+# generate the input json needed to request a token using openstack/keystone v3 interface
+function gen_v3_token_json {
+cat <<endKat
+{
+ "auth": {
+   "identity": {
+     "methods": [ "password" ],
+     "password": {
+       "user": {
+       		"domain": { "name": "${OS_DOMAIN_NAME:-default}" },
+			"name": "${OS_USERNAME:-missing}", "password": "${OS_PASSWORD:-missing}"
+	   }
+     },
+   "scope": {
+     "project": {
+       "name": "$OS_TENNANT_NAME"
+     }
+   }
+   }
+ }
+}
+endKat
+}
+
+
+# parse the output from keystone/openstack version2 token generation
+function v2_suss_token {
+	awk '{ print $0 "},"} ' RS="," | awk '1' RS="{" | awk '
+		/"access":/ { snarf = 1; next }				# we want the id that is a part of the access struct
+		/"id":/ && snarf == 1  {					# so only chase id if we have seen access tag
+			gsub( "\"", "", $0 );					# drop annoying bits of json
+			gsub( "}", "", $0 );
+			gsub( ",", "", $0 );
+			print $NF
+			exit ( 0 );								# stop short; only need one
+		} '											# now bash compatable
+}
+
+# Run the v3 output for the returned token
+# Bloody openstack puts the token from a v3 request in the HEADER and not in the body
+# with the rest of the data; data does NOT belong in the transport header! Header fields
+# are tagged by rjprt and are contained in square brackets which need to be stripped.
+function v3_suss_token {
+	awk '/header: X-Subject-Token/ { gsub( "\\[", "", $NF ); gsub( "]", "", $NF ); print $NF; exit( 0 ); }'
+}
+
 function str2expiry
 {
 	typeset expiry
@@ -149,7 +196,7 @@ function str2expiry
 }
 
 # given a raw token, or nothing, generate the proper rjprt option to set
-# it in the header. 
+# it in the header.
 # CAUTION: error messages MUST go to &2
 function set_xauth
 {
@@ -217,19 +264,24 @@ function gen_token
 	then
 		token_value=$( keystone token-get | awk -F \| '{gsub( "[ \t]", "", $2 ) } $2 == "id" {print $3 }' )	# now bash compatable
 	else
-		url="$OS_AUTH_URL/tokens"
-		content_type="Content-type: application/json" 
-		token_value=$( curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | awk '{ print $0 "},"} ' RS="," | awk '1' RS="{" | awk '
+		content_type="Content-type: application/json"
+		case $OS_AUTH_URL in
+			 *v2*)
+				url="$OS_AUTH_URL/tokens"
+				token_value=$( curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | v2_suss_token )
+				;;
 
-		/"access":/ { snarf = 1; next }				# we want the id that is a part of the access struct
-		/"id":/ && snarf == 1  {					# so only chase id if we have seen access tag
-			gsub( "\"", "", $0 );					# drop annoying bits of json
-			gsub( "}", "", $0 );
-			gsub( ",", "", $0 );
-			print $NF
-			exit ( 0 );								# stop short; only need one
-		}
-		' )											# now bash compatable
+			*v3*)
+				url="$OS_AUTH_URL/auth/tokens"
+				body="$( gen_v3_token_json )"			# body for the url
+				token_value=$( rjprt -h -J -m POST -d -D "$body" -t $url | v3_suss_token )
+				;;
+
+			*)	echo "version in OS_AUTH_URL ($OS_AUTH_URL) is not supported for -T"
+				exit 1
+				;;
+		esac
+
 	fi
 
 	if [[ -z $token_value ]]
@@ -521,6 +573,7 @@ case $1 in
 
 	test)
 		shift
+		echo "test: raw_token=($raw_token)"
 		echo "test: options: ($opts)"
 		;;
 
