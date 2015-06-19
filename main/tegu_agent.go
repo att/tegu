@@ -35,6 +35,7 @@
 				20 Apr 2015 : Now accepts direction of external IP to pass on bw-fmod command.
 				28 May 2015 : Changes to support trinity. (version bump to 2.2)
 				15 Jun 2015 : Added support for oneway bandwidth reservations (bump 2.3)
+				19 Jun 2015 : Added bwow script to copy list.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -851,6 +852,7 @@ func main() {
 			"/usr/bin/tegu_add_mirror " +
 			"/usr/bin/tegu_del_mirror " +
 			"/usr/bin/ql_bw_fmods " +
+			"/usr/bin/ql_bwow_fmods " +
 			"/usr/bin/ql_set_trunks " +
 			"/usr/bin/ql_filter_rtr " +
 			"/usr/bin/setup_ovs_intermed "
