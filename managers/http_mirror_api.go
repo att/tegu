@@ -19,6 +19,8 @@
 	Mods:		17 Feb 2015 - Created.
 				20 Mar 2014 - Added support for specifying ports via MACs
 				27 Apr 2015 - allow IPv6 for <output> GRE address, fixed bug with using label for output spec
+				05 Jun 2015 - added token auth to mirroring
+				22 Jun 2015 - write error messages in JSON, to play nice with tegu_req
 */
 
 package managers
@@ -402,6 +404,7 @@ func validateOutputPort(port *string) (newport *string, err error) {
 		}
 		return
 	}
+	newport = port
 	_, err = validatePort(port)
 	return
 }
@@ -537,7 +540,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 					ip := gizmos.Pledge( res )							// must pass an interface pointer to resmgr
 					req.Send_req( rmgr_ch, my_ch, REQ_ADD, &ip, nil )	// network OK'd it, so add it to the inventory
 					req = <- my_ch										// wait for completion
-	
+
 					if req.State == nil {
 						ckptreq := ipc.Mk_chmsg( )
 						ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
@@ -674,7 +677,7 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 			if token_has_osroles( &auth, *mirror_roles ) {	// if token has one of the roles listed in config file
 				authorised = true
 			}
-		} 
+		}
 	} else {
 		code = http.StatusMethodNotAllowed
 		msg = "Tegu is running but not accepting requests; try again later"
@@ -709,13 +712,12 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 		}
 	}
 
-	// set response code and write response
-	if code == http.StatusOK || code == http.StatusCreated {
-		// Set Content-type header for JSON
-		hdr := out.Header()
-		hdr.Add("Content-type", "application/json")
-	} else {
+	// Set response code and write response; set Content-type header for JSON
+	hdr := out.Header()
+	hdr.Add("Content-type", "application/json")
+	if code != http.StatusOK && code != http.StatusCreated {
 		http_sheep.Baa( 2, "Response: " + msg)
+		msg = fmt.Sprintf(`{ "error": %q }`, msg)
 	}
 	out.WriteHeader(code)
 	out.Write([]byte(msg))
