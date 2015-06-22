@@ -38,6 +38,7 @@
 				29 Jul 2014 : Mlag support
 				18 Jun 2015 : Corrected cause of potential core dump if queue ID passed in is
 					empty. Some cleanup of commented lines.
+				22 Jun 2015 : Corrected cause of core dump when updating utilisation on mlag.
 */
 
 package gizmos
@@ -144,7 +145,7 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 		ts1 *Time_slice = nil		// temp hold of timeslice for various reasons
 	)
 
-	obj_sheep.Baa( 2, "obligation: adjusting queue %s by %d", *qid, amt )
+	obj_sheep.Baa( 2, "obligation: adjusting utilisation q=%d by %d", qnum, amt )
 	msg = nil
 	for ts := ob.tslist; ts != nil; ts = ts.Next {
 		if !ts.Is_before( commence ) {					// only consider slices that overlap or are after the given window

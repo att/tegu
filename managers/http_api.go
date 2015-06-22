@@ -71,6 +71,7 @@
 				26 May 2015 : Conversion to support pledge as an interface.
 				01 Jun 2015 : Added duplicate reservation checking.
 				05 Jun 2015 : Minor typo fixes.
+				19 Jun 2015 : Added better debug to token_has_osroles().
 */
 
 package managers
@@ -221,6 +222,8 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 
 	if req.State == nil {
 		return true
+	} else {
+		http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s", token, roles )
 	}
 
 	return false

@@ -28,6 +28,7 @@
 				07 Jul 2014 - Now generates queue strings if the bandwidth amount is 
 					greater than zero.
 				18 Jun 2015 - Allow a queue to be added only if the amount is positive.
+				22 Jun 2015 - Added check for nil qid pointer on add.
 */
 
 package gizmos
@@ -245,6 +246,11 @@ func (ts *Time_slice) Get_queue_info( id *string ) ( qnum int, swdata *string ) 
 */
 func (ts *Time_slice) Add_queue( qnum int, id *string, swdata *string, amt int64 ) {
 	if ts == nil {
+		return
+	}
+
+	if id == nil {
+		obj_sheep.Baa( 1, "timeslice/add_queue: internal mishap: nil qid for q=%d amt=%d", qnum, amt )
 		return
 	}
 
