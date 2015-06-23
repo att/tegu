@@ -307,7 +307,7 @@ force=0
 use_keystone=0
 
 bandwidth="bandwidth"		# http api collections
-steering="steering"
+steering="api"				# eventually this should become steering
 default="api"
 
 while [[ $1 == -* ]]
@@ -483,7 +483,7 @@ case $1 in
 		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto://$host/tegu/$default"
 		;;
 
-	steer)
+	steer*)
 		expiry=$( str2expiry $2 )
 		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto://$host/tegu/$steering"
 		;;
