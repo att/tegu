@@ -36,6 +36,8 @@
 				28 May 2015 : Changes to support trinity. (version bump to 2.2)
 				15 Jun 2015 : Added support for oneway bandwidth reservations (bump 2.3)
 				19 Jun 2015 : Added bwow script to copy list.
+				23 Jun 2015 : Removed one result channel close (defer) that was causing a panic in ssh_broker
+					if the agent pops the timeout.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -278,6 +280,8 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	msg.State = 0					// assume success
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
+																		// do NOT close the channel here; only senders should close
+
 	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// for now, there will only ever be one host for these commands
 	if err != nil {
 		sheep.Baa( 1, "WRN: error submitting bandwidth command  to %s: %s", act.Hosts[0], err )
@@ -366,6 +370,7 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
 	msg.State = 0					// assume success
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
+																		// do NOT close the channel here; only senders should close
 	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// oneway fmods are only ever applied to one host so [0] is ok
 	if err != nil {
 		sheep.Baa( 1, "WRN: error submitting bwow command  to %s: %s", act.Hosts[0], err )
@@ -432,7 +437,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 	startt := time.Now().Unix()
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
-	defer close( ssh_rch )
+															// do NOT close this channel, only senders should close
 
 	wait4 := 0											// number of responses to wait for
 	for k, v := range req.Hosts {						// submit them all out non-blocking
@@ -503,6 +508,8 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts (broker)" )
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
+															// do NOT close the channel here; only senders should close
+
 	wait4 := 0												// number of responses to wait for
 	for i := range req.Hosts {
 		cmd_str := fmt.Sprintf( `PATH=%s:$PATH setup_ovs_intermed -d "%s"`, *path, req.Dscps )
@@ -585,6 +592,8 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
     }
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
+															// do NOT close the channel here; only senders should close
+
 	wait4 := 0												// number of responses to wait for
 	for i := range req.Hosts {
     	sheep.Baa( 1, "via broker on %s: create_ovs_queues embedded in %s", req.Hosts[i], fname )
@@ -672,6 +681,8 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[f] )
 
 		ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
+																// do NOT close the channel here; only senders should close
+
 		wait4 := 0												// number of responses to wait for
 		for i := range req.Hosts {
 			sheep.Baa( 1, "via broker on %s send fmod: %s", req.Hosts[i], cstr )
