@@ -700,6 +700,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					if validate_auth( &auth_data, is_token, admin_roles ) {
 						state = "OK"
 						reason = ""
+						rcount := 0
 						for i := 1; i < ntokens; i++ {
 							req = ipc.Mk_chmsg( )
 							req.Send_req( osif_ch, my_ch, REQ_XLATE_HOST, &tokens[i], nil )		// translate [token/][project/]host-name into ID/hostname
@@ -709,16 +710,18 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 								req.Send_req( rmgr_ch, my_ch, REQ_PLEDGE_LIST, hname, nil )		// get a list of pledges that are associated with the hostname
 								req = <- my_ch
 								if req.Response_data != nil {
-									plist := req.Response_data.( []gizmos.Pledge )				// list of all pledges that touch the VM
+									plist := req.Response_data.( []*gizmos.Pledge )				// list of all pledges that touch the VM
 									http_sheep.Baa( 1, "refreshing reservations for %s, %d pledge(s)", *hname, len( plist ) )
 
 									for i := range plist {
-										req.Send_req( rmgr_ch, my_ch, REQ_YANK_RES, plist[i].Get_id(), nil )		// yank the reservation for this pledge
+										p := *plist[i]
+										req.Send_req( rmgr_ch, my_ch, REQ_YANK_RES, p.Get_id(), nil )		// yank the reservation for this pledge
 										req = <- my_ch
 
 										if req.State == nil {
-											switch sp := plist[i].(type) {
+											switch sp := p.(type) {
 												case *gizmos.Pledge_bw:
+													rcount++
 													h1, h2 := sp.Get_hosts( ) 							// get the pldege hosts so we can update the graph
 													update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
 													update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
@@ -739,11 +742,14 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 											http_sheep.Baa( 1, "unable to yank reservation for refresh: %s", req.State )
 										}
 									}
+
 								} else {
 									http_sheep.Baa( 1, "refreshing reservations for %s, no pledges", tokens[i] )
 								}
 							}
 						}
+
+						reason = fmt.Sprintf( "%d reservations were refreshed", rcount )
 					}
 
 				case "reserve":
