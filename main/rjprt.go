@@ -28,6 +28,7 @@
 				03 Jun 2015 - To accept an authorisation token to send as X-Tegu-Auth in the header.
 				19 Jun 2015 - Added support to dump headers in order to parse out the token that openstack
 					identity v3 sends back in the bloody header of all places.
+				24 Jun 2015 - Added xauth support to GET.
 */
 
 package main
@@ -120,7 +121,14 @@ func main() {
 	
 	switch( *method ) {
 		case "GET", "get":
-			resp, err = client.Get( *target_url )
+			req, err = http.NewRequest( "GET", *target_url, nil )
+			if err == nil {
+				if auth != nil && *auth != "" {
+					req.Header.Set( "X-Auth-Tegu", *auth )
+				}
+	
+				resp, err = client.Do( req )
+			}
 
 		case "POST", "post":
 			if *request_data == "" {
@@ -129,12 +137,14 @@ func main() {
 				req, err = http.NewRequest( "POST", *target_url, bytes.NewBufferString( *request_data ) )
 			}
 
-			req.Header.Set( "Content-Type", input_type )
-			if auth != nil && *auth != "" {
-				req.Header.Set( "X-Auth-Tegu", *auth )
+			if err == nil {
+				req.Header.Set( "Content-Type", input_type )
+				if auth != nil && *auth != "" {
+					req.Header.Set( "X-Auth-Tegu", *auth )
+				}
+	
+				resp, err = client.Do( req )
 			}
-
-			resp, err = client.Do( req )
 
 		case "DELETE", "del", "delete":
 			if *request_data == "" {
@@ -142,10 +152,13 @@ func main() {
 			} else {
 				req, err = http.NewRequest( "DELETE", *target_url, bytes.NewBufferString( *request_data ) )
 			}
-			if auth != nil && *auth != "" {
+
+			if err == nil {
+				if auth != nil && *auth != "" {
 				req.Header.Add( "X-Auth-Tegu", *auth )
+				}
+				resp, err = client.Do( req )
 			}
-			resp, err = client.Do( req )
 
 		default:
 			fmt.Fprintf( os.Stderr, "%s method is not supported\n", *method )
