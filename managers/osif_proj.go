@@ -554,6 +554,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 		return
 	}
 	
+	osif_sheep.Baa( 2, "lazyupdate: Response_data = %s %s %s %s %s %s", safe( name ), safe( id ), safe( ip4 ), safe( phost ), safe( mac ), safe( gw ) ) 
 	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, fip4, gwmap )		// build the vm data block for network manager
 	msg.Response_ch <- msg																// and send it on its merry way
 

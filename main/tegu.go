@@ -110,12 +110,12 @@
 				04 Jun 2015 : Added authentication to mirror request processing.
 				09 Jun 2015 : Added oneway bandwidth reservations.
 				16 Jun 2015 : Extended oneway bandwitdh reservations to include queues.
+				25 Jun 2015 : Corrected bug with mirror expiration and xlation of proj/vm to mac.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
 				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
-				3.1		- QoS-Lite with steering added
-				3.1.3	- QoS-Lite with steering and mirroring API added
+				3.1		- QoS-Lite with steering and mirroring added
 				3.2		- QoS-Lite with steering and WACC support added
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
@@ -145,7 +145,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.4/16185"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.4/16255"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

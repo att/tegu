@@ -38,6 +38,7 @@
 				19 Jun 2015 : Added bwow script to copy list.
 				23 Jun 2015 : Removed one result channel close (defer) that was causing a panic in ssh_broker
 					if the agent pops the timeout.
+				25 Jun 2015 : Now puts stderr out from a mirror command on failure or bleat level 2+.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -651,32 +652,6 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 	startt := time.Now().Unix()
 
 	errcount := 0
-/*
-	for i := range req.Fdata {
-	for hi := range req.Hosts {			//TODO:  send them in parallel
-
-		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[i] )
-    	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
-
-		_, stderr, err := broker.Run_cmd( req.Hosts[hi], cstr )				// there is at most only one host when sending fmods
-		if err != nil {
-			sheep.Baa( 0, "ERR: send fmod failed host=%s: %s	[TGUAGN005]", req.Hosts[hi], err )
-			errcount++
-		} else {
-        	sheep.Baa( 2, "fmod succesfully sent: %s", cstr )
-		}
-		for {
-			line, err := stderr.ReadBytes( '\n' )
-			if err == nil {
-				sheep.Baa( 0, "send_fmod stderr:  %s", bytes.TrimRight( line, "\n" ) )
-			} else {
-				break
-			}
-		}
-	}
-	}
-
-*/
 	for f := range req.Fdata {
 		cstr := fmt.Sprintf( `PATH=%s:$PATH send_ovs_fmod %s`, *path, req.Fdata[f] )
 
@@ -747,11 +722,14 @@ func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) {
 	}
 	if cstr != "" {
     	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
-		_, _, err := broker.Run_cmd( req.Hosts[0], cstr )
+		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )
 		if err != nil {
 			sheep.Baa( 0, "ERR: send mirror cmd failed host=%s: %s	[TGUAGN005]", req.Hosts[0], err )
 		} else {
         	sheep.Baa( 2, "mirror cmd succesfully sent: %s", cstr )
+		}
+		if sheep.Would_baa( 2 ) || err != nil {
+			dump_stderr( *stderr, "addmirror" + req.Hosts[0] )			// always dump on error, or if chatty
 		}
 	} else {
 		sheep.Baa( 0, "Unrecognized mirror command: " + req.Qdata[0] )

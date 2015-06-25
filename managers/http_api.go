@@ -72,6 +72,7 @@
 				01 Jun 2015 : Added duplicate reservation checking.
 				05 Jun 2015 : Minor typo fixes.
 				19 Jun 2015 : Added better debug to token_has_osroles().
+				25 Jun 2015 : Corrected bug: no longer announces a verbose change if it didn't make it.
 */
 
 package managers
@@ -1088,11 +1089,13 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 									default:
 										state = "ERROR"
-										http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2], nv )
+										http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2] )
 										jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
 								}
 
-								http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
+								if state == "OK" {
+									http_sheep.Baa( 1, "verbose level set: %s %d", tokens[2], nv )
+								}
 							} else {
 								jreason = fmt.Sprintf( "\"verbose set: master level to %d\"",   nv )
 								http_sheep.Baa( 1, "verbose level set: master %d", nv )
@@ -1426,7 +1429,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	}
 
 	enable_mirroring := false										// off if section is missing all together
-	if cfg_data["mirroring"] != nil {
+	if cfg_data["mirror"] != nil {									// yes, mirror, not mirroring
 		enable_mirroring = true										// on by default if section is presernt
 		if p := cfg_data["mirroring"]["enable"]; p != nil {			// allow explicit disable with enable=no
 			if *p == "no" || *p == "No" || *p == "false" || *p == "False" {

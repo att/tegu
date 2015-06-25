@@ -326,9 +326,12 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 		vm = req.Response_data.( *Net_vm )
 		if vm.phost == nil {
 			// There seems to be a bug in REQ_GET_HOSTINFO, such that the 2nd call works
+			// wanting to capture this more aggressively since I cannot reproduce the first time failure
+			http_sheep.Baa( 1, "requiring a second osif lazy call: port=%s name=%s id=%s ip4=%s phost=%s mac=%s gw=%s fip=%s", safe( port ), safe(vm.name), safe(vm.id), safe(vm.ip4), safe(vm.phost), safe(vm.mac), safe(vm.gw), safe(vm.fip) )
 			req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, port, nil )
 			req = <- my_ch
 			vm = req.Response_data.( *Net_vm )
+			err = req.State
 		}
 		http_sheep.Baa( 1, "name=%s id=%s ip4=%s phost=%s mac=%s gw=%s fip=%s", safe(vm.name), safe(vm.id), safe(vm.ip4), safe(vm.phost), safe(vm.mac), safe(vm.gw), safe(vm.fip) )
 	} else {
@@ -404,8 +407,16 @@ func validateOutputPort(port *string) (newport *string, err error) {
 		}
 		return
 	}
-	newport = port
-	_, err = validatePort(port)
+
+	vm, err := validatePort(port)		// must capture the translation to mac
+	if err == nil {
+		if vm.mac != nil {
+			newport = vm.mac
+		} else {
+			err = fmt.Errorf( "no mac address translation for %s", *port )
+		}
+	}
+
 	return
 }
 

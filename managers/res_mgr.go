@@ -77,6 +77,8 @@
 				01 Jun 2015 : Corrected bug in delete all which was atttempting to delete expired reservations.
 				15 Jun 2015 : Added oneway support.
 				18 Jun 2015 : Added oneway delete support.
+				25 Jun 2015 : Corrected bug preventing mirror reserations from being deleted (they require an agent
+						command to be run and it wasn't.)
 */
 
 package managers
@@ -234,6 +236,10 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 }
 
 /*
+	Deprecated -- these should no longer be set by tegu and if really needed should
+		be set by the ql_bw*fmods and other agent scripts.
+
+
 	Push table 9x flow-mods. The flowmods we toss into the 90 range of
 	tables generally serve to mark metadata in a packet since metata
 	cannot be marked prior to a resub action (flaw in OVS if you ask me).
@@ -308,11 +314,15 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 
 	rm_sheep.Baa( 4, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
-		if p != nil  &&  ! (*p).Is_pushed() {
+		if p != nil {
 			if (*p).Is_expired() {								// some reservations need to be explicitly undone at expiry
-				switch (*p).(type) {
-					case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
-						undo_mirror_reservation( p, rname, ch )
+				if (*p).Is_pushed() {							// no need if not pushed
+					switch (*p).(type) {
+						case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
+							undo_mirror_reservation( p, rname, ch )
+					}
+
+					(*p).Reset_pushed()
 				}
 			} else {
 				if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
@@ -502,6 +512,9 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 									} else {
 										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
 									}
+
+								default:
+									rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )
 
 							}						// end switch on specific pledge type
 						}
@@ -934,8 +947,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_NOOP:			// just ignore
 
 			case REQ_ADD:
-				//msg.State = inv.Add_res( msg.Req_data.( *gizmos.Pledge ) )		// we require an interface pointer
-				msg.State = inv.Add_res( msg.Req_data )
+				msg.State = inv.Add_res( msg.Req_data )			// add will determine the pledge type and do the right thing
 				msg.Response_data = nil
 
 
