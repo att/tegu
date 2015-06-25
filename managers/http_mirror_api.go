@@ -530,9 +530,10 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 				gp := gizmos.Pledge( res )								// convert to generic pledge to pass
 				req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
 				req = <- my_ch											// get response from the network thread
-				if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
-					rp := req.Response_data.( *string )
+				if req.Response_data != nil  &&  req.Response_data.( *string ) != nil {	 // response is a pointer to string, if the pointer isn't nil it's a dup
+					rp := req.Response_data.( *string )	
 					if rp != nil {
+						http_sheep.Baa( 1, "duplicate mirror reservation was dropped" )
 						err = fmt.Errorf( "reservation duplicates existing reservation: %s",  *rp )
 					}
 				} else {
@@ -559,8 +560,9 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 				if err == nil {
 					err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
 				}
-				mirror.err = err
 			}
+
+			mirror.err = err
 		}
 
 		bs.WriteString(fmt.Sprintf(`%s { "name": "%s", `, sep, mirror.name))
