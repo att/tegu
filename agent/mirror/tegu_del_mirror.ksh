@@ -18,6 +18,7 @@
 #
 #       Mods:      4 Feb 2015 - created
 #                  11 Feb 2015 - remove temp file
+#					25 Jun 2015 - Corrected PATH.
 #
 
 function logit
@@ -25,7 +26,7 @@ function logit
 	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $argv0: $@" >&2
 }
 
-PATH=/sbin:/usr/bin:/bin
+PATH=$PATH:/sbin:/usr/bin:/bin 		# must pick up agent augmented path
 echo=:
 if [ "$1" == "-v" ]
 then

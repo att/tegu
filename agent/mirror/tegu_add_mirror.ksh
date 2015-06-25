@@ -41,6 +41,7 @@
 #
 #       Mods:      4 Feb 2015 - created
 #                  27 Apr 2015 - allow IPv6 for <output> GRE address
+#					25 Jun 2015 - Corrected PATH.
 #
 
 function valid_ip4
@@ -76,7 +77,7 @@ function translatemac
 }
 
 # Preliminaries
-PATH=/sbin:/usr/bin:/bin
+PATH=$PATH:/sbin:/usr/bin:/bin		# must pick up agent augmented path
 echo=:
 if [ "$1" == "-v" ]
 then
