@@ -504,15 +504,47 @@ case $1 in
 			exit 1
 		fi
 		json="{"
-		if [[ $1 == *"-"* ]]
-		then
-			s=$( echo $1 | sed 's/-.*//' )
-			e=$( echo $1 | sed 's/.*-//' )
-			json="$json \"start_time\": \"$s\", \"end_time\": \"$e\","
-		else
-			e=$1
-			json="$json \"end_time\": \"$e\","
-		fi
+
+		case $1 in 		# handle [start-]end or +sss
+			*-*)					# start-end
+				json="$json \"start_time\": \"${1%%-*}\", \"end_time\": \"${##*-}\","
+				;;
+
+			+[0-9]*)				# number of seconds after now
+				now=$( date +%s )
+				json="$json \"start_time\": \"${now}\", \"end_time\": \"$((now $1))\","
+				;;
+
+			[0-9]*)					# just a hard end
+				now=$( date +%s )
+				if (( $1 < now ))
+				then
+					echo "end time ($1) is not in the future"
+					echo "invalid window: expected [start-]end or +sss  [FAIL]"
+					usage
+					exit 1
+				fi
+
+				json="$json \"start_time\": \"${now}\", \"end_time\": \"$1\","
+				;;
+			
+			*)
+				echo "invalid window: expected [start-]end or +sss   [FAIL]"
+				usage
+				exit 1
+				;;
+		esac
+
+		#if [[ $1 == *"-"* ]]
+		#then
+		#	s=$( echo $1 | sed 's/-.*//' )
+		#	e=$( echo $1 | sed 's/.*-//' )
+		#	json="$json \"start_time\": \"$s\", \"end_time\": \"$e\","
+		#else
+		#	e=$1
+		#	json="$json \"end_time\": \"$e\","
+		#fi
+
 		json="$json \"output\": \"$3\", \"port\": [ "
 		sep=""
 		for p in $( echo $2 | tr , ' ' )
