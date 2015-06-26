@@ -567,8 +567,8 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			osif_sheep.Baa( 1, "admin creds generated, mapping tenants" )
 			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the initial translation maps
 			//pname2id, id2pname, _ = os_admin.Map_all_tenants( )		// get the translation maps
-			for k := range pname2id {
-				osif_sheep.Baa( 1, "tenant known: %s", k )
+			for k, v := range pname2id {
+				osif_sheep.Baa( 1, "project known: %s %s", k, *v )				// useful to see in log what projects we can see
 			}
 		} else {
 			id2pname = make( map[string]*string )				// empty maps and we'll never generate a translation from project name to tenant ID since there are no default admin creds
@@ -620,22 +620,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 
 		os_projects = make( map[string]*osif_project )
-		for k, _ := range os_refs {					// build the projects for maps
-			if k != "_ref_" {	
-				np, err := Mk_osif_project( k )
-				if err == nil {
-					if pname2id[k] == nil {
-						osif_sheep.Baa( 0, "project did not map to an id: %s", k )
-					} else {
-						os_projects[*pname2id[k]] = np	
-						osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
-					}
-				} else {
-					osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
-				}
-			}
-		}
+		add2projects( os_projects, os_refs, pname2id, 0 )							// add refernces to the projects list
 	}
+
 	// ---------------- end config parsing ----------------------------------------
 
 
@@ -667,6 +654,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	
 					if os_list == "all" {
 						os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )						// periodic update of project cred list
+						add2projects( os_projects, os_refs, pname2id, 2 )								// add refernces to the projects list
 					}
 
 					osif_sheep.Baa( 2, "credentials were updated from openstack" )

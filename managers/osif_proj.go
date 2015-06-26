@@ -97,6 +97,34 @@ func Mk_osif_project( name string ) ( p *osif_project, err error ) {
 	return
 }
 
+
+/*
+	Run the os creds in the creds list and add any projects to the 
+	project list that aren't already there. pname2id is a map that
+	translates project names to a uuid.
+*/
+func add2projects( projects map[string]*osif_project, creds map[string]*ostack.Ostack, pname2id map[string]*string, bleat_level uint ) {
+
+	for k, _ := range creds {					// build the projects for maps
+		if k != "_ref_" {						// we don't do this for the reference project
+			pid, ok := pname2id[k]					// projects are tracked with uuid
+			if ok {
+				if _, ok = projects[*pid]; !ok {	// project hasn't been added to the list yet
+					np, err := Mk_osif_project( k )
+					if err == nil {
+						projects[*pname2id[k]] = np	
+						osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
+					} else {
+						osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
+					}
+				}
+			} else {
+				osif_sheep.Baa( bleat_level, "project did not map to an id: %s", k )		// probably bleat on the first go
+			}
+		}
+	}
+}
+
 /*
 	Build all translation maps for the given project.
 	Does NOT replace a map with a nil map; we assume this is an openstack glitch.
@@ -139,11 +167,6 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 				p.vmid2ip = vmid2ip						// id and vm name map to just ONE ip address
 				p.vm2ip = vm2ip
 				p.ip2vmid = ip2vmid						// the only complete list of ips
-if osif_sheep.Would_baa( 2 ) {
-for k, v := range p.ip2vmid {
-osif_sheep.Baa( 2, "   %s -> %s", k, *v )
-}
-}
 				p.vmid2host = vmid2host					// id to physical host
 				p.ip2vm = vmip2vm
 			}
