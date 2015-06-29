@@ -167,7 +167,7 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 
 	p.window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
 	//p.protocol = jp.Protocol
-	//p.id = jp.Id
+	p.id = jp.Id
 	//p.dscp_koe = jp.Dscp_koe
 	p.usrkey = jp.Usrkey
 	p.qid = jp.Qid
