@@ -15,6 +15,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		18 Jun 2015 : Added set_qid() function.
+				29 Jun 2015 : Corrected bug in Equals().
 */
 
 package gizmos
@@ -287,23 +288,19 @@ func (p *Pledge_bwow) Clone( name string ) ( *Pledge_bwow ) {
 func (p *Pledge_bwow) Equals( op *Pledge ) ( state bool ) {
 	
 	if p == nil {
-		return
+		return false
 	}
 
 	obw, ok := (*op).( *Pledge_bwow )			// convert from generic type to specific
 	if ok {
 		if ! Strings_equal( p.protocol, obw.protocol ) { return false } // simple tests that don't swap if hosts are reversed
 
-															// more complicated when only diff is h1 and h2 are swapped
-		if Strings_equal( p.src, obw.src ) {			// if hosts matche 1:1 and 2:2
-			if !Strings_equal( p.dest, obw.dest ) {		// then expect vlan and port to match the same
-				return false
-			}
+		if !Strings_equal( p.src, obw.src ) { return false }
+		if !Strings_equal( p.dest, obw.dest ) { return false }
 
-			if ! Strings_equal( p.src_tpport, obw.src_tpport ) { return false }
-			if ! Strings_equal( p.dest_tpport, obw.dest_tpport ) { return false }
-			if ! Strings_equal( p.src_vlan, obw.src_vlan ) { return false }
-		}
+		if !Strings_equal( p.src_tpport, obw.src_tpport ) { return false }		// hosts can match if ports are different
+		if !Strings_equal( p.dest_tpport, obw.dest_tpport ) { return false }
+		if !Strings_equal( p.src_vlan, obw.src_vlan ) { return false }
 
 		if !p.window.overlaps( obw.window ) {
 			return false;
