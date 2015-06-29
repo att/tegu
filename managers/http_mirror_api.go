@@ -21,6 +21,7 @@
 				27 Apr 2015 - allow IPv6 for <output> GRE address, fixed bug with using label for output spec
 				05 Jun 2015 - added token auth to mirroring
 				22 Jun 2015 - write error messages in JSON, to play nice with tegu_req
+				29 Jun 2015 - Fixed fallout from config section name change.
 */
 
 package managers
@@ -352,7 +353,7 @@ func cidrMatches(ip net.IP, cidr string) (bool) {
 }
 
 func validateAllowedOutputIP(port *string) (err error) {
-	oklist := cfg_data["mirroring"]["allowed_gre_addr"]
+	oklist := cfg_data["mirror"]["allowed_gre_addr"]
 	if oklist != nil {
 		ip := net.ParseIP(*port)
 		if ip == nil {
@@ -377,7 +378,7 @@ func validateOutputPort(port *string) (newport *string, err error) {
 	if strings.HasPrefix(*port, "label:") {
 		label := (*port)[6:]
 		// check for a label with this name in the configuration
-		mirsect := cfg_data["mirroring"]
+		mirsect := cfg_data["mirror"]
 		for k, v := range mirsect {
 			if k == label {
 				newport = v

@@ -74,6 +74,7 @@
 				19 Jun 2015 : Added better debug to token_has_osroles().
 				25 Jun 2015 : Corrected bug: no longer announces a verbose change if it didn't make it.
 				29 Jun 2015 : Now checkpoints after a delete reservation (tracker 272).
+								Fixed mirroring references from config.
 */
 
 package managers
@@ -1434,12 +1435,12 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	enable_mirroring := false										// off if section is missing all together
 	if cfg_data["mirror"] != nil {									// yes, mirror, not mirroring
 		enable_mirroring = true										// on by default if section is presernt
-		if p := cfg_data["mirroring"]["enable"]; p != nil {			// allow explicit disable with enable=no
+		if p := cfg_data["mirror"]["enable"]; p != nil {			// allow explicit disable with enable=no
 			if *p == "no" || *p == "No" || *p == "false" || *p == "False" {
 				enable_mirroring = false
 			}
 		}
-		if p := cfg_data["mirroring"]["mirror_roles"]; p != nil {
+		if p := cfg_data["mirror"]["mirror_roles"]; p != nil {
 			mirror_roles = p
 		} 
 	} 
