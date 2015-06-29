@@ -697,7 +697,7 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 		//if (*p).Is_ptype( gizmos.PT_MIRRORING ) && !(*p).Is_expired() {
 		p, ok := (*gp).(*gizmos.Pledge_mirror)
 		if ok  && !p.Is_expired() {
-			bs.WriteString(fmt.Sprintf("%s%s", sep, p.Get_id()))
+			bs.WriteString(fmt.Sprintf("%s%s", sep, *p.Get_id()))
 			sep = " "
 		}
 	}

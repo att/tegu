@@ -226,7 +226,7 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 	if req.State == nil {
 		return true
 	} else {
-		http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s", token, roles )
+		http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s", *token, roles )
 	}
 
 	return false
