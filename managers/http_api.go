@@ -73,6 +73,7 @@
 				05 Jun 2015 : Minor typo fixes.
 				19 Jun 2015 : Added better debug to token_has_osroles().
 				25 Jun 2015 : Corrected bug: no longer announces a verbose change if it didn't make it.
+				29 Jun 2015 : Now checkpoints after a delete reservation (tracker 272).
 */
 
 package managers
@@ -1187,6 +1188,8 @@ func delete_reservation( tokens []string ) ( err error ) {
 	
 		if req.State == nil {
 			err = nil
+			ckptreq := ipc.Mk_chmsg( )								// request checkpoint but no need to wait on it
+			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 		} else {
 			err = req.State
 		}
