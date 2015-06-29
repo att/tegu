@@ -21,6 +21,7 @@
 				24 Feb 2015 - Corrected to_json reference of tpport values (pointers, not strings)
 				21 May 2015 - Converted from generic pledge type.
 				01 Jun 2015 - Addded equal() support
+				26 Jun 2015 - Return nil pledge if one bw value is <= 0.
 */
 
 package gizmos
@@ -120,6 +121,11 @@ func Mk_bw_pledge(	host1 *string, host2 *string, p1 *string, p2 *string, commenc
 		p = nil;
 		err = fmt.Errorf( "bad host2 name submitted: %s", *host2 )
 		obj_sheep.Baa( 1, "pledge: %s", err )
+		return
+	}
+
+	if bandw_in < 1 || bandw_out < 1 {
+		err = fmt.Errorf( "invalid bandwidth; bw-in and bw-out must be greater than zero" )
 		return
 	}
 
