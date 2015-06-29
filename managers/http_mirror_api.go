@@ -86,7 +86,7 @@ func checkTimes(s string, e string) (startt int64, endt int64, err error) {
 		if endt <= startt {
 			err = fmt.Errorf( "end_time (%d) <= start_time, (%d)", endt, startt )
 		} else {
-			t := cfg_data["mirroring"]["min_mirror_expiration"]
+			t := cfg_data["mirror"]["min_mirror_expiration"]
 			if t != nil {
 				min, _ := strconv.ParseInt(*t, 0, 64)
 				if (endt - startt) < min {
