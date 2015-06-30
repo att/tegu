@@ -25,7 +25,7 @@
 #				08 Jan 2014 - Changed the order of parms on the reservation command so
 #					that they match the order on the HTTP interface. This was purely
 #					to avoid confusion.  Added a bit better error checking to reserve
-#					and consistenly routing error messages to stderr.
+#					and consistently routing error messages to stderr.
 #				03 Mar 2014 - Added error checking based on host pair syntax.
 #				31 Mar 2014 - Allows for queue dump/list command.
 #				13 May 2014 - Added support to provide dscp value on a reservation req.
@@ -42,10 +42,11 @@
 #				01 Apr 2015 - Corrected bug with token passed on steering request.
 #				18 May 2015 - Dumbed down so that bash could run the script.
 #				02 Jun 2015 - Added optional request name to *-mirror commands to make
-#					consistant with others (no dash).
+#					consistent with others (no dash).
 #				04 Jun 2015 - Added token to -a call.
 #				10 Jun 2015 - Added one way reservation support
 #				19 Jun 2015 - Added support for v3 token generation.
+#				30 Jun 2015 - Fixed a bunch of typos.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -54,7 +55,7 @@ function usage {
 	usage: $argv0 [-d] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-r rname] [-s] [-t token|-T] command parms
 
 	  -d causes json output from tegu to be formatted in a dotted hierarch style
-	  -f force propting for user and password if -T is used even if a user name or password is
+	  -f force prompting for user and password if -T is used even if a user name or password is
 	     currrently set in the environment.
 	  -h is needed when tegu is running on a different host than is being used to run tegu_req
 	     and/or when tegu is listening on a port that isn't the default
@@ -68,7 +69,7 @@ function usage {
 	  -t allows a keystone token to be supplied for privileged commands; -T causes a token to
 	     be generated using the various OS_ environment variables. If a needed variable is
 	     not in the environment, then a prompt will be issued. When either -t or -T is given
-	     a %t can be used on the commandline in place of the token and the toekn will
+	     a %t can be used on the commandline in place of the token and the token will
 	     substituted. For example: %t/cloudqos/daniels8  would substitute the generated
 	     token into the host name specification.
 
@@ -82,7 +83,7 @@ function usage {
 	  $argv0 list-mirrors
 	  $argv0 show-mirror name [cookie]
 
-	Privledged commands (admin token must be supplied)
+	Privileged commands (admin token must be supplied)
 	  $argv0 graph
 	  $argv0 listhosts
 	  $argv0 listulcap
@@ -102,7 +103,7 @@ function usage {
 
 	  The dscp value is the desired value that should be left tagging the data as it
 	  reaches the egress point.  This allows applications to have their data tagged
-	  in cases when the applicaton does not, or cannot, tag it's own data.
+	  in cases when the application does not, or cannot, tag it's own data.
 
 	  For the listconns command, "name" may be a VM name, VM ID, or IP address. If
 	  a file is supplied on stdin, then it is assumed to consist of one name per
@@ -144,7 +145,7 @@ cat <<endKat
      },
    "scope": {
      "project": {
-       "name": "$OS_TENNANT_NAME"
+       "name": "$OS_TENANT_NAME"
      }
    }
    }
@@ -164,7 +165,7 @@ function v2_suss_token {
 			gsub( ",", "", $0 );
 			print $NF
 			exit ( 0 );								# stop short; only need one
-		} '											# now bash compatable
+		} '											# now bash compatible
 }
 
 # Run the v3 output for the returned token
@@ -262,16 +263,16 @@ function gen_token
 
 	if (( use_keystone ))			# -K used on the command line
 	then
-		token_value=$( keystone token-get | awk -F \| '{gsub( "[ \t]", "", $2 ) } $2 == "id" {print $3 }' )	# now bash compatable
+		token_value=$( keystone token-get | awk -F \| '{gsub( "[ \t]", "", $2 ) } $2 == "id" {print $3 }' )	# now bash compatible
 	else
 		content_type="Content-type: application/json"
 		case $OS_AUTH_URL in
-			 *v2*)
+			 */v2.0)
 				url="$OS_AUTH_URL/tokens"
 				token_value=$( curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | v2_suss_token )
 				;;
 
-			*v3*)
+			*/v3)
 				url="$OS_AUTH_URL/auth/tokens"
 				body="$( gen_v3_token_json )"			# body for the url
 				token_value=$( rjprt -h -J -m POST -d -D "$body" -t $url | v3_suss_token )
@@ -319,7 +320,7 @@ do
 		-h) 	host=$2; shift;;
 		-j)		opts+=" -j";;
 		-k)		kv_pairs+="$2 "; shift;;
-		-K)		use_keyston=1;;
+		-K)		use_keystone=1;;
 		-r)		root="$2"; shift;;
 		-s)		proto="https";;
 		-t)		raw_token="$2"; token=$"auth=$2"; shift;;
@@ -439,7 +440,7 @@ case $1 in
 			usage >&2
 			exit 1
 		fi
-		
+
 		expiry=$( str2expiry $2 )
 		if [[ $3 != *"-"* ]] && [[ $3 != *","* ]]
 		then
@@ -527,7 +528,7 @@ case $1 in
 
 				json="$json \"start_time\": \"${now}\", \"end_time\": \"$1\","
 				;;
-			
+
 			*)
 				echo "invalid window: expected [start-]end or +sss   [FAIL]"
 				usage
