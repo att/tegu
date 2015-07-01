@@ -146,7 +146,8 @@ func lookupMirror(name string, cookie string) (mirror *gizmos.Pledge_mirror) {
 	req.Send_req( rmgr_ch, my_ch, REQ_GET, [] *string { &name, &cookie }, nil )
 	req = <- my_ch
 	if req.State == nil {
-		mirror = req.Response_data.( *gizmos.Pledge_mirror )
+		mi := req.Response_data.( *gizmos.Pledge )    // assert to iface pointer
+		mirror = (*mi).( *gizmos.Pledge_mirror )    // assert to correct type
 	}
 	return
 }
