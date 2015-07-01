@@ -50,6 +50,7 @@ function build_it
 ex_root=/tmp/${LOGNAME:=$USER}/export
 argv0="${0##*/}"
 dir=""
+compress_options""
 chatty=0
 rebuild=0			# -r sets to mark as a rebuild of a previous package so that last ver is not updated
 build=1				# force a build of binaries before exporting, -b turns off
@@ -58,6 +59,7 @@ while [[ $1 == -* ]]
 do
 	case $1 in
 		-b)		build=0;;
+		-c)		compress_options=$2; shift;;
 		-d)		dir=$2; shift;;
 		-r)		rebuild=1;;
 		-v)		chatty=1;;
@@ -132,7 +134,9 @@ typeset -A seen
 # copy things from the list into the export directory
 trap "echo something failed!!!!" EXIT
 set -e
-while read src target mode junk
+compress=""
+mode=""
+while read src target mode compress junk
 do
 	if [[ -z ${seen[${target%/*}]} ]]			# ensure that the directory exists
 	then
@@ -156,10 +160,11 @@ do
 			fi
 		done
 	fi
-	verbose "$src -> $dir/${target}"
+	verbose "$src -> $dir/${target} (${mode:-755}, ${compress:-no-compression})"
 	if cp $src $dir/$target
 	then
-		if [[ -z $mode ]]
+
+		if [[ -z $mode || $mode == "-" ]]
 		then
 			mode="775"
 		fi
@@ -169,7 +174,15 @@ do
 		else
 			ctarget=$dir/$target
 		fi
+
 		chmod $mode $ctarget
+		if [[ -n $compress ]]
+		then
+			echo "compressing: $compress $compress_options $ctarget"
+			$compress $compress_options $ctarget
+		fi
+
+
 	fi
 done </tmp/PID$$.data
 verbose ""

@@ -21,6 +21,10 @@
 ../agent/ovs/ql_set_trunks	usr/bin/
 ../agent/ovs/ql_filter_rtr	usr/bin/
 
+# manual pages
+../doc/rjprt.1 		/usr/share/man/man1/	664 gzip
+../doc/tegu_req.1	/usr/share/man/man1/	664 gzip
+
 # port mirroring
 ../agent/mirror/tegu_add_mirror usr/bin/
 ../agent/mirror/tegu_del_mirror usr/bin/

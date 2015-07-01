@@ -26,6 +26,9 @@
 ../agent/mirror/tegu_add_mirror usr/bin/
 ../agent/mirror/tegu_del_mirror usr/bin/
 
+# manual pages
+../doc/rjprt.1 		/usr/share/man/man1/	664 gzip
+../doc/tegu_req.1	/usr/share/man/man1/	664 gzip
 
 ../system/tegu_req	usr/bin/
 ../system/start_tegu_agent	usr/bin/
