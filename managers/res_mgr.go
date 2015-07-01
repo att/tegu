@@ -995,11 +995,13 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
 				inv.pause_on()
+				res_refresh = 0;						// must force a push of everything on next push tickle
 				rm_sheep.Baa( 1, "pausing..." )
 
 			case REQ_RESUME:
 				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
+				res_refresh = 0;						// must force a push of everything on next push tickle
 				inv.pause_off()
 
 			case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
