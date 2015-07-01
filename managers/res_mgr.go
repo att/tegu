@@ -727,6 +727,7 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 		switch p := (*gp).(type) {
 			case *gizmos.Pledge_mirror:
 				p.Set_expiry( time.Now().Unix() )					// expire the mirror NOW
+				p.Set_pushed()						// need this to force undo to occur
 
 			case *gizmos.Pledge_bw, *gizmos.Pledge_bwow:			// network handles either type
 				ch := make( chan *ipc.Chmsg )	
@@ -736,9 +737,8 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 				req = <- ch											// wait for response from network
 				state = req.State
 				p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
+				(*gp).Reset_pushed()						// force push of flow-mods that reset the expiry
 		}
-
-		(*gp).Reset_pushed()									// force push of flow-mods that reset the expiry
 	} else {
 		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
 	}
