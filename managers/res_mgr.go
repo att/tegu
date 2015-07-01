@@ -86,7 +86,6 @@ package managers
 import (
 	"bufio"
 	"bytes"
-	//"errors"
 	"fmt"
 	"io"
 	"os"
