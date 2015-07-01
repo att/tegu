@@ -46,6 +46,7 @@
 #				04 Jun 2015 - Added token to -a call.
 #				10 Jun 2015 - Added one way reservation support
 #				19 Jun 2015 - Added support for v3 token generation.
+#				01 Jul 2015 - Correct bug in mirror timewindow parsing.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -507,7 +508,7 @@ case $1 in
 
 		case $1 in 		# handle [start-]end or +sss
 			*-*)					# start-end
-				json="$json \"start_time\": \"${1%%-*}\", \"end_time\": \"${##*-}\","
+				json="$json \"start_time\": \"${1%%-*}\", \"end_time\": \"${1##*-}\","
 				;;
 
 			+[0-9]*)				# number of seconds after now
@@ -534,16 +535,6 @@ case $1 in
 				exit 1
 				;;
 		esac
-
-		#if [[ $1 == *"-"* ]]
-		#then
-		#	s=$( echo $1 | sed 's/-.*//' )
-		#	e=$( echo $1 | sed 's/.*-//' )
-		#	json="$json \"start_time\": \"$s\", \"end_time\": \"$e\","
-		#else
-		#	e=$1
-		#	json="$json \"end_time\": \"$e\","
-		#fi
 
 		json="$json \"output\": \"$3\", \"port\": [ "
 		sep=""
