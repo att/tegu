@@ -2,11 +2,11 @@
 
 #	Mnemonic:	tegu_verification.ksh
 #	Abstract:	Runs a few regression(ish) tests to verify that tegu is working.
-#				Must have OS_PASSWORD and OS_AUTH_URL defined in the environment. 
+#				Must have OS_PASSWORD and OS_AUTH_URL defined in the environment.
 #				project and vm names are supplied on the command line as:
 #					project1:project2 user vm1,vm2...vmN vma,vmb,...vmn
-#				The first set of VMs are assumed to be for project 1 and the 
-#				second set for project 2. 
+#				The first set of VMs are assumed to be for project 1 and the
+#				second set for project 2.
 #
 #				We assume this is being run from the host where tegu is running.
 #
@@ -16,13 +16,17 @@
 
 
 
-# check the file for a simple ERROR or not. Return good (0) 
+# check the file for a simple ERROR or not. Return good (0)
 # if error not observed.
 function isok
 {
-	$trace
-	if grep -q "status.*ERROR" $1
+	if grep -q "status.*ERROR" $1		# explicitly found an error
 	then
+		return 1
+	fi
+
+	if ! grep -q "status.*OK" $1		# must also have an OK in the mix
+	then								# if tegu not running it won't have ERROR
 		return 1
 	fi
 
@@ -30,7 +34,8 @@ function isok
 }
 
 
-# returns failure if error not found in the output file
+# checks for error in the output and returns good if found.  This can be used
+# to ensure something did fail, so don't look for an OK.
 function isnotok
 {
 	$trace
@@ -47,16 +52,16 @@ function validate_ok
 {
 	if ! isok $1
 	then
-		echo "FAIL: $2"
+		echo "FAIL: $global_comment"
 		(( errors++ ))
 		if (( short_circuit ))
 		then
-			exit 1 
+			exit 1
 		fi
 		return
 	fi
 
-	echo "OK:   $2"
+	echo "OK:   $global_comment"
 }
 
 # return true if the output failed (failure expected)
@@ -64,16 +69,16 @@ function validate_fail
 {
 	if isok $1
 	then
-		echo "FAIL: $2"
+		echo "FAIL: $global_comment"
 		(( errors++ ))
 		if (( short_circuit ))
 		then
-			exit 1 
+			exit 1
 		fi
 		return
 	fi
 
-	echo "OK:   $2"
+	echo "OK:   $global_comment"
 }
 
 # ensure that the command retured ok, and that the output contains the
@@ -96,30 +101,30 @@ function validate_contains
 	then
 		if grep -q "$2" $1
 		then
-			echo "OK:   $3"
+			echo "OK:   $global_comment"
 		else
-			echo "FAIL: $fmsg, but did not contain expected data: $3"
+			echo "FAIL: $fmsg, but did not contain expected data: $global_comment"
 			(( errors++ ))
 			if (( short_circuit ))
 			then
-				exit 1 
+				exit 1
 			fi
-			return 
+			return
 		fi
 	else
-		echo "FAIL: $3"
+		echo "FAIL: $global_comment"
 		(( errors++ ))
 		if (( short_circuit ))
 		then
-			exit 1 
+			exit 1
 		fi
 		return
 	fi
 }
 
-# ensure that the command retured ok, and that the output does NOT contain
-# the indicated string/pattern
-# parms:  file "pattern" "message"
+# ensure that the command retured ok (or failed if -f set), and that the output does NOT contain
+# the indicated string/pattern.
+# parms:  file "pattern"
 function validate_missing
 {
 	typeset not=""
@@ -136,18 +141,18 @@ function validate_missing
 	then
 		if ! grep -q "$2" $1
 		then
-			echo "OK:   $3"
+			echo "OK:   $global_comment"
 		else
-			echo "FAIL: $fmsg, but contained unexpected data: ($2) $3"
+			echo "FAIL: $fmsg, but contained unexpected data: ($2) $global_comment"
 			(( errors++ ))
 			if (( short_circuit ))
 			then
-				exit 1 
+				exit 1
 			fi
-			return 
+			return
 		fi
 	else
-		echo "FAIL: $3"
+		echo "FAIL: $global_comment"
 		(( errors++ ))
 		return
 	fi
@@ -159,8 +164,11 @@ function suss_rid
 	awk '$1 == "id" { print $NF; exit( 0 ) }' $1
 }
 
+# copy contents of $1 to outfile giving a separation line with $2 as a comment
+# sets global_comment to $2 for other functions to use
 function capture
 {
+	global_comment="$2"
 	if [[ -n $out_file ]]
 	then
 		echo "===== $2 =====" >>$out_file
@@ -178,9 +186,9 @@ function usage
 	echo "p1vm1 (etc) are the VM names for project 1 and project 2"
 }
 
-function run 
+function run
 {
-	last_cmd="$@" 
+	last_cmd="$@"
 	"$@"
 }
 
@@ -200,11 +208,11 @@ user=$OS_USERNAME					# -u overrides
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-e) short_circuit=1;;
 		-h)	host="-h $2"; shift;;
 		-o)	out_file=$2; shift;;
-		-p)	proj_list="$2"; shift;;
+		-p)	project_list="$2"; shift;;
 		-s)	skip_long=1;;			# short tests only
 		-S)	secure="-s";;
 		-u) user=$2; shift;;
@@ -225,10 +233,10 @@ project1=${project_list:-cloudqos:cloudqos}
 project2=${project1##*:}
 project1=${project1%%:*}
 
-vma=${1:-esd_ss1,esd_ss2}			# project 1
+vma=${1:-esd_ss1}			# project 1
 p1vm_list=( ${vma//,/ } )
 
-vma=${2:-esd_ss1,esd_ss2}			# project 2 (by default these are the same project, so same vms)
+vma=${2:-esd_ss2}			# project 2
 p2vm_list=( ${vma//,/ } )
 
 
@@ -249,53 +257,99 @@ then
 	>$out_file
 fi
 
-# = = = = = = = = =  tests below here = = = = = = = = = = 
+# = = = = = = = = = = = = = = = = = =  tests below here = = = = = = = = = = = = = = = = = = =
 
-# ----- simple connectivity and response test (ping)
+# ----- simple connectivity and response test (ping) ---------------------------------
 run tegu_req $secure $host ping >$single_file
 capture  $single_file "ping test"
-validate_ok $single_file "ping"
+validate_ok $single_file
+if grep -q POST $single_file
+then
+	echo "ABORT:  tegu seems to not be running"
+	exit 1
+fi
 
-# ----- list host and network topology graph tests
-run tegu_req $secure $host listhosts >$single_file
+# ----- list host and network topology graph tests ---------------------------------
+run tegu_req -k project="$project1" $secure $host listhosts >$single_file
 capture  $single_file "list hosts"
-validate_ok $single_file "listhosts"
+validate_ok $single_file
+count=0
+for v in $p1vm_list
+do
+	if ! grep -q $v $single_file
+	then
+		echo "FAIL: $v not found in list host output for project $project1"
+		(( count++ ))
+	fi
+done
+
+if (( count ))
+then
+	cat $single_file
+	echo "unable to continue with missing VM"
+	exit 1
+else
+	echo "OK:   found all project1 VMs in the listhost output"
+fi
+
 
 run tegu_req $secure $host graph >$single_file
 capture  $single_file "network graph"
-validate_ok $single_file "graph"
+validate_ok $single_file
 
 
-# ----- create a single project reservation and verify
-run run tegu_req -T $secure $host reserve 10M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
-capture $single_file "create reservation"
-validate_ok $single_file "reserve single project"
+# ----- create a single project reservation and verify ---------------------------------
+run tegu_req -T $secure $host reserve 10M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reserve single project"
+validate_ok $single_file
 
 suss_rid $single_file | read rid
 
-#------ reservation verification and deletion
+
+#------ reservation verification, dup rejected, and deletion ---------------------------------
 if [[ -n $rid ]]				# if we found the req id, list reservations and ensure it's listed, then delete
 then
 	run tegu_req $secure $host listres >$single_file
 	capture $single_file "list reservation"
-	validate_contains $single_file "id.*$rid" "list reservation"
+	validate_contains $single_file "id.*$rid"
+
+	# attempt a duplicate; should fail
+	run tegu_req -T $secure $host reserve 10M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+	capture $single_file "ensure dup reservations are rejected"
+	validate_fail $single_file
 
 	run tegu_req $secure $host cancel $rid not-my-cookie >$single_file		# should fail
-	capture $single_file	"cancel with bad cookie"
-	validate_fail $single_file "prevents reservation cancel with invalid cookie"
+	capture $single_file	"prevents reservation cancel with invalid cookie"
+	validate_fail $single_file
 
 	run tegu_req $secure $host cancel $rid cookie	>$single_file			# this should be successful
-	capture $single_file	"cancel with good cookie"
-	validate_ok $single_file "cancel reservation"
+	capture $single_file	"cancel reservation"
+	validate_ok $single_file
+	echo "INFO: waiting 20s for reservation cancel to take effect"
+	sleep 20
 
 else
 	echo "WARN: no reservation ID; list and cancel functions not tested"
 fi
 
-# ----- verify reservation expires 
+# ----- reservation with 0 bandwidth is rejected --------------------------------------------
+run tegu_req -T $secure $host reserve 0 +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reject reservation with 0 bandwidth"
+validate_fail $single_file
+
+run tegu_req -T $secure $host reserve 10M,0 +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reject reservation with 10M,0 bandwidth"
+validate_fail $single_file
+
+run tegu_req -T $secure $host reserve 0,10M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reject reservation with 0,10M bandwidth"
+validate_fail $single_file
+
+
+# ----- verify reservation expires  ---------------------------------
 if (( skip_long == 0 ))
 then
-	run tegu_req -T $secure $host reserve 10M +30 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
+	run tegu_req -T $secure $host reserve 10M +30 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
 	capture $single_file "reservation for expiration test"
 	validate_ok $single_file "resere single project"
 	suss_rid $single_file | read rid
@@ -304,8 +358,8 @@ then
 		echo "INFO: waiting 40s for reservation to expire"
 		sleep 40
 		run tegu_req $secure $host listres >$single_file
-		capture $single_file "list reservations after expiration should have happened"
-		validate_missing $single_file "id.*$rid" "reservation natural expiration"
+		capture $single_file "reservation natural expiration"
+		validate_missing $single_file "id.*$rid"
 	else
 		echo "WRN: no reservation id found trying to verify reservation natural expiration"
 	fi
@@ -314,60 +368,79 @@ else
 fi
 
 
-# ----- verify reservation rejected for bad token and project
-run tegu_req $secure $host reserve 10M +30 bad-token/$project1/${p1vm_list[0]},bad-token/$project1/${p1vm_list[1]} cookie >$single_file
-capture $single_file "reservation attempt with bad token"
-validate_fail $single_file "reservation with bad token was rejected"
+# ----- verify reservation rejected for bad token and project ---------------------------------
+run tegu_req $secure $host reserve 10M +30 bad-token/$project1/${p1vm_list[0]},bad-token/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reservation with bad token is rejected"
+validate_fail $single_file
 suss_rid $single_file | read rid
 
-run tegu_req -T $secure $host reserve 10M +30 %t/bad_project/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
-capture $single_file "reservation attempt with bad project"
-validate_fail $single_file "reservation with bad project was rejected"
+run tegu_req -T $secure $host reserve 10M +30 %t/bad_project/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reservation with bad project is rejsected"
+validate_fail $single_file
 
 
-# ----- verify user link caps can be set
+# ----- verify user link caps can be set ------------------------------------
 run tegu_req $secure $host setulcap $project1 1 >$single_file
-capture $single_file "set user link cap to 1%"
-validate_contains $single_file "comment = user link cap set for.*1[%]*$" "set user link cap to 1%"
+capture $single_file "can set user link cap (1%)"
+validate_contains $single_file 'comment = user link cap set for.*1[%]*$'
 
-# ----- verify link cap is enforced (assuming 10G links, with 1% cap, a request for 500M should fail)
+# ----- verify link cap is enforced (assuming 10G links, with 1% cap, a request for 500M should fail) ---------------------
 #trace="set -x"
-run tegu_req -T $secure $host reserve 500M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
-capture $single_file "reservation attempt in excess of user link cap (expect fail)"
-validate_contains -f $single_file "unable to generate a path" "rejected reservation attempt for more than user link cap (1%)"
+run tegu_req -T $secure $host reserve 500M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reservation rejected when exceeds user cap"
+validate_contains -f $single_file "unable to generate a path"
 trace="set +x"
 
-run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
-capture $single_file "user allowed to reserve less than link cap setting"
-validate_ok $single_file "allowed to reserve less than 1% link cap"
+run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reservation accepted when less than link cap"
+validate_ok $single_file
 
-# ---- set zero link cap
+# ---- set zero link cap ----------------------------------------------------
 run tegu_req $secure $host setulcap $project1 0 >$single_file
 capture $single_file "set user link cap to 0"
-validate_contains $single_file "comment = user link cap set for" "set user link cap to 0"
+validate_contains $single_file "comment = user link cap set for"
 
-# ---- ensure reservation request rejected when limit is 0
-run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
-capture $single_file "test reservation when link cap set to 0"
-validate_fail $single_file "rejected reservation when user link cap set to 0"
+# ---- ensure reservation request rejected when limit is 0 ----------------------------------------------------
+run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+capture $single_file "reservation rejected when link cap is 0"
+validate_fail $single_file
 
-# ---- return link cap to sane value
+# ---- return link cap to sane value ----------------------------------------------------
 run tegu_req $secure $host setulcap $project1 90 >$single_file
-capture $single_file "set user link cap back up to 90%"
-validate_ok $single_file "reset user link cap to 90% for further testing"
+capture $single_file "user link cap can be set back up (90%)"
+validate_ok $single_file
 
 
-# ------ VM to  external reservation
-run tegu_req -T $secure $host reserve 5M +30 %t/$project1/${p1vm_list[0]},!//135.207.01.01 cookie >$single_file
-capture $single_file "VM to external IP reservation test"
-validate_ok $single_file "VM to external IP reservation test"
+# ------ oneway reservation testing ------------------------------------------------
+run tegu_req -T $secure $host owreserve 10M +90 %t//${p1vm_list[0]},!//135.207.43.60 owcookie voice >$single_file
+capture $single_file "oneway reservation can be created"
+validate_ok $single_file
+
+suss_rid $single_file | read rid
+if [[ -n $rid ]]
+then
+	run tegu_req cancel all owcookie >$single_file
+	capture $single_file "oneway reservation can be cancelled"
+	validate_ok $single_file
+	echo "INFO: pausing 20s to let cancel fall off"
+	sleep 20
+	run tegu_req listres | grep -c $rid |read count
+	if (( count ))
+	then
+		echo "FAIL: still found oneway reservation in list after cancel"
+	else
+		echo "OK:   oneway reservation cancel successfully removed the resrvation from the list"
+	fi
+else
+	echo "SKIP: skipping oneway cancel test: no reservation id found"
+fi
 
 # ------ multi-project "half" reservations
-# NOTE: if this fails, ensure that the VM in both projects have floating IP addresses attached. 
+# NOTE: if this fails, ensure that the VM in both projects have floating IP addresses attached.
 #trace="set -x"
-run tegu_req -T $secure $host reserve 5M +30 %t/$project1/${p1vm_list[0]},!/$project2/${p2vm_list[0]} cookie >$single_file
-capture $single_file "multi-project reservation test"
-validate_ok $single_file "multi-project reservation (half)"
+run tegu_req -T $secure $host reserve 5M +30 %t/$project1/${p1vm_list[0]},!/$project2/${p2vm_list[0]} cookie voice >$single_file
+capture $single_file "can make half of a multi project reservation"
+validate_ok $single_file
 trace="set +x"
 
 suss_rid $single_file | read rid
@@ -375,47 +448,86 @@ suss_rid $single_file | read rid
 if [[ -n $rid ]]
 then
 	run tegu_req $secure $host listres >$single_file
-	capture $single_file "list mulit-project reservation"
-	validate_contains $single_file "id.*$rid" "list reservation after mulit-project reservation created"
+	capture $single_file "list reservation following a multi project reservation"
+	validate_contains $single_file
 fi
 
 
+# ----- cancel all reservations with a given cookie ----------------------------------------------------
+run tegu_req listres >$single_file
+capture $single_file "reservation state before cancel tests"
 
-# ----- multiple concurrent reservations
+run tegu_req cancel all invalid-cookie >$single_file
+run tegu_req listres >$single_file.more
+cat $single_file.more >>$single_file
+capture $single_file "canceling all with non-matching cookie leave non-matching reservations"
+grep -c time $single_file.more | read count
+if (( count <= 0 ))
+then
+	echo "FAIL:	cancel all reservations with cookie leave non-matching reservations"
+else
+	echo "OK:   cancel all left non-matching reservations"
+fi
+rm -f $single_file.more
+
+run tegu_req cancel all cookie >$single_file
+capture $single_file "cancel all matching cookie"
+tegu_req listres >$single_file
+grep  "time =" $single_file| grep -c -v "time.*=.*15" | read count
+if (( count > 0 ))
+then
+	echo "FAIL:	reservations with cookie remain"
+	capture $single_file "cookie reservations remained"
+	grep  "time =" $single_file| grep  -v "time.*=.*15"
+else
+	echo "OK:   delete of all reservations with the same cookie"
+fi
+
+run tegu_req listres >$single_file
+capture $single_file "reservation state after cancel tests"
+
+
+# ----- multiple concurrent reservations ----------------------------------------------------
 if (( ${#p1vm_list[*]} < 4 ))
 then
 	echo "INFO: skipping concurrent reservation test; requires 4 VM names for project 1 on command line"
 else
-	run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie >$single_file
-	capture $single_file "first reservation in multiple reservation"
-	validate_ok $single_file "first reservation in concurrent reservation"
+	echo "INFO: pausing 20s to allow previous reservations to expire"
+	sleep 20
+	run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
+	capture $single_file "create first reservation in multiple reservation test"
+	validate_ok $single_file
 	suss_rid $single_file | read rida
 
 	if [[ -n $rida ]]
 	then
-		run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[2]},%t/$project1/${p1vm_list[3]} cookie >$single_file
-		capture $single_file "second reservation in multiple reservation"
-		validate_ok $single_file "second reservation in concurrent reservation"
+		run tegu_req -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[2]},%t/$project1/${p1vm_list[3]} cookie voice >$single_file
+		capture $single_file "able to make second reservation in multiple reservation test"
+		validate_ok $single_file
 		suss_rid $single_file | read ridb
 		
 		if [[ -n $ridb ]]
 		then
 			run tegu_req $secure $host listres >$single_file
-			capture $single_file "concurrent reservations list reservation"
-			validate_contains $single_file "id.*$rida" "concurrent list reservation has first reservation"
-			validate_contains $single_file "id.*$ridb" "concurrent list reservation has second reservation"
+			capture $single_file "list concurrent reservations"
+
+			global_comment="concurrent list reservation has first reservation"
+			validate_contains $single_file "id.*$rida" 
+			global_comment="concurrent list reservation has second reservation"
+			validate_contains $single_file "id.*$ridb" 
 		
 			run tegu_req $secure $host cancel $rida cookie >$single_file		# should fail
 			capture $single_file	"cancel first of the concurrent reservations"
-			validate_ok $single_file "cancel first of concurrent reservations"
+			validate_ok $single_file
 
-			echo "INFO: waiting 20s before checking reservation state (allow cancelled reservation to clear)"
+			echo "INFO: waiting 20s before checking reservation state <allow cancelled reservation to clear>"
 			sleep 20
 
 			run tegu_req $secure $host listres >$single_file
-			capture $single_file "list reservation after cancelling the first"
-			validate_missing $single_file "id.*$rida" "cancelled concurrent resrvation is not listed"
-			validate_contains $single_file "id.*$ridb" "second concurrent reservation continues to be listed after first cancelled"
+			capture $single_file "list contains second reservation after first in multiple reservation test cancelled"
+			validate_missing $single_file "id.*$rida" 
+			global_comment="second concurrent reservation continues to be listed after first cancelled"
+			validate_contains $single_file "id.*$ridb" 
 		else
 			echo "WARN: could not find reservation id for second reservation; rest of concurrent reservation tests skipped"
 		fi
