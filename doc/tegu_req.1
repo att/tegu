@@ -1,0 +1,379 @@
+.\"
+.\"		tegu_req Manual Page
+.\"
+.\"     Date:		14 Jun 2015
+.\"		Author:		E. Scott Daniels
+.\"                 Robert Eby
+.\"
+.\"     Mods:		14 Jun 2015 - Created
+.\"
+.TH TEGU_REQ 1 "Tegu Manual"
+.CM 4
+.SH NAME
+tegu_req \- the command line interface to Tegu
+.SH SYNOPSIS
+\fBtegu_req\fP [\fB-d\fP] [\fB-f\fP] [\fB-h host[:port]\fP] [\fB-j\fP] [\fB-K\fP] [\fB-k key=value\fP] [\fB-r name\fP] [\fB-s\fP] [\fB-t token\fP] [\fB-T\fP] \fBcommand\fP
+
+.SH DESCRIPTION
+\fItegu_req(1)\fR provides a command line interface to the running Tegu system in an
+OpenStack cloud.
+It gathers command arguments, does some preliminary validation upon them, and then runs
+the command by sending the command to Tegu's HTTP API.
+\fItegu_req\fP will normally be run on the same machine as the running Tegu system, however
+it can be run on a different machine if the \fB-h\fP option is used.
+It requires the \fIrjprt\fP binary be in the user's $PATH.
+.P
+For details on the Tegu HTTP API, look at \fItegu(8)\fP.
+
+.SH COMMAND LINE OPTIONS
+\fItegu_req\fR interprets the following options:
+.\" ==========
+.TP 8
+.B \-d
+Causes JSON output from Tegu to be formatted in a dotted hierarchical style.
+The default is to display the output in a indented, nested style (but see also -j below).
+.\" ==========
+.TP 8
+.B \-f
+Causes \fItegu_req\fP to prompt for a username and password, even if these are already found
+in the OS_USERNAME and OS_PASSWORD environment variables.
+This option is only useful when the -T option is also used.
+.\" ==========
+.TP 8
+.B \-h host[:port]
+Use this option if Tegu is running on some other host, or on a non-standard port.
+Normally Tegu is assumed to be running on the localhost, on port 29444.
+.\" ==========
+.TP 8
+.B \-j
+Causes JSON output from Tegu to be sent directly to the output (but see also -d above).
+.\" ==========
+.TP 8
+.B \-K
+Causes tegu_req to use the Keystone command line interface, rather than the direct OpenStack
+Identity API, when needed to generate an authentication token.
+Only useful if -T is not used.
+.TP 8
+.B \-k key=value
+Causes extra arguments, in the form of key=value, to be passed to Tegu for certain requests.
+The commands where this is used are: listres, listhosts, graph, reserve, steer.
+.TP 8
+.B \-r name
+Allow specification of a "root" name for the JSON output.
+The default root name is the name of the command (e.g. "graph" when using the graph command).
+.TP 8
+.B \-s
+Causes tegu_req to use secure TLS (HTTPS) protocol for requests to Tegu.
+.TP 8
+.B \-t token
+Allows a Keystone token to be supplied for privileged commands.
+.TP 8
+.B \-T
+Causes a token to be generated using the OS_USERNAME, OS_PASSWORD, OS_TENANT_NAME, and OS_AUTH_URL
+environment variables.
+If these variables are not in the environment, they will be prompted for, and if -f is used,
+the username and password will always be prompted for.
+
+.SH COMMANDS
+The command that Tegu should run follows the options, and is one of the following.
+
+.SS Bandwidth Allocation Commands
+.TP 8
+.B reserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 [cookie [dscp]]
+The reserve command is used to reserve bandwidth between two endpoints in the network.
+It expects a bandwidth, host pair, and start/end time stamps on the command line and causes
+a reservation request to be sent to tegu.
+.IP
+\fBbandwidth\fP Is the desired amount of bandwidth to reserve between hosts.
+May be supplied as 10K or 10,000 etc.
+Bandwidth may also be supplied as two separated values: bandwidth_in,bandwidth_out.
+When specified this way, the inbound value will be used to reserve bandwidth for traffic
+from host2 (in) to host1, and the outbound value will be used to reserve bandwidth for
+traffic from host1 (out) to host2.
+If only a single value is given, then that value is used to set bandwidth in each
+direction (middle switches will have 2x the value specified).
+.IP
+\fB[start-]expiry\fP
+Defines the starting and ending time of the reservation.
+If start is omitted, then the current time is assumed.
+Both times should be UNIX timestamps.
+The time window specification can also be supplied as \fB+nnn\fP which will be interpreted
+as an expiry time nnn seconds from the current time.
+(If the time window defined by this parameter is too small, Tegu will refuse to establish
+a reservation.)
+.IP
+\fBhost1,host2\fP
+TODO
+.IP
+\fBcookie\fP
+Is a string that is used when deleting a reservation.
+In theory this cookie is known only to the reservation creator and tegu will only allow a
+reservation to be deleted if a matching cookie is supplied.
+The cookie may not contain any spaces, and does not need to be unique across reservations.
+.IP
+\fBdscp\fP
+The DSCP value to use.
+Must be between 0 and 64.
+The default, if not specified is WTF?
+
+.TP 8
+.B owreserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie [dscp]
+A one-way bandwidth reservation is necessary when the second endpoint in the pair is in a
+different project, or lies outside of the cloud environment, AND the NAT-ting router is
+not a neutron router.
+In this situation, Tegu can only establish ingress DSCP markings and rate limiting for the
+reservation, and all DSCP markings will persist (there is no spot where Tegu generated
+flow-mods can turn them off before the packets leave our controlled environment).
+The one-way reservation request is similar to the general bandwidth reservation request
+with the notable difference that the order of the endpoints does matter: the internal,
+or source, endpoint must be defined first.
+
+.TP 8
+.B cancel reservation-id [cookie]
+The cancel command allows a reservation to be removed from Tegu.
+The reservation ID that was returned when the reservation was made, and the cookie if one
+was given on the reservation, are required.
+
+.TP 8
+.B setdiscount value
+Set the discount value to \fBvalue\fP.
+The value is a number that may be suffixed with a
+\fBM\fP or \fBMB\fP (million),
+\fBG\fP or \fBGB\fP (billion),
+\fBK\fP or \fBKB\fP (thousand),
+\fBm\fP or \fBMiB\fP (1024^2),
+\fBg\fP or \fBGiB\fP (1024^3),
+or
+\fBk\fP or \fBKiB\fP (1024).
+
+.TP 8
+.B setulcap tenant percentage
+Each user (tenant in OpenStack terminology) may reserve up to a maximum percentage of any
+network link as defined in the Tegu configuration file.
+If it is necessary to treat some users differently, with either a higher or lower limit
+than is set in the configuration file, the setulcap API request can be used.
+The request supplies the user name or ID and the maximum percentage (e.g. 15%) that
+should be enforced for the given user.
+The following illustrates the request syntax which would allow reservations for the
+tenant1 group to use as much as 25% of any link:
+.IP
+\f(CWtegu_req setulcap tenant1 25%\fP
+.IP
+\fBCAUTION:\fP Setting the user capacity to a value that is lower than the user's current
+reservation usage will prevent the user from creating new reservations, but will not have
+any affect on the existing reservations.
+The administration staff can cancel reservations if needed, however they are not
+automatically affected by this command.
+This command only sets the limit for future requests made by the user.
+.TP 8
+.B listulcap
+The listulcaps command causes tegu to generate a list of all of the user link limits that
+are currently set (see setulcap).
+The list includes the default which is set from the config file. 
+
+.TP 8
+.B listres
+The \fIlistres\fP command causes Tegu to return the current list of active (flow-mods
+should already be in place) and future reservations.
+For each reservation the following information is listed:
+.IP
+\(bu The reservation state (ACTIVE or PENDING).
+.IP
+\(bu The time remaining until the reservation expires, or the time before it becomes active.
+.IP
+\(bu The reserved bandwidth in bytes/sec.
+.IP
+\(bu The hosts (VMs) involved.
+.IP
+\(bu The reservation ID assigned by Tegu (necessary to cancel the reservation).
+
+.TP 8
+.B listqueue
+Lists all queues on the switches or bridges being managed.
+
+.SS Topology Commands
+.TP 8
+.B graph
+The graph request causes tegu to return a description of the network as it has been described
+by floodlight, or by the physical network description file.
+The graph is a fairly lengthy representation of the network.
+.TP 8
+.B listhosts
+Generates a JSON list of all hosts known to Tegu.
+The list includes which includes host name, VM UUID, MAC address, IP address(es), name, switch(es) and port(s).
+
+.SS Flow Steering Commands
+.TP 8
+.B steer {[start-]end|+seconds} tenant src-host dest-host mbox-list [cookie]
+TODO
+
+.SS Mirroring Commands
+.TP 8
+.B add-mirror [start-]end port1[,port2...] output [cookie] [vlan]
+This command causes a mirror to be set up on one or more ports, mirroring traffic to an output port or GRE tunnel.
+.IP
+.B [start-]end
+As with the reservations API, the start and end values indicate the time period when the
+mirroring should be in effect.
+Both times are normally UNIX timestamps.
+If start is omitted, or precedes the current time, then the current time is used for the
+start of the mirroring period.
+If the end time is specified as "unbounded", then it is set to a time very far in the
+future (1/1/3000 to be exact).
+Needless to say, end should be greater than start, or the request is rejected.
+The time window specification can also be supplied as \fB+nnn\fP which will be interpreted
+as an expiry time nnn seconds from the current time.
+Regardless of how the end time is specified, if the end time is less than the start time
++ \fImin_mirror_expiration\fP (where \fImin_mirror_expiration\fP, in seconds, is specified
+in the Tegu configuration file), then the request is rejected.
+.IP
+.B port1[,port2...]
+This specifies the port(s) to be mirrored.
+Traffic going both to and from the port(s) is mirrored (e.g. there is no uni-directional mirroring).
+If multiple ports are listed, a separate mirror will be set up per physical host.
+That is, if all ports reside on one physical machine, then one mirror will be created and returned.
+If the ports are on multiple machines, then several mirrors may be constructed.
+In this scenario, it is possible that only a subset of the mirrors may be constructed successfully;
+the output JSON will indicate which mirrors succeeded.
+Ports are specified in the same way as hosts are for the Tegu reserve request; e.g.
+.IP
+name or IP - if not in "tenant aware mode", the name or IP address of the host attached to the port.
+.IP
+token/tenant/host - for "host" (with 1 port only) on "tenant".
+.IP
+token//vm_uuid - for the host with UUID "vm_uuid"
+.IP
+mac:mac ID - names the port directly using the MAC id of the VM attached to the port.
+Tegu will attempt to determine which physical machine the bridge is on and set up the mirror appropriately.
+
+.IP
+.B output
+Specifies where the mirror should be directed to.
+This may either be another port, or a GRE tunnel.
+If specified as an IP address (IPv4 or IPv6) or DNS name, then a new GRE endpoint is constructed
+on the \fBbr-int\fP bridge (with the specified IP address), and the mirror is connected to this endpoint.
+If specified as a port (using the same syntax as for ports above), then the mirror is
+connected to the pre-existing port.
+Note: initially, only local ports on \fBbr-int\fP will be supported, that is sending mirroring
+output to a port on a different host from the mirrored ports will not be initially
+supported, as it requires flow steering.
+When mirroring to a GRE tunnel, the IP address of the tunnel must be in a list of valid address
+ranges (\fIallowed_gre_addr\fP) provided in the Tegu configuration when Tegu starts up
+(which may possibly include 0.0.0.0/0 or 2001::/16).
+The output parameter may also be specified as "label:<label>", where <label> refers to a
+label in the Tegu configuration file (of the form label=<ip address>).
+This allows GRE endpoints to be pre-specified.
+.IP
+.B cookie
+Is an optional string that is used to provide a minimum of security for the mirror.
+If provided, it is required when deleting (del-mirror) or viewing (show-mirror) the mirror.
+The cookie may not contain any spaces, and does not need to be unique across mirror requests.
+.IP
+.B vlan
+Is an optional string that can be used to specify one or more (comma separated) VLANs to
+be added to the create mirror request passed to openvswitch.
+If provided, it must consist of a comma separated list of VLAN ids from 0 to 4095.
+If the string is provided and is syntactically incorrect, the mirror request is rejected.
+
+.TP 8
+.B del-mirror name [cookie]
+This command deletes the mirror \fIname\fP.
+The \fIcookie\fP argument is optional, but must be provided and match the cookie used to create the mirror,
+if the mirror was created with a cookie.
+This deletes the mirror immediately.
+If the mirror was active, and directing to a GRE output port, this GRE port is also deleted.
+The name is the name of the mirror that Tegu returned when the mirror was initially created,
+and the full URL is the url returned.
+.TP 8
+.B list-mirrors
+This command displays all the mirrors that Tegu knows about, along with their access URLs.
+.TP 8
+.B show-mirror name [cookie]
+This command displays details about the mirror \fIname\fP.
+The \fIcookie\fP argument is optional, but must be provided and match the cookie used to create the mirror,
+if the mirror was created with a cookie.
+
+.SS Miscellaneous Commands
+.TP 8
+.B ping
+This command is used to check connectivity to the Tegu system itself.
+tegu_req will attempt to contact the main tegu process, and report back as to whether it was successful.
+
+.TP 8
+.B refresh [ vmname | tenant/vmname ]
+When a user migrates a VM they are expected to cancel and reissue reservation requests before
+and after the migration of any VM that is a apart of an existing reservation (whether future
+or active).
+The operations staff may issue a privileged command which refreshes any existing reservations
+for a VM that has already been migrated.
+Following the migration of a VM, the refresh command will reset reservations that were associated
+with the VM, and will preserve reservation related information (name and cookie) such that
+the reservation owner can still manage the reservation.
+The following syntax illustrates how the tegu_req command line interface can be used to
+refresh the reservations associated with the VM named \fIdemovm8\fP in the \fIdemo\fP tenant:
+
+tegu_req refresh demo/demovm8
+
+.TP 8
+.B verbose level [subsystem]
+The verbose command allows the verbosity level to be adjusted.
+The level affects what diagnostics are written to the standard error device.
+The larger the value the chattier Tegu is.
+Tegu supports a two level verbosity specification.
+The 'master' level is applied to all components of Tegu.
+If a specific component name is given with the desired level, only that component will be
+more chatty than the current master setting.
+(Setting a component level lower than the master setting will not have the effect of
+keeping the component quieter than the others.)
+Level is a numeric value (0 is 'off'), and component is one of the following strings:
+.IP
+.B master
+Sets the level for all components.
+This is the default if no component is supplied, or if a component name is given, and is not recognized.
+.IP
+.B osif
+Sets the level for the OpenStack interface component
+.IP
+.B resmgr
+Sets the level for the Reservation manager component
+.IP
+.B net
+Sets the level for the Network manager component
+.IP
+.B fq
+Sets the level for the flowmod/queue interface component
+.IP
+.B http
+Sets the level for the HTTP api component
+
+.TP 8
+.B listconns [ name [ name] ... | < file ]
+The listconns request accepts a host name as a parameter and requests that tegu list all
+known switch connections associated with the name.
+An OpenStack VM ID, or the host's IP address may be given in place of the name parameter,
+and if multiple names are given on the command line, a request for each will be made.
+If name is omitted from the command line, the script will read the names from standard in.
+An example listconns command is shown below which will list all three hosts:
+.IP
+\f(CWtegu_req listconns vm1 vm2 vm3\fP
+.IP
+If tegu is running in project (tenant) mode, then the project ID (tenant ID) must be
+prepended to the VM name (e.g. cca822aceabb4aa3ac6cb6ff065a82de/vm1)
+
+.SH ENVIRONMENT
+.TP 15
+OS_TENANT_NAME
+.TP
+OS_USERNAME
+.TP
+OS_PASSWORD
+These OpenStack environment variables specify the tenant, user name, and password to use
+when asking Keystone to generate a token.
+If they are not in the environment, they will be prompted for if a token is needed.
+.TP
+OS_AUTH_URL
+This OpenStack environment variables specifies the URL to use when contacting Keystone.
+If it is not in the environment, it will be prompted for if a token is needed.
+
+.SH SEE ALSO
+rjprt(1), tegu.cfg(5), tegu(8)
