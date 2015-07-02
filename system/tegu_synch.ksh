@@ -19,6 +19,8 @@
 #
 #	Mod:		14 Jan - added provision to reload that will search for an old style name (no host)
 #					if one with a host cannot be found.
+#				02 Jul 2015 - correct bug that allowed an old gzip file to be used when newer 
+#					checkpoint files exist.
 # --------------------------------------------------------------------------------------------------
 
 trap "rm -f /tmp/PID$$.*" 1 2 3 15 EXIT
@@ -80,7 +82,7 @@ export TEGU_ROOT=${TEGU_ROOT:-/var}
 logd=${TEGU_LOGD:-/var/log/tegu}
 libd=${TEGU_LIBD:-/var/lib/tegu}
 etcd=${TEGU_ETCD:-/etc/tegu}
-chkptd=$TEGU_ROOT/chkpt
+chkptd=$TEGU_LIBD/chkpt
 tegu_user=${TEGU_USER:-tegu}
 
 ssh_opts="-o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
@@ -172,15 +174,21 @@ else
 	bfile=$libd/synch_backup.tgz		# we'll take a snapshot of what was there just to prevent some accidents
 	tar -cf - chkpt | gzip >$bfile
 
-	gzip -dc $synch_file | tar -xf - 		# unload the synch file into the directory
-	echo "synch file ($synch_file) was restored into $PWD/chkpt    [OK]"
+	newer_list=$( find $chkptd -name "resmgr_*" -newer $synch_file )
+	if [[ -n $newer_list ]]
+	then
+		echo "WRN: did not restore from tar, $synch_file is older than some checkpoint files"
+	else
+		gzip -dc $synch_file | tar -xf - 		# unload the synch file into the directory
+		echo "synch file ($synch_file) was restored into $PWD/chkpt    [OK]"
 
-	# chef gets pissy if we do this, so we don't any more.
-	#restore_config chkpt/tegu.cfg					# restore the config files 
-	#ls chkpt/*.json | while read jfile
-	#do
-	#	restore_config $jfile
-	#done
+		# chef gets pissy if we do this, so we don't any more.
+		#restore_config chkpt/tegu.cfg					# restore the config files 
+		#ls chkpt/*.json | while read jfile
+		#do
+		#	restore_config $jfile
+		#done
+	fi
 fi
 
 exit 0
