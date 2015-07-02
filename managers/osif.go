@@ -1,5 +1,6 @@
 // vi: sw=4 ts=4:
 
+
 /*
 
 	Mnemonic:	osif -- openstack interface manager
@@ -74,6 +75,7 @@
 				01 Apr 2015 - Corrected bug introduced by requiring a validate token to have a non
 						empty host which is legit for steering.
 				16 Apr 2015 - Pick up and use a region parameter from the config file.
+				02 Jul 2015 - No longer bail from host list when a request turns up empty.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -82,10 +84,7 @@
 package managers
 
 import (
-	//"bufio"
-	//"errors"
 	"fmt"
-	//"io"
 	"os"
 	"strings"
 	"time"
@@ -326,21 +325,26 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	sep := ""
 
 	if os_refs == nil || len( os_refs ) <= 0 {
-		err = fmt.Errorf( "no openstack hosts in list to query" )
+		err = fmt.Errorf( "no openstack creds in list to query" )
 		return
 	}
 
+	
+	osif_sheep.Baa( 2, "physical host query starts" )
 	for k, ostk := range os_refs {
+		bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
+
 		if k != "_ref_" {
 			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )	
 			if err != nil {
-				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
+				osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
 				ostk.Expire()					// force re-auth next go round
-				return							// drop out on first error with no list
 			} else {
+				osif_sheep.Baa_some_reset( bs_class )			// reset on good attempt so 1st failure after good is logged
 				if *list != "" {
 					ts += sep + *list
 					sep = " "
+					osif_sheep.Baa( 3, "list of hosts was returned by %s  ", ostk.To_str() )	
 				} else {
 					osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
 				}
@@ -358,6 +362,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		}
 	}
 
+	osif_sheep.Baa( 2, "phys host query ends: %d hosts", len( cmap ) )
 	s = &ts
 	return
 }
@@ -689,7 +694,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
+					//osif_sheep.Baa( 2, "starting list host" )
 					msg.Response_data, msg.State = get_hosts( os_refs )
+					//osif_sheep.Baa( 2, "finishing list host" )
 				} else {
 					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI012]" )
 				}

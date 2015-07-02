@@ -62,7 +62,7 @@
 					Added support for 'one way' reservations (non-virtual router so no real endpoint)
 				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
 				18 Jun 2015 - Added oneway rate limiting and delete support.
-
+				02 Jul 2015 - Extended the phyiscal host refresh rate.
 */
 
 package managers
@@ -1076,7 +1076,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	}
 
 	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 						// tickle once, very soon after starting, to get a host list
-	tklr.Add_spot( int64( refresh ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// tickles us every once in a while to update host list
+	tklr.Add_spot( int64( refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// get a host list from openstack now and again
 	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network 
 	
 	for {
