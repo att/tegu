@@ -3,24 +3,24 @@
 /*
 
 	Mnemonic:	network
-	Abstract:	Manages everything associated with a network. This module contains a 
+	Abstract:	Manages everything associated with a network. This module contains a
 				goroutine which should be invoked from the tegu main and is responsible
 				for managing the network graph and responding to requests for information about
-				the network graph. As a part of the collection of functions here, there is also 
-				a tickler which causes the network graph to be rebuilt on a regular basis. 
+				the network graph. As a part of the collection of functions here, there is also
+				a tickler which causes the network graph to be rebuilt on a regular basis.
 
 				The network manager goroutine listens to a channel for requests such as finding
-				and reserving a path between two hosts, and generating a json representation 
+				and reserving a path between two hosts, and generating a json representation
 				of the network graph for outside consumption.
 
-				TODO: need to look at purging links/vlinks so they don't bloat if the network changes 
+				TODO: need to look at purging links/vlinks so they don't bloat if the network changes
 
 	Date:		24 November 2013
 	Author:		E. Scott Daniels
 
 	Mods:		19 Jan 2014 - Added support for host-any reservations.
-				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link. 
-				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint 
+				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link.
+				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint
 							loading until after the driver here has been entered and thus we've built
 							the first graph.
 				03 Apr 2014 - Support for endpoints on the path.
@@ -34,25 +34,25 @@
 				07 Jul 2014 - Added support for reservation refresh.
 				15 Jul 2014 - Added partial path allocation if one endpoint is in a different user space and
 							is not validated.
-				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
+				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when
 					vm names have a dash (gak).
 				29 Jul 2014 - Added mlag support.
-				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given. 
+				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given.
 				11 Aug 2014 - Corrected bleat message.
 				01 Oct 2014 - Corrected bleat message during network build.
 				09 Oct 2014 - Turned 'down' two more bleat messages to level 2.
 				10 Oct 2014 - Correct bi-directional link bug (228)
-				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly 
+				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly
 					setting the -S or -D flag for an external IP (#243).
 				12 Nov 2014 - Change to strip suffix on phost map.
 				17 Nov 2014 - Changes for lazy mapping.
-				24 Nov 2014 - Changes to drop the requirement for both VMs to have a floating IP address 
-					if a cross tenant reservation is being made. Also drops the requirement that the VM 
+				24 Nov 2014 - Changes to drop the requirement for both VMs to have a floating IP address
+					if a cross tenant reservation is being made. Also drops the requirement that the VM
 					have a floating IP if the reservation is being made with a host using an external
 					IP address.
-				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the 
+				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the
 					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
-					as the endpoint 'name'. 
+					as the endpoint 'name'.
 				20 Mar 2014 - Added REQ_GET_PHOST_FROM_MAC code
 				25 Mar 2015 - IPv6 changes.
 				30 Mar 2014 - Added ability to accept an array of Net_vm blocks.
@@ -62,7 +62,7 @@
 					Added support for 'one way' reservations (non-virtual router so no real endpoint)
 				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
 				18 Jun 2015 - Added oneway rate limiting and delete support.
-				02 Jul 2015 - Extended the phyiscal host refresh rate.
+ 				02 Jul 2015 - Extended the physical host refresh rate.
 */
 
 package managers
@@ -85,7 +85,7 @@ import (
 // this probably should be network rather than Network as it's used only internally
 
 /*
-	Defines everything we need to know about a network. 
+	Defines everything we need to know about a network.
 */
 type Network struct {				
 	switches	map[string]*gizmos.Switch	// symtable of switches
@@ -197,7 +197,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 }
 
 /*
-	Using a net_vm struct update the various maps. Allows for lazy discovery of 
+	Using a net_vm struct update the various maps. Allows for lazy discovery of
 	VM information rather than needing to request everything all at the same time.
 */
 func (net *Network) insert_vm( vm *Net_vm ) {
@@ -278,7 +278,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 
 
 /*
-	Given a user name find a fence in the table, or copy the defaults and 
+	Given a user name find a fence in the table, or copy the defaults and
 	return those.
 */
 func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
@@ -325,7 +325,7 @@ func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 		if phost_suffix != nil {								// if we added a suffix to the host, we must strip it away
 			stoks := strings.Split( toks[0], *phost_suffix )
 			dup_str = stoks[0]
-		} 
+		}
 		n.mac2phost[toks[1]] = &dup_str
 	}
 
@@ -353,14 +353,14 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 		}
 	}
 
-	net_sheep.Baa( 2, "built ip2vm map: %d entires", len( i2v ) )
+	net_sheep.Baa( 2, "built ip2vm map: %d entries", len( i2v ) )
 	return
 }
 
 
 /*
 	Accepts a list (string) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
-	the list based on spaces and adds each information segment to the queue map.  If ep_only is true, 
+	the list based on spaces and adds each information segment to the queue map.  If ep_only is true,
 	then we drop all middle link queues (priority-in priority-out).
 
 	(Supports gen_queue_map and probably not useful for anything else)
@@ -384,10 +384,10 @@ func qlist2map( qmap map[string]int, qlist *string, ep_only bool ) {
 }
 
 /*
-	Traverses all known links and generates a switch queue map based on the queues set for 
-	the time indicated by the timestamp passed in (ts). 
+	Traverses all known links and generates a switch queue map based on the queues set for
+	the time indicated by the timestamp passed in (ts).
 
-	If ep_only is set to true, then queues only for endpoints are generated. 
+	If ep_only is set to true, then queues only for endpoints are generated.
 
 	TODO:  this needs to return the map, not an array (fqmgr needs to change to accept the map)
 */
@@ -418,15 +418,15 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 }
 
 /*
-	Returns the ip address associated with the name. The name may indeed be 
-	an IP address which we'll look up in the hosts table to verify first. 
-	If it's not an ip, then we'll search the vm2ip table for it. 
+	Returns the ip address associated with the name. The name may indeed be
+	an IP address which we'll look up in the hosts table to verify first.
+	If it's not an ip, then we'll search the vm2ip table for it.
 
-	If the name passed in has a leading bang (!) meaning that it was not 
-	validated, we'll strip it and do the lookup, but will return the resulting 
-	IP address with a leading bang (!) to propigate the invalidness of the address.
+	If the name passed in has a leading bang (!) meaning that it was not
+	validated, we'll strip it and do the lookup, but will return the resulting
+	IP address with a leading bang (!) to propagate the invalidness of the address.
 
-	The special case !/ip-addrss is used to designate an external address. It won't
+	The special case !/ip-address is used to designate an external address. It won't
 	exist in our map, and we return it as is.
 */
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
@@ -615,7 +615,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		links, err = gizmos.Read_json_links( *flhost )
 		if err != nil || len( links ) <= 0 {
 			if host_list != nil {
-				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existant: %s", *flhost )
+				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *flhost )
 				links = gizmos.Gen_star_topo( *host_list )				// generate a dummy topo based on the host list
 			} else {
 				net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
@@ -919,7 +919,7 @@ func (n *Network) to_json( ) ( jstr string ) {
 }
 
 /*
-	Transfer maps from an old network grah to this one
+	Transfer maps from an old network graph to this one
 */
 func (net *Network) xfer_maps( old_net *Network ) {
 	net.vm2ip = old_net.vm2ip
@@ -1014,7 +1014,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 		if p := cfg_data["network"]["all_paths"]; p != nil {
 			find_all_paths = false
-			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use paths = {all|mlag|shortest}" )
+			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use find_paths = {all|mlag|shortest}" )
 		}
 
 		if p := cfg_data["network"]["find_paths"]; p != nil {
@@ -1039,7 +1039,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		}
 
 		if p := cfg_data["network"]["link_headroom"]; p != nil {
-			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacites down by
+			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacities down by
 		}
 
 		if p := cfg_data["network"]["link_alarm"]; p != nil {
@@ -1185,7 +1185,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 										req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
 									}
 								} else {
-									net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reesrvation of %s", p.Get_bandwidth() )
+									net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
 									req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
 								}
 							} else {
@@ -1426,7 +1426,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							req.Response_data = nil
 						}
 
-					case REQ_GETPHOST:							// given a name or IP address, return the physcial host
+					case REQ_GETPHOST:							// given a name or IP address, return the physical host
 						if req.Req_data != nil {
 							var ip *string
 
@@ -1564,7 +1564,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 					case REQ_SETDISC:
 						req.State = nil;	
-						req.Response_data = "";			// we shouldn't send anything back, but if caller gave a channel, be sucessful
+						req.Response_data = "";			// we shouldn't send anything back, but if caller gave a channel, be successful
 						if req.Req_data != nil {
 							d := clike.Atoll( *(req.Req_data.( *string )) )
 							if d < 0 {
@@ -1591,4 +1591,3 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		}
 	}
 }
-
