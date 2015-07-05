@@ -329,7 +329,7 @@ Level is a numeric value (0 is 'off'), and component is one of the following str
 .IP
 .B master
 Sets the level for all components.
-This is the default if no component is supplied, or if a component name is given, and is not recognized.
+This is the default if no component is supplied.
 .IP
 .B osif
 Sets the level for the OpenStack interface component
@@ -345,6 +345,12 @@ Sets the level for the flowmod/queue interface component
 .IP
 .B http
 Sets the level for the HTTP api component
+.IP
+.B agent
+Sets the level for the Agent manager component.
+.IP
+.B gizmos
+Sets the level for various library components that are used.
 
 .TP 8
 .B listconns [ name [ name] ... | < file ]
