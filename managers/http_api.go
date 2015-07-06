@@ -96,6 +96,7 @@ import (
 	"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/token"
 	"codecloud.web.att.com/gopkgs/ipc"
+	"codecloud.web.att.com/gopkgs/ostack"
 	"codecloud.web.att.com/gopkgs/security"
 
 	"codecloud.web.att.com/tegu/gizmos"
@@ -1088,6 +1089,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 									case "lib", "gizmos":
 										gizmos.Set_bleat_level( nv )
+
+									case "ostack_json":
+										ostack.Set_debugging( int( nv ) )			// this works backwards (setting 0 turns on for a short while)
 
 									default:
 										state = "ERROR"

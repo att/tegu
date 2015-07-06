@@ -538,6 +538,14 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			}
 		}
 	
+		p = cfg_data["osif"]["debug"]
+		if p != nil {
+			v := clike.Atoi( *p )
+			if v > -5 {
+				ostack.Set_debugging( v )
+			}
+		}
+
 		p = cfg_data["osif"]["region"] 
 		if p != nil {
 			def_region = p
