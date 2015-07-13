@@ -76,6 +76,8 @@
 						empty host which is legit for steering.
 				16 Apr 2015 - Pick up and use a region parameter from the config file.
 				02 Jul 2015 - No longer bail from host list when a request turns up empty.
+				13 Jul 2015 - Added work round openstack v2/v3 keystone issue with role verification
+						now must try all roles in our known universe.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -267,24 +269,39 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 /*
 	Given a token, return true if the token is valid for one of the roles listed in role.
 	Role is a list of space separated role names. 
+
+	2015 Jul 13
+		Bloody openstack is just broken.  we must run every project we know about in order to 
+		suss this information out becuase openstack doesn't return a proejct as a part of token information 
+		and given just a token it's not possible to tell whether it's associated with a project unless 
+		making a call that directly tries with the project name. Further, this opens a HUGE hole in security
+		as a user's roles are now valid across all projects, but I guess that's the openstack way.
 */
-func has_any_role( admin *ostack.Ostack, token *string, roles *string ) ( found bool, err error ) {
+func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( found bool, err error ) {
 
-	stuff, err := admin.Crack_token( token ) 						// return a stuff struct with details about the token
+	for _, v := range os_refs {
+		pname, _ := v.Get_project( )
+		osif_sheep.Baa( 2, "has_any_role: checking %s", *pname )
 
-	found = false													// assume the worst
-	if err == nil {
-		err = fmt.Errorf( "role not defined; %s", *roles )			// asume not
-		rtoks := strings.Split( *roles, "," )
-		for i := range rtoks {
-			if  stuff.Roles[rtoks[i]] {
-				err = nil 
-				found = true
-				return												// short out
+		stuff, err := admin.Crack_ptoken( token, pname, false )			// return a stuff struct with details about the token
+
+		found = false													// assume the worst
+		if err == nil {
+			err = fmt.Errorf( "role not defined; %s", *roles )			// asume not
+			rtoks := strings.Split( *roles, "," )
+			for i := range rtoks {
+				if  stuff.Roles[rtoks[i]] {
+					osif_sheep.Baa( 1, "has_any_role: verified in %s", *pname )
+					return	true, nil									// short out
+				}
 			}
 		}
+	}
+
+	if err != nil {
+		osif_sheep.Baa( 1, "unable to verify role: %s: %s", roles, err )
 	} else {
-		osif_sheep.Baa( 1, "unable to verify role: %s", err )
+		osif_sheep.Baa( 1, "unable to verify role: %s", roles )
 	}
 
 	return
@@ -330,21 +347,24 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	}
 
 	
-	osif_sheep.Baa( 2, "physical host query starts" )
+	osif_sheep.Baa( 2, "physical host query starts: %d sets of creds", len( os_refs ) )
 	for k, ostk := range os_refs {
 		bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
 
+ostack.Set_debugging( -10 )
+	osif_sheep.Baa( 2, "physical host query for %s", k )
 		if k != "_ref_" {
 			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )	
+	osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 			if err != nil {
 				osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
-				ostk.Expire()					// force re-auth next go round
+				//ostk.Expire()					// force re-auth next go round
 			} else {
 				osif_sheep.Baa_some_reset( bs_class )			// reset on good attempt so 1st failure after good is logged
 				if *list != "" {
 					ts += sep + *list
 					sep = " "
-					osif_sheep.Baa( 3, "list of hosts was returned by %s  ", ostk.To_str() )	
+					osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )	
 				} else {
 					osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
 				}
@@ -702,9 +722,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
-					//osif_sheep.Baa( 2, "starting list host" )
+					osif_sheep.Baa( 2, "starting list host" )
 					msg.Response_data, msg.State = get_hosts( os_refs )
-					//osif_sheep.Baa( 2, "finishing list host" )
+					osif_sheep.Baa( 2, "finishing list host" )
 				} else {
 					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI012]" )
 				}
@@ -769,7 +789,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					d := msg.Req_data.( *string )
 					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
 					if len( dtoks ) > 1 {
-						msg.Response_data, msg.State = has_any_role( os_admin, &dtoks[0], &dtoks[1] )
+						msg.Response_data, msg.State = has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
 					} else { 
 						msg.State = fmt.Errorf( "has_any_role: bad input data" )
 						msg.Response_data = false

@@ -147,7 +147,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.4/17065"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.4/17135"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

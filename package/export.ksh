@@ -50,7 +50,7 @@ function build_it
 ex_root=/tmp/${LOGNAME:=$USER}/export
 argv0="${0##*/}"
 dir=""
-compress_options""
+compress_options=""
 chatty=0
 rebuild=0			# -r sets to mark as a rebuild of a previous package so that last ver is not updated
 build=1				# force a build of binaries before exporting, -b turns off
