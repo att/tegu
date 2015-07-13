@@ -28,7 +28,8 @@
 # manual pages
 ../doc/rjprt.1 		/usr/share/man/man1/	664 gzip
 ../doc/tegu_req.1	/usr/share/man/man1/	664 gzip
-../doc/tegu.cfg.5 	/usr/share/man/man1/	664 gzip
+../doc/tegu.cfg.5 	/usr/share/man/man5/	664 gzip
+../doc/tegu.8	 	/usr/share/man/man8/	664 gzip
 
 # port mirroring
 ../agent/mirror/tegu_add_mirror usr/bin/
