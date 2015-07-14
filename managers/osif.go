@@ -351,11 +351,10 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	for k, ostk := range os_refs {
 		bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
 
-ostack.Set_debugging( -10 )
 	osif_sheep.Baa( 2, "physical host query for %s", k )
 		if k != "_ref_" {
 			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )	
-	osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
+			osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 			if err != nil {
 				osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
 				//ostk.Expire()					// force re-auth next go round
