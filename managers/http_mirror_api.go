@@ -175,6 +175,10 @@ func safe(s *string) ( string) {
 	}
 	return *s
 }
+func cvttime(n int64) (string) {
+	t := time.Unix(n, 0)
+	return fmt.Sprintf("%4d/%02d/%02d %02d:%02d:%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
+}
 /*
  * Convert a pledge into the JSON form needed by the API, which is not the same as the JSON in pledge.go
  * since that reflects the underlying pledge structure.
@@ -187,6 +191,9 @@ func convertToJSON(mirror *gizmos.Pledge_mirror, scheme string, host string) (st
 	bs.WriteString(fmt.Sprintf("  \"name\": \"%s\",\n", *mirror.Get_id()))
 	bs.WriteString(fmt.Sprintf("  \"start_time\": %d,\n", start))
 	bs.WriteString(fmt.Sprintf("  \"end_time\": %d,\n", end))
+	bs.WriteString(fmt.Sprintf("  \"start_time_ascii\": \"%s\",\n", cvttime(start)))
+	bs.WriteString(fmt.Sprintf("  \"end_time_ascii\": \"%s\",\n", cvttime(end)))
+	
 //	if mirror.usrkey != "" {
 //		// No harm including this since the user needed to provide it anyway
 //		bs.WriteString(fmt.Sprintf(`  "cookie": "%s",\n`, mirror.usrkey))
