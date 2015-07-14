@@ -52,7 +52,20 @@ function valid_ip4
 
 function valid_ip6
 {
-	echo "$1:" | grep -E -q "^([0-9a-fA-F]{1,4}:){8}$"
+	case "$1" in
+	::*)
+		echo "$1" | grep -E -q "(:[0-9a-fA-F]{1,4}){1,7}$"
+		;;
+	*::)
+		echo "$1" | grep -E -q "^([0-9a-fA-F]{1,4}:){1,7}"
+		;;
+	*::*)
+		echo "$1:" | grep -E -q "^([0-9a-fA-F]{0,4}:){1,8}$"
+		;;
+	*)
+		echo "$1:" | grep -E -q "^([0-9a-fA-F]{1,4}:){8}$"
+		;;
+	esac
 	return $?
 }
 
