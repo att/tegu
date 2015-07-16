@@ -39,6 +39,7 @@
 				23 Jun 2015 : Removed one result channel close (defer) that was causing a panic in ssh_broker
 					if the agent pops the timeout.
 				25 Jun 2015 : Now puts stderr out from a mirror command on failure or bleat level 2+.
+				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -65,7 +66,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.3/16155"
+	version		string = "v2.3/17165"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
