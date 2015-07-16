@@ -75,6 +75,7 @@
 				25 Jun 2015 : Corrected bug: no longer announces a verbose change if it didn't make it.
 				29 Jun 2015 : Now checkpoints after a delete reservation (tracker 272).
 								Fixed mirroring references from config.
+				16 Jul 2015 : Correct typo in the default admin role string.
 */
 
 package managers
@@ -1373,7 +1374,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	dup_str := "localhost"
 	priv_auth = &dup_str
 
-	ar_str := "admintegu_admin"						// default roles which are allowed to run privledged requests (ulcap etc)
+	ar_str := "admin,tegu_admin"						// default roles which are allowed to run privledged requests (ulcap etc)
 	admin_roles = &ar_str
 	sp_str := ",tegu_sysproc"							// default roles which for system processes (limited set of privledged requests, e.g. listhosts)
 	sysproc_roles = &ar_str
