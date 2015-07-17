@@ -1,5 +1,6 @@
 // vi: sw=4 ts=4:
 
+
 /*
 
 	Mnemonic:	osif -- openstack interface manager
@@ -50,6 +51,7 @@
 				14 Aug 2014 - Corrected comment.
 				15 Aug 2014 - Changed pointer reference on calls to ostk for clarity (was os).
 				19 Aug 2014 - Fix for bug #202 -- need to return nil if project ID not known.
+				21 Aug 2014 - Fixed cause of core dump (ln 148) (steer)
 				30 Sep 2014 - For what ever reason, the ccp environment wasn't returning a
 					full complement of mac addresses on  a single call, so we now revert to
 					making a call for each project.
@@ -66,7 +68,16 @@
 						to use a list of active (up) hosts rather than every host known to 
 						openstack.
 				05 Dec 2014 - Added work round for AIC admin issue after they flipped to LDAP.
-				16 Jan 2014 : Support port masks in flow-mods.
+				16 Jan 2014 - Support port masks in flow-mods.
+				18 Feb 2015 - Corrected slice index bug (@214)
+				27 Feb 2015 - To make steering work with lazy updates.
+				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
+				01 Apr 2015 - Corrected bug introduced by requiring a validate token to have a non
+						empty host which is legit for steering.
+				16 Apr 2015 - Pick up and use a region parameter from the config file.
+				02 Jul 2015 - No longer bail from host list when a request turns up empty.
+				13 Jul 2015 - Added work round openstack v2/v3 keystone issue with role verification
+						now must try all roles in our known universe.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -75,13 +86,10 @@
 package managers
 
 import (
-	//"bufio"
-	//"errors"
 	"fmt"
-	//"io"
 	"os"
 	"strings"
-	//"time"
+	"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
 	"codecloud.web.att.com/gopkgs/clike"
@@ -179,7 +187,10 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				return &xstr, nil
 			}
 
-		case 3:										// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
+		case 3:													// could be: token/project/name, token/project/ID, token//ID,  !//IP-addr
+			if tokens[0] == ""  {								// must have something out front, a ! or token, but empty is no good ([2] can be empty)
+					return nil, fmt.Errorf( "invalid host name; expected {!|tok}/[project]/hostname, got: %s", *raw )
+			}
 
 			if tokens[1] == "" {								// empty project name, must attempt to extract from the token
 				if tokens[0] != "!" {							//  if !//stuff we leave things alone and !//stuff is returned later
@@ -230,16 +241,15 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			}
 
 			xstr := fmt.Sprintf( "%s/%s", id, tokens[2] )			// build and return the translated string
-			osif_sheep.Baa( 2, "validation: %s: tok//host ==> %s", *raw, xstr )
+			osif_sheep.Baa( 2, "validation: %s: proj/host ==> %s", *raw, xstr )
 			return &xstr, nil
 	}
 	
 	return nil, fmt.Errorf( "invalid token/tenant pair" )
 }
 
-
 /*
-	Verifies that the token passed in is a valid token for the default user given in the
+	Verifies that the token passed in is a valid token for the default user (a.k.a. the tegu admin) given in the
 	config file.
 	Returns "ok" (err is nil) if it is good, and an error otherwise. 	
 */
@@ -251,9 +261,50 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 		osif_sheep.Baa( 2, "admin token validated successfully: %s expires: ", *token, exp )
 	} else {
 		osif_sheep.Baa( 1, "admin token invalid: %s", err )
-}
+	}
 
 	return err
+}
+
+/*
+	Given a token, return true if the token is valid for one of the roles listed in role.
+	Role is a list of space separated role names. 
+
+	2015 Jul 13
+		Bloody openstack is just broken.  we must run every project we know about in order to 
+		suss this information out becuase openstack doesn't return a proejct as a part of token information 
+		and given just a token it's not possible to tell whether it's associated with a project unless 
+		making a call that directly tries with the project name. Further, this opens a HUGE hole in security
+		as a user's roles are now valid across all projects, but I guess that's the openstack way.
+*/
+func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( found bool, err error ) {
+
+	for _, v := range os_refs {
+		pname, _ := v.Get_project( )
+		osif_sheep.Baa( 2, "has_any_role: checking %s", *pname )
+
+		stuff, err := admin.Crack_ptoken( token, pname, false )			// return a stuff struct with details about the token
+
+		found = false													// assume the worst
+		if err == nil {
+			err = fmt.Errorf( "role not defined; %s", *roles )			// asume not
+			rtoks := strings.Split( *roles, "," )
+			for i := range rtoks {
+				if  stuff.Roles[rtoks[i]] {
+					osif_sheep.Baa( 1, "has_any_role: verified in %s", *pname )
+					return	true, nil									// short out
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		osif_sheep.Baa( 1, "unable to verify role: %s: %s", roles, err )
+	} else {
+		osif_sheep.Baa( 1, "unable to verify role: %s", roles )
+	}
+
+	return
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
@@ -291,21 +342,28 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	sep := ""
 
 	if os_refs == nil || len( os_refs ) <= 0 {
-		err = fmt.Errorf( "no openstack hosts in list to query" )
+		err = fmt.Errorf( "no openstack creds in list to query" )
 		return
 	}
 
+	
+	osif_sheep.Baa( 2, "physical host query starts: %d sets of creds", len( os_refs ) )
 	for k, ostk := range os_refs {
+		bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
+
+	osif_sheep.Baa( 2, "physical host query for %s", k )
 		if k != "_ref_" {
 			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )	
+			osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 			if err != nil {
-				osif_sheep.Baa( 0, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
-				ostk.Expire()					// force re-auth next go round
-				return							// drop out on first error with no list
+				osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
+				//ostk.Expire()					// force re-auth next go round
 			} else {
+				osif_sheep.Baa_some_reset( bs_class )			// reset on good attempt so 1st failure after good is logged
 				if *list != "" {
 					ts += sep + *list
 					sep = " "
+					osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )	
 				} else {
 					osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
 				}
@@ -323,6 +381,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		}
 	}
 
+	osif_sheep.Baa( 2, "phys host query ends: %d hosts", len( cmap ) )
 	s = &ts
 	return
 }
@@ -335,7 +394,6 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 */
 func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err error ) {
 	
-
 	err = nil
 	m = make( map[string]*string )
 	for _, p := range os_projs {
@@ -360,17 +418,38 @@ func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err
 }
 
 /*
-	Gets an openstack interface object for the admin user.
+	Gets an openstack interface object for the admin user (tegu user id as defined in the config file).
+	This function blocks until it gets them AND can successfully authenticate.
 */
-func get_admin_creds( url *string, usr *string, passwd *string, project *string ) ( creds *ostack.Ostack ) {
+func get_admin_creds( url *string, usr *string, passwd *string, project *string, region *string ) ( creds *ostack.Ostack ) {
 	creds = nil
+
 	if url == nil || usr == nil || passwd == nil {
+		osif_sheep.Baa( 1, "cannot generate default tegu creds: no url, usr and/or password" );
 		return
 	}
 
-	creds = ostack.Mk_ostack( url, usr, passwd, project )		// project isn't known or needed for this
+	creds = ostack.Mk_ostack_region( url, usr, passwd, project, region )		// project isn't known or needed for this
 
-	return
+	if creds == nil {
+		osif_sheep.Baa( 1, "cannot generate default tegu creds: nil returned from library call" )
+		return 
+	}
+
+	for {
+		err := creds.Authorise()		// must ensure we can authorise before we can continue
+		if err == nil {
+			r_str := "default"
+			if region != nil {
+				r_str = *region
+			}
+			osif_sheep.Baa( 1, "tegu user (admin) creds were allocated and authorised with region: %s", r_str )
+			return
+		}
+
+		osif_sheep.Baa( 1, "unable to authenticate tegu (admin) creds: %s", err )
+		time.Sleep( time.Second * 60 )
+	}
 }
 
 /*
@@ -397,7 +476,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 	}
 
 	r = nil
-	for k, v := range id2pname {
+	for k, v := range id2pname {						// run the list of projects and add creds to the map if we don't have them
 		if old_list[*v] == nil  {	
 			osif_sheep.Baa( 1, "adding creds for: %s/%s", k, *v )
 			creds[*v], err = admin.Dup( v )				// duplicate creds for this project and then authorise to get a token
@@ -415,7 +494,6 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 		}
 
 		if r == nil &&  creds[*v] != nil {							// need to test if this has admin -- ref must have admin
-
  			_, _, err = creds[*v].Mk_mac_maps( nil, nil, false )
 			if  err == nil  {
 				r = creds[*v]
@@ -453,6 +531,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		def_usr		*string
 		def_url		*string
 		def_project	*string
+		def_region	*string
 	)
 
 	osif_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
@@ -478,6 +557,19 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			}
 		}
 	
+		p = cfg_data["osif"]["debug"]
+		if p != nil {
+			v := clike.Atoi( *p )
+			if v > -5 {
+				ostack.Set_debugging( v )
+			}
+		}
+
+		p = cfg_data["osif"]["region"] 
+		if p != nil {
+			def_region = p
+		}
+
 		p = cfg_data["osif"]["ostack_list"] 				// preferred placement in osif section
 		if p == nil {
 			p = cfg_data["default"]["ostack_list"] 			// originally in default, so backwards compatable
@@ -502,21 +594,21 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	} else {
 		// TODO -- investigate getting id2pname maps from each specific set of creds defined if an overarching admin name is not given
 
-		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project )
+		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project, def_region )		// this will block until we authenticate
 		if os_admin != nil {
 			osif_sheep.Baa( 1, "admin creds generated, mapping tenants" )
 			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the initial translation maps
 			//pname2id, id2pname, _ = os_admin.Map_all_tenants( )		// get the translation maps
-			for k := range pname2id {
-				osif_sheep.Baa( 1, "tenant known: %s", k )
+			for k, v := range pname2id {
+				osif_sheep.Baa( 1, "project known: %s %s", k, *v )				// useful to see in log what projects we can see
 			}
 		} else {
 			id2pname = make( map[string]*string )				// empty maps and we'll never generate a translation from project name to tenant ID since there are no default admin creds
 			pname2id = make( map[string]*string )
 			if def_project != nil {
-				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, %s) to authorise with openstack  [TGUOSI009]", def_usr, def_project )
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, proj=%s, reg=%s) to authorise with openstack  [TGUOSI009]", def_usr, def_project, def_region )
 			} else {
-				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, no-project) to authorise with openstack  [TGUOSI009]", def_usr )	// YES msg ids are duplicated here
+				osif_sheep.Baa( 0, "WRN: unable to use admin information (%s, proj=no-project, reg=%s) to authorise with openstack  [TGUOSI009]", def_usr, def_region )	// YES msg ids are duplicated here
 			}
 		}
 
@@ -560,22 +652,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 
 		os_projects = make( map[string]*osif_project )
-		for k, _ := range os_refs {					// build the projects for maps
-			if k != "_ref_" {	
-				np, err := Mk_osif_project( k )
-				if err == nil {
-					if pname2id[k] == nil {
-						osif_sheep.Baa( 0, "project did not map to an id: %s", k )
-					} else {
-						os_projects[*pname2id[k]] = np	
-						osif_sheep.Baa( 1, "successfully created osif_project for: %s/%s", k, *pname2id[k] )
-					}
-				} else {
-					osif_sheep.Baa( 1, "unable to create  an osif_project for: %s/%s", k, *pname2id[k] )
-				}
-			}
-		}
+		add2projects( os_projects, os_refs, pname2id, 0 )							// add refernces to the projects list
 	}
+
 	// ---------------- end config parsing ----------------------------------------
 
 
@@ -607,6 +686,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	
 					if os_list == "all" {
 						os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )						// periodic update of project cred list
+						add2projects( os_projects, os_refs, pname2id, 2 )								// add refernces to the projects list
 					}
 
 					osif_sheep.Baa( 2, "credentials were updated from openstack" )
@@ -641,14 +721,49 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_CHOSTLIST:
 				if msg.Response_ch != nil {										// no sense going off to ostack if no place to send the list
+					osif_sheep.Baa( 2, "starting list host" )
 					msg.Response_data, msg.State = get_hosts( os_refs )
+					osif_sheep.Baa( 2, "finishing list host" )
 				} else {
 					osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI012]" )
 				}
 
-			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info and return in a network update struct
+/* ======= don't think these are needed but holding ======
+			case REQ_PROJNAME2ID:					// translate a project name (tenant) to ID
 				if msg.Response_ch != nil {
-					go get_hostinfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+					pname := msg.Req_data.( *string )
+					if s, ok := pname2id[*pname]; ok {			// translate if there, else assume it's in it's "final" form
+						msg.Response_data = s
+					} else {
+						msg.Response_data = pname
+					}
+				}
+				
+*/
+
+			case REQ_VALIDATE_TOKEN:						// given token/tenant validate it and translate tenant name to ID if given; returns just ID
+				if msg.Response_ch != nil {
+					s := msg.Req_data.( *string )
+					*s += "/"								// add trailing slant to simulate "data"
+					msg.Response_data, msg.State = validate_token( s, os_refs, pname2id, req_token )
+				}
+
+
+			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info for a single host from oepnstack and return in a network update struct
+				if msg.Response_ch != nil {
+					go get_os_hostinfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+					msg = nil							// prevent early response
+				}
+
+			case REQ_GET_PROJ_HOSTS:
+				if msg.Response_ch != nil {
+					go get_all_osvm_info( msg, os_refs, os_projects, id2pname, pname2id )		// do it asynch and return the result on the message channel
+					msg = nil																	// prevent response from this function
+				}
+
+			case REQ_GET_DEFGW:							// dig out the default gateway for a project
+				if msg.Response_ch != nil {
+					go get_os_defgw( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
 					msg = nil							// prevent early response
 				}
 
@@ -674,10 +789,23 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, false )		// same process as validation but token not required
 				}
 
-			case REQ_VALIDATE_ADMIN:					// validate an admin token passed in
+			case REQ_VALIDATE_TEGU_ADMIN:					// validate that the token is for the tegu user
 				if msg.Response_ch != nil {
 					msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ), def_usr )
 					msg.Response_data = ""
+				}
+
+			case REQ_HAS_ANY_ROLE:							// given a token and list of roles, returns true if any role listed is listed by openstack for the token
+				if msg.Response_ch != nil {
+					d := msg.Req_data.( *string )
+					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
+					if len( dtoks ) > 1 {
+						msg.Response_data, msg.State = has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
+					} else { 
+						msg.State = fmt.Errorf( "has_any_role: bad input data" )
+						msg.Response_data = false
+					}
+
 				}
 
 			case REQ_PNAME2ID:							// user, project, tenant (what ever) name to ID

@@ -28,6 +28,8 @@
 					generic and flexible.
 				27 Aug 2014 - Small fixes during testing. 
 				03 Sep 2014 - Correct bug introduced with fq_req changes (ignored protocol and port)
+				08 Sep 2014 - Fixed bugs with tcp oriented proto steering.
+				09 Sep 2014 - corrected buglette that was preventing udp:0 or tcp:0 from working. (steering)
 				23 Sep 2014 - Added suport for multiple tables in order to keep local traffic off of the rate limit bridge.
 				24 Sep 2014 - Added vlan_id support. Added support ITONS dscp demands.
 				14 Oct 2014 - Added check to prevent ip2mac table from being overlaid if new table is empty.
@@ -38,6 +40,8 @@
 				26 Jan 2015 - Corrected table number problem -- outbound data should resub through the base+1 table, but inbound
 					packets should resub through the base table, not base+1.
 				01 Feb 2015 - Corrected bug itroduced when host name removed from fmod parmss (agent w/ ssh-broker changes).
+				19 Feb 2015 - Change in adjust_queues_agent to allow create queues to be driven from agent without -h on command line.
+				21 Mar 2015 - Changes to support new bandwith endpoint flow-mod agent script.
 */
 
 package managers
@@ -161,6 +165,11 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 	This now augments the switch name with the suffix; needs to be fixed for q-full
 	so that it handles intermediate names properly.
+
+	In the world with the ssh-broker, there is no -h host on the command line and 
+	the script's view of host name might not have the suffix that we are supplied
+	with.  To prevent the script from not recognising an entry, we must now 
+	put an entry for both the host name and hostname+suffix into the list. 
 */
 func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	var (
@@ -171,9 +180,12 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 
 	target_hosts := make( map[string]bool )					// hosts that are actually affected by the queue list
 	if phsuffix != nil {									// need to convert the host names in the list to have suffix
-		nql := make( []string, len( qlist ) )
+		nql := make( []string, len( qlist ) * 2 )			// need one for each possible host name
 
+		offset := len( qlist )								// put the originals into the second half of the array
 		for i := range qlist {
+			nql[offset+i] = qlist[i]								// just copy the original
+
 			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
 			if len( toks ) == 2 {
 				nh := add_phost_suffix( &toks[0],  phsuffix )		// add the suffix
@@ -220,8 +232,111 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	}
 }
 
+/*
+	Send a bandwidth endpoint flow-mod request to the agent manager. 
+	This is little more than a wrapper that converts the fq_req into
+	an agent request. The ultimate agent action is to put in all
+	needed flow-mods on an endpoint host in one go, so no need for
+	individual requests for each and no need for tegu to understand
+	the acutal flow-mod mechanics any more.
+
+	Yes, this probably _could_ be pushed up into the reservation manager
+	and sent from there to the agent manager, but for now, since the 
+	ip2mac information is local to fq-mgr, we'll keep it here.  (That
+	info is local to fq-mgr b/c in the original Tegu it came straight
+	in from skoogi and it was fq-mgr's job to interface with skoogi.)
+*/
+func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
+
+
+	if data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
+		fq_sheep.Baa( 1, "unable to send bw-fmods request to agent: no switch defined in input data" )
+		return
+	}
+
+	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
+	if phost_suffix != nil {										// we need to add the physical host suffix
+		host = add_phost_suffix( host, phost_suffix )
+	}
+
+	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
+
+	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
+	msg.Actions = make( []action, 1 )							// just a single action
+	msg.Actions[0].Atype = "bw_fmod"							// set all related bandwidth flow-mods for an endpoint
+	msg.Actions[0].Hosts = make( []string, 1 )					// bw endpoint flow-mods created on just one host
+	msg.Actions[0].Hosts[0] = *host
+	msg.Actions[0].Data = data.To_bw_map()						// convert useful data from caller into parms for agent
+
+	json, err := json.Marshal( msg )						// bundle into a json string
+	if err != nil {
+		fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+	} else {
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+	}
+
+	fq_sheep.Baa( 2, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
+	
+}
 
 /*
+	Send a bandwidth endpoint flow-mod request for a oneway set of 
+	flow-mods.  This is little more than a wrapper that converts 
+	the fq_req into an agent request. The ultimate agent action is 
+	to put in all needed flow-mods on the endpoint host in one go,
+	so no need for individual requests for each.
+
+	Yes, this probably _could_ be pushed up into the reservation manager;
+	see comments above.
+*/
+func send_bwow_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
+	if data == nil {
+		fq_sheep.Baa( 1, "fq_req: internal mishap: unable to send bwow-fmods data to bwow function was nil" )
+		return
+	}
+
+	if data.Espq == nil || data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
+		fq_sheep.Baa( 1, "unable to send bwow-fmods request to agent: no switch defined in input data" )
+		return
+	}
+
+	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
+	if phost_suffix != nil {									// we need to add the physical host suffix
+		host = add_phost_suffix( host, phost_suffix )
+	}
+
+	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	if data.Match.Ip2 != nil {
+		data.Match.Dmac = ip2mac[*data.Match.Ip2]					// this may come up nil and that's ok
+	} else {
+		data.Match.Dmac = nil
+	}
+
+	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
+	msg.Actions = make( []action, 1 )							// just a single action
+	msg.Actions[0].Atype = "bwow_fmod"							// operation to invoke on agent
+	msg.Actions[0].Hosts = make( []string, 1 )					// oneway flow-mods created on just one host
+	msg.Actions[0].Hosts[0] = *host
+	msg.Actions[0].Data = data.To_bwow_map()					// convert useful data from caller into parms for agent
+
+	json, err := json.Marshal( msg )						// bundle into a json string
+	if err != nil {
+		fq_sheep.Baa( 0, "unable to build json to set bwow flow mod" )
+	} else {
+		tmsg := ipc.Mk_chmsg( )
+		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
+	}
+
+	fq_sheep.Baa( 2, "oneway bandwidth flow-mod request sent to agent manager: %s", json )
+}
+
+/*
+	WARNING: this should be deprecated.  Still needed by steering, but that should change. Tegu
+		should send generic 'setup' actions to the agent and not try to craft flow-mods. 
+		Thus, do NOT use this from any new code!
+
 	Send a flow-mod to the agent using a generic struct to represnt the match and action criteria.
 
 	The fq_req contains data that are neither match or action specific (priority, expiry, etc) or 
@@ -447,6 +562,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 	}
 }
 
+
 /*
 	Send a newly arrived host list to the agent manager.
 */
@@ -455,16 +571,6 @@ func send_hlist_agent( hlist *string ) {
 	tmsg.Send_req( am_ch, nil, REQ_CHOSTLIST, hlist, nil )			// push the list; does not expect response back
 }
 
-/*
-	Send a request to openstack interface for a host list. We will _not_ wait on it 
-	and will handle the response in the main loop. 
-*/
-func req_hosts(  rch chan *ipc.Chmsg ) {
-	fq_sheep.Baa( 2, "requesting host list from osif" )
-
-	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, rch, REQ_CHOSTLIST, nil, nil )
-}
 
 /*
 	Send a request to openstack interface for an ip to mac map. We will _not_ wait on it 
@@ -582,8 +688,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	//tklr.Add_spot( qcheck_freq, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER );  	// tickle us every few seconds to adjust the ovs queues if needed
 
 	if switch_hosts == nil {
-		tklr.Add_spot( 2, my_chan, REQ_CHOSTLIST, nil, 1 );  						// tickle once, very soon after starting, to get a host list
-		tklr.Add_spot( hcheck_freq, my_chan, REQ_CHOSTLIST, nil, ipc.FOREVER );  	// tickles us every once in a while to update host list
+		tklr.Add_spot( 2, my_chan, REQ_CHOSTLIST, nil, 1 )  						// tickle once, very soon after starting, to get a host list
+		tklr.Add_spot( hcheck_freq, my_chan, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// tickles us every once in a while to update host list
 		fq_sheep.Baa( 2, "host list will be requested from openstack every %ds", hcheck_freq )
 	} else {
 		host_list = switch_hosts
@@ -607,7 +713,17 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					send_gfmod_agent( fdata,  ip2mac, host_list, phost_suffix )
 				}
 
-			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod
+			case REQ_BWOW_RESERVE:						// oneway bandwidth flow-mod generation
+				msg.Response_ch = nil					// nothing goes back from this
+				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
+				send_bwow_fmods( fdata, ip2mac, phost_suffix )
+
+			case REQ_BW_RESERVE:						// bandwidth endpoint flow-mod creation; single agent script creates all needed fmods
+				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
+				send_bw_fmods( fdata, ip2mac, phost_suffix )
+				msg.Response_ch = nil					// nothing goes back from this
+
+			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod  (this is likely deprecated as of 3/21/2015 -- resmgr invokes the bw_fmods script via agent)
 				fdata = msg.Req_data.( *Fq_req ); 		// user view of what the flow-mod should be
 
 				if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled
@@ -631,13 +747,15 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 							cdata.Swid = &swid
 						}
 
-						resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
-						if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
-							resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
-						} else {
-							resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
+						if cdata.Resub == nil {
+							resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
+							if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
+								resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
+							} else {
+								resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
+							}
+							cdata.Resub = &resub_list
 						}
-						cdata.Resub = &resub_list
 				
 						meta := "0x00/0x07"						// match-value/mask; match only when meta neither of our two bits, nor the agent bit (0x04) are set
 						cdata.Match.Meta = &meta
@@ -668,7 +786,20 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					msg.Response_ch = nil
 				}
 
-			case REQ_RESERVE:								// send a reservation to skoogi
+			case REQ_ST_RESERVE:							// reservation fmods for traffic steering
+				msg.Response_ch = nil						// for now, nothing goes back
+				if msg.Req_data != nil {
+					fq_data := msg.Req_data.( *Fq_req ); 			// request data
+					if uri_prefix != "" {							// an sdn controller -- skoogi -- is enabled (not supported)
+						fq_sheep.Baa( 0, "ERR: steering reservations are not supported with skoogi (SDNC); no flow-mods pushed" )
+					} else {
+						send_stfmod_agent( fq_data, ip2mac, host_list )	
+					}
+				} else {
+					fq_sheep.Baa( 0, "CRI: missing data on st-reserve request to fq-mgr" )
+				}
+
+			case REQ_SK_RESERVE:							// send a reservation to skoogi
 				data = msg.Req_data.( []interface{} ); 		// msg data expected to be array of interface: h1, h2, expiry, queue h1/2 must be IP addresses
 				if uri_prefix != "" {
 					fq_sheep.Baa( 2,  "msg to reserve: %s %s %s %d %d",  uri_prefix, data[0].(string), data[1].(string), data[2].(int64), data[3].(int) )
@@ -685,7 +816,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					adjust_queues_agent( qlist, host_list, phost_suffix )		// if sending json to an agent
 				}
 
-			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
+			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
 				msg.Response_ch = nil;						// regardless of source, we should not reply to this request
 
 				if msg.State != nil || msg.Response_data != nil {				// response from ostack if with list or error
@@ -707,9 +838,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 						fq_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
 					}
 				} else {
-					fq_sheep.Baa( 2, "requesting lists from osif" )
-					req_hosts( my_chan )					// send requests to osif for data
-					//req_ip2mac( my_chan )
+					req_hosts( my_chan, fq_sheep )					// send requests to osif for data
 				}
 
 			case REQ_IP2MACMAP:								// a new map from osif

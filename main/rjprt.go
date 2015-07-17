@@ -3,9 +3,11 @@
 /*
 
 	Mnemonic:	rjprt.go
-	Abstract:	Send an http oriented post or get request that results in json output and 
-				then format the output in a human readable fashion to stdout. 
+	Abstract:	Send an http oriented post or get request that results in json output and
+				then format the output in a human readable fashion to stdout.
 				is returned.  Input command line:
+					-a token	Authorisation token related to the privlege of executing the command
+								such as listhost (not VM related tokens for a reservation).
 					-d 			Display result in 'dotted' notaion rather than indented hiarchy
 					-D			POST request "body of data"
 					-j			No formatting, outputs raw json
@@ -15,7 +17,7 @@
 					-r			returns raw json (debugging mostly)
 					-t url		Target url
 					-T			tight security (does not trust host certificates that cannot be validated)
-					-v			verbose 
+					-v			verbose
 
 	Date:		01 January 2014
 	Author:		E. Scott Daniels
@@ -23,13 +25,16 @@
 	Mod:		07 Jun 2014 - Added ability to ignore invalid certs (-T option added to force tight security)
 				09 Jul 3014 - Added -J capability
 				14 Dec 2014 - Formally moved to tegu code.
+				03 Jun 2015 - To accept an authorisation token to send as X-Tegu-Auth in the header.
+				19 Jun 2015 - Added support to dump headers in order to parse out the token that openstack
+					identity v3 sends back in the bloody header of all places.
+				24 Jun 2015 - Added xauth support to GET.
 */
 
 package main
 
 import (
 	"bytes"
-	//"encoding/json"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -46,14 +51,15 @@ var (
 
 func usage( version string ) {
 	fmt.Printf( "%s\n", version );
-	fmt.Printf( "usage: rjprt [-D post-data-string] [-d] [-t target-url] [-l dot-string] [-m GET|POST|DELETE] [-r root-string] [-T] [-v] -t target url\n" )
-	fmt.Printf( `	If -m POST is supplied, and -D "string" is omitted, rjprt will read the POST data from stdin` )
+	fmt.Printf( "usage: rjprt [-a auth-string] [-D data-string] [-d] [-t target-url] [-j] [-J] [-l dot-string] [-m GET|POST|DELETE] [-r root-string] [-T] [-v] -t target url\n" )
+	fmt.Printf( `	If -m POST or -m DELETE is supplied, and -D "string" is omitted, rjprt will read the POST data from stdin` )
 	fmt.Printf( "\n\n" )
 }
 
 func main() {
 	var (
-		version		string = "rjprt v1.2/16074"
+		version		string = "rjprt v1.4/16195"
+		auth		*string
 		err			error
 		resp		*http.Response
 		verbose 	*bool
@@ -70,10 +76,12 @@ func main() {
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
+	auth = flag.String( "a", "", "authorisation token" )
 	dot_fmt = flag.Bool( "d", false, "dotted named output" )
 	request_data = flag.String( "D", "", "post data" )
 	raw_json = flag.Bool( "j", false, "raw-json" )
-	appl_json := flag.Bool( "J", false, "appltype-json" )
+	show_headers := flag.Bool( "h", false, "show http response headers" )
+	appl_json := flag.Bool( "J", false, "data type is json" )
 	look4 = flag.String( "l", "", "look4 string in hashtab" )
 	method = flag.String( "m", "GET", "request method" )
 	root = flag.String( "r", "", "top level root name" )
@@ -82,9 +90,9 @@ func main() {
 	verbose = flag.Bool( "v", false, "verbose" )
 	flag.Parse();									// actually parse the commandline
 
-	appl_type := "text"
+	input_type := "text"			// type of data being sent in body
 	if *appl_json {
-		appl_type = "json"
+		input_type = "application/json"
 	}
 
 	if *needs_help {
@@ -108,17 +116,34 @@ func main() {
 	trparms := &http.Transport{				// override default transport parms to skip the verify
         TLSClientConfig: &tls.Config{ InsecureSkipVerify: !*tight_sec },
     }
+
 	client := &http.Client{ Transport: trparms }		// default client except with our parms
 	
 	switch( *method ) {
 		case "GET", "get":
-			resp, err = client.Get( *target_url )
+			req, err = http.NewRequest( "GET", *target_url, nil )
+			if err == nil {
+				if auth != nil && *auth != "" {
+					req.Header.Set( "X-Auth-Tegu", *auth )
+				}
+	
+				resp, err = client.Do( req )
+			}
 
 		case "POST", "post":
 			if *request_data == "" {
-				resp, err = client.Post( *target_url, "application/" + appl_type, os.Stdin )
+				req, err = http.NewRequest( "POST", *target_url, os.Stdin )
 			} else {
-				resp, err = client.Post( *target_url, "application/" + appl_type, bytes.NewBufferString( *request_data ) )
+				req, err = http.NewRequest( "POST", *target_url, bytes.NewBufferString( *request_data ) )
+			}
+
+			if err == nil {
+				req.Header.Set( "Content-Type", input_type )
+				if auth != nil && *auth != "" {
+					req.Header.Set( "X-Auth-Tegu", *auth )
+				}
+	
+				resp, err = client.Do( req )
 			}
 
 		case "DELETE", "del", "delete":
@@ -127,7 +152,13 @@ func main() {
 			} else {
 				req, err = http.NewRequest( "DELETE", *target_url, bytes.NewBufferString( *request_data ) )
 			}
-			resp, err = client.Do( req )
+
+			if err == nil {
+				if auth != nil && *auth != "" {
+				req.Header.Add( "X-Auth-Tegu", *auth )
+				}
+				resp, err = client.Do( req )
+			}
 
 		default:
 			fmt.Fprintf( os.Stderr, "%s method is not supported\n", *method )
@@ -145,6 +176,12 @@ func main() {
 		}
 		resp.Body.Close( )
 
+		if *show_headers {
+			for k, v := range resp.Header {
+				fmt.Printf( "header: %s = %s\n", k, v )
+			}
+		}
+
 		if data == nil {
 			os.Exit( 0 );					// maybe not what they were expecting, but nothing isn't an error
 		}
@@ -161,16 +198,16 @@ func main() {
 					result := m[*look4]
 					if result != nil {
 						switch result.( type ) {
-							case string: 
+							case string:
 								fmt.Printf( "%s = %s\n", *look4, result.(string) )
 
-							case int: 
+							case int:
 								fmt.Printf( "%s = %d\n", *look4, result.(int) )
 
-							case float64: 
+							case float64:
 								fmt.Printf( "%s = %.2f\n", *look4, result.(float64) )
 
-							default: 
+							default:
 								fmt.Printf( "found %s, but its in an unprintable format\n", *look4 )
 						}
 
@@ -185,8 +222,9 @@ func main() {
 			}
 		} else {
 			_, err = jsontools.Json2blob( data, root, true );			// normal hiarchy can be printed as it blobs, so ignore jif coming back
-			if  err != nil {
-				fmt.Fprintf( os.Stderr, "ERR: %s \n", err );
+			if  err != nil {											// assume mirroring which doesn't put out json in all cases (boo)
+				//fmt.Fprintf( os.Stderr, "ERR: %s \n", err );
+				fmt.Fprintf( os.Stdout, "%s\n", data );
 			}
 		}
 	}

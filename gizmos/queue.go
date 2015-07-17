@@ -11,6 +11,7 @@
 
 	Mods:		07 Jul 2014 - Added To_str_pos() function to generate strings
 					only if the bandwidth for the queue is greater than zero.
+				18 Jun 2015 - Ensure bandwidth amount doesn't go negative.
 */
 
 package gizmos
@@ -77,6 +78,9 @@ func (q *Queue) Clone( ) ( cq *Queue ) {
 func (q *Queue) Inc( amt int64 ) {
 	if q != nil {
 		q.bandwidth += amt
+		if q.bandwidth < 0 {
+			q.bandwidth = 0
+		}
 	}
 }
 
@@ -86,6 +90,9 @@ func (q *Queue) Inc( amt int64 ) {
 func (q *Queue) Dec( amt int64 ) {
 	if q != nil {
 		q.bandwidth -= amt
+		if q.bandwidth < 0 {
+			q.bandwidth = 0
+		}
 	}
 }
 

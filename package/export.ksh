@@ -8,11 +8,13 @@
 #
 #	Mods:		30 Jan 2015 - Added support for python
 #				01 Feb 2015 - Ensure that binaries are chmod'd correctly.
+#				28 Apr 2015 - Added auto build of certain binaries.
 # -------------------------------------------------------------------------------------------
 
 function usage
 {
-	echo "$argv0 [-d export-dir] package-name version"
+	echo "$argv0 [-b] [-d export-dir] package-name version"
+	echo "  -b turns off the auto build before export"
 }
 
 function verbose
@@ -22,17 +24,44 @@ function verbose
 		echo "$@"
 	fi
 }
+
+function build_it
+{
+	(
+		set -e
+		cd ../main
+		echo "building tegu and agent"
+		go build tegu.go
+		go build tegu_agent.go
+
+		./tegu -?|grep "^tegu"
+		./tegu_agent -?| grep "^tegu"
+	)
+
+	if (( $? != 0 ))
+	then
+		echo "abort: build failed"
+		exit 1
+	fi
+}
+
 # -------------------------------------------------------------------------------------------
 
 ex_root=/tmp/${LOGNAME:=$USER}/export
 argv0="${0##*/}"
 dir=""
+compress_options=""
 chatty=0
+rebuild=0			# -r sets to mark as a rebuild of a previous package so that last ver is not updated
+build=1				# force a build of binaries before exporting, -b turns off
 
 while [[ $1 == -* ]]
 do
 	case $1 in
+		-b)		build=0;;
+		-c)		compress_options=$2; shift;;
 		-d)		dir=$2; shift;;
+		-r)		rebuild=1;;
 		-v)		chatty=1;;
 		-\?)	usage; exit 0;;
 		*)		echo "unrecognised parameter: $1"
@@ -55,13 +84,14 @@ if [[ -z $2 ]]
 then
 	echo "missing version number as second parameter"
 	echo "last version was:"
-	cat last_export_ver 2>/dev/null
+	cat last_export_ver.$1 2>/dev/null
 	usage
 	exit 1
 fi
 
 pkg_name=$1
 ver="$2"
+name_ver=${pkg_name}_${ver}
 pkg_list=${pkg_name}.exlist
 
 if [[ ! -r $pkg_list ]]
@@ -70,13 +100,21 @@ then
 	exit 1
 fi
 
-echo $ver >last_export_ver
+if (( ! rebuild ))
+then
+	echo $ver >last_export_ver.$1
+fi
+
+if (( build ))
+then
+	build_it
+fi
 
 
 if [[ -z $dir ]]
 then
 	#dir=$ex_root/$(date +%Y%m%d)
-	dir=$ex_root/$ver
+	dir=$ex_root/$name_ver
 fi
 if [[ ! -d $dir ]]
 then
@@ -96,7 +134,9 @@ typeset -A seen
 # copy things from the list into the export directory
 trap "echo something failed!!!!" EXIT
 set -e
-while read src target mode junk
+compress=""
+mode=""
+while read src target mode compress junk
 do
 	if [[ -z ${seen[${target%/*}]} ]]			# ensure that the directory exists
 	then
@@ -120,10 +160,11 @@ do
 			fi
 		done
 	fi
-	verbose "$src -> $dir/${target}"
+	verbose "$src -> $dir/${target} (${mode:-755}, ${compress:-no-compression})"
 	if cp $src $dir/$target
 	then
-		if [[ -z $mode ]]
+
+		if [[ -z $mode || $mode == "-" ]]
 		then
 			mode="775"
 		fi
@@ -133,7 +174,15 @@ do
 		else
 			ctarget=$dir/$target
 		fi
+
 		chmod $mode $ctarget
+		if [[ -n $compress ]]
+		then
+			echo "compressing: $compress $compress_options $ctarget"
+			$compress $compress_options $ctarget
+		fi
+
+
 	fi
 done </tmp/PID$$.data
 verbose ""
@@ -149,6 +198,6 @@ then
 fi
 
 mkdir -p $ex_root/bundle/
-tar -cf - . | gzip >/$ex_root/bundle/attlrqlite-${ver}.tar.gz
+tar -cf - . | gzip >/$ex_root/bundle/attlr${pkg_name}-${ver}.tar.gz
 trap - EXIT
-echo "packaged ready for deb build in: $ex_root/bundle/attlrqlite-${ver}.tar.gz"
+echo "packaged ready for deb build in: $ex_root/bundle/attlr${pkg_name}-${ver}.tar.gz"

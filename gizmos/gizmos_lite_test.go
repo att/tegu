@@ -41,6 +41,7 @@ const (
 func TestLoadLinks( t *testing.T ) {			// must use bloody camel case to be recognised by go testing 
 
 
+	fmt.Fprintf( os.Stderr, "-------- q-lite tests ---------------\n" )
 	
 	links, err := gizmos.Read_json_links( "static_links.json" ) 
 	if err == nil  {
@@ -52,4 +53,6 @@ func TestLoadLinks( t *testing.T ) {			// must use bloody camel case to be recog
 		fmt.Fprintf( os.Stdout, "failed to read links: %s  [FAIL]\n", err )
 		t.Fail()
 	}
+
+	fmt.Fprintf( os.Stderr, "\n" )
 }

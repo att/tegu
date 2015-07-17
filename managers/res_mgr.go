@@ -9,11 +9,24 @@
 	Author:		E. Scott Daniels
 
 	CFG:		These config file variables are used when present:
-					default:alttable = n  The OVS table number to be used for metadata marking.
+					default:alttable -  The OVS table number to be used for metadata marking.
+
+					default:queue_type -  If "endpoint" then we only generate endpoint queues, not intermediate
+									switch queues.
 
 					resmgr:ckpt_dir	- name of the directory where checkpoint data is to be kept (/var/lib/tegu)
 									FWIW: /var/lib/tegu selected based on description:
 									http://www.tldp.org/LDP/Linux-Filesystem-Hierarchy/html/var.html
+
+					resmgr:verbose	- Defines the initial verbose setting for reservation manager bleater
+
+					deprecated - resmgr:set_vlan - If true (default) then we flag fq-mgr to add vlan setting to flow-mods
+
+					resmgr:super_cookie - A cookie that can be used to manage any reservation.
+
+					resmgr:hto_limit - The hard timeout limit that should be used to reset flow-mods on long reservation.
+
+					resmgr:res_refresh - The rate (seconds) that reservations are refreshed if hto-limit is non-zero.
 
 
 	TODO:		need a way to detect when skoogie/controller has been reset meaning that all
@@ -31,12 +44,13 @@
 						rather than depending on the http manager to do that -- possible timing issues if we wait.
 						Added support for reservation refresh.
 				29 Jul 2014 : Change set user link cap such that 0 is a valid value, and -1 will delete.
-				27 Aug 2014 (sd) : Changes to support using Fq_req for generating flowmods (support of
+				27 Aug 2014 : Changes to support using Fq_req for generating flowmods (support of
 						meta marking of reservation traffic).
 				28 Aug 2014 : Added message tags to crit/err/warn messages.
 				29 Aug 2014 : Added code to allow alternate OVS table to be supplied from config.
 				03 Sep 2014 : Corrected bug introduced with fq_req changes (ignored protocol and port)
-				24 Sep 2014 : Added support for ITONS traffic class demands. 
+				08 Sep 2014 : Fixed bugs with tcp oriented proto steering.
+				24 Sep 2014 : Added support for ITONS traffic class demands.
 				09 Oct 2014 : Added all_sys_up, and prevent checkpointing until all_sys_up is true.
 				29 Oct 2014 : Corrected bug -- setting vlan id when VMs are on same switch.
 				03 Nov 2014 : Removed straggling comments from the bidirectional fix.
@@ -46,19 +60,32 @@
 				19 Nov 2014 : correct bug in loading reservation path.
 				16 Jan 2014 : Allow mask on a tcp/udp port specification and to set priority a bit higher
 						when a transport port is specified.
-						Changed when meta table flow-mods are pushed (now with queues and only to hosts in 
+						Changed when meta table flow-mods are pushed (now with queues and only to hosts in
 						the queue list).
-				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files 
+				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files
 						written only when there are updates.
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
 				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
+				24 Feb 2015 : Added mirroring
+				27 Feb 2015 : Steering changes to work with lazy update.
+				17 Mar 2015 : lite version of resmgr brought more in line with steering.
+				25 Mar 2015 : Reservation pushing only happens after a new queue list is received from netmgr
+						and sent to fq-mgr. The exception is if the hard swtich timeout pops where reservations
+						are pushed straight away (assumption is that queues don't change).
+				20 Apr 2015 : Ensured that reservations are pushed following a cancel request.
+				26 May 2015 : Conversion to support pledge as an interface.
+				01 Jun 2015 : Corrected bug in delete all which was atttempting to delete expired reservations.
+				15 Jun 2015 : Added oneway support.
+				18 Jun 2015 : Added oneway delete support.
+				25 Jun 2015 : Corrected bug preventing mirror reserations from being deleted (they require an agent
+						command to be run and it wasn't.)
 */
 
 package managers
 
 import (
 	"bufio"
-	//"errors"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -99,8 +126,8 @@ func ( i *Inventory ) res2json( ) (json string, err error) {
 	json = `{ "reservations": [ `
 
 	for _, p := range i.cache {
-		if ! p.Is_expired( ) {
-			json += fmt.Sprintf( "%s%s", sep, p.To_json( ) )
+		if ! (*p).Is_expired( ) {
+			json += fmt.Sprintf( "%s%s", sep, (*p).To_json( ) )
 			sep = ","
 		}
 	}
@@ -112,20 +139,48 @@ func ( i *Inventory ) res2json( ) (json string, err error) {
 
 /*
 	Given a name, send a request to the network manager to translate it to an IP address.
+	If the name is nil or empty, we return nil. This is legit for steering in the case of
+	L* endpoint specification.
 */
 func name2ip( name *string ) ( ip *string ) {
 	ip = nil
 
+	if name == nil || *name == "" {
+		return
+	}
+
 	ch := make( chan *ipc.Chmsg )	
 	defer close( ch )									// close it on return
 	msg := ipc.Mk_chmsg( )
-	msg.Send_req( nw_ch, ch, REQ_GETIP, *name, nil )
+	msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
 	msg = <- ch
 	if msg.State == nil {					// success
 		ip = msg.Response_data.(*string)
 	}
 
 	return
+}
+
+/*
+	Given a name, get host info (IP, mac, switch-id, switch-port) from network.
+*/
+func get_hostinfo( name *string ) ( *string, *string, *string, int ) {
+
+	if name != nil  &&  *name != "" {
+		ch := make( chan *ipc.Chmsg );	
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, ch, REQ_HOSTINFO, name, nil )		// get host info string (mac, ip, switch)
+		req = <- ch
+		if req.State == nil {
+			htoks := strings.Split( req.Response_data.( string ), "," )					// results are: ip, mac, switch-id, switch-port; all strings
+			return &htoks[0], &htoks[1], &htoks[2], clike.Atoi( htoks[3] )
+		} else {
+			rm_sheep.Baa( 1, "get_hostinfo: error from network mgr: %s", req.State )
+		}
+	}
+
+	rm_sheep.Baa( 1, "get_hostinfo: no name provided" )
+	return nil, nil, nil, 0
 }
 
 
@@ -145,7 +200,7 @@ func (i *Inventory) failed_push( msg *ipc.Chmsg ) {
 	rm_sheep.Baa( 1, "WRN: proactive ie reservation push failed, pledge marked unpushed: %s  [TGURMG002]", *fq_data.Id )
 	p := i.cache[*fq_data.Id]
 	if p != nil {
-		p.Reset_pushed()
+		(*p).Reset_pushed()
 	}
 }
 
@@ -155,7 +210,7 @@ func (i *Inventory) failed_push( msg *ipc.Chmsg ) {
 func (i *Inventory) any_concluded( past int64 ) ( bool ) {
 
 	for _, p := range i.cache {									// run all pledges that are in the cache
-		if p != nil  &&  p.Concluded_recently( past ) {			// pledge concluded within past seconds
+		if p != nil  &&  (*p).Concluded_recently( past ) {			// pledge concluded within past seconds
 				return true
 		}
 	}
@@ -171,7 +226,7 @@ func (i *Inventory) any_concluded( past int64 ) ( bool ) {
 func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 
 	for _, p := range i.cache {							// run all pledges that are in the cache
-		if p != nil  &&  (p.Commenced_recently( past ) || p.Is_active_soon( future ) ) {	// will activate between now and the window
+		if p != nil  &&  ((*p).Commenced_recently( past ) || (*p).Is_active_soon( future ) ) {	// will activate between now and the window
 				return true
 		}
 	}
@@ -180,6 +235,10 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 }
 
 /*
+	Deprecated -- these should no longer be set by tegu and if really needed should
+		be set by the ql_bw*fmods and other agent scripts.
+
+
 	Push table 9x flow-mods. The flowmods we toss into the 90 range of
 	tables generally serve to mark metadata in a packet since metata
 	cannot be marked prior to a resub action (flaw in OVS if you ask me).
@@ -221,7 +280,7 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	target_hosts := make( map[string]bool )							// hosts that are actually affected by the queue list
 
 	for i := range qlist {											// make a list of hosts we need to send fmods to
-		toks := strings.SplitN( qlist[i], "/", 2 )					// split host from front 
+		toks := strings.SplitN( qlist[i], "/", 2 )					// split host from front
 		if len( toks ) == 2 {										// should always be, but don't choke if not
 			target_hosts[toks[0]] = true							// fq-mgr will add suffix if needed
 		}
@@ -235,157 +294,64 @@ func send_meta_fmods( qlist []string, alt_table int ) {
 	}
 }
 
+
 /*
 	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
-	next 15 seconds).  We push the reservation request to fq_manager which does the necessary formatting
-	and communication with skoogi.  With the new method of managing queues per reservation on ingress/egress
-	hosts, we now send to fq_mgr:
-		h1, h2 -- hosts
-		expiry
-		switch/port/queue
-	
-	for each 'link' in the forward direction, and then we reverse the path and send requests to fq_mgr
-	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but
-	asycnh; we do not wait for responses to each message generated here. If set_vlan is true then
-	we will send the src mac address on the flow-mod at ingress so that the vlan is properly set
-	(suports br-rl in a GRE environment).
+	next 15 seconds).  Also handles undoing any mirror reservations that have expired.
 
-	To_limit is a cap to the expiration time sent when creating a flow-mod.  OVS (and others we assume)
-	use an unsigned int32 as a hard timeout value, and thus have an upper limit of just over 18 hours. If
-	to_limit is > 0, we'll ensure that the timeout passed on the request to fq-mgr won't exceed  the limit,
- 	and we assume that this function is called periodically to update long running reservations.
+	Favour_v6 is passed to push_bw and will favour the IPv6 address if a host has both addresses defined.
 
 	Returns the number of reservations that were pushed.
 */
-func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set_vlan bool, to_limit int64 ) ( npushed int ) {
+func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_limit int64, pref_v6 bool ) ( npushed int ) {
 	var (
-		msg		*ipc.Chmsg
-		ip2		*string					// the ip ad
-
-		push_count	int = 0
+		bw_push_count	int = 0
+		st_push_count	int = 0
 		pend_count	int = 0
 		pushed_count int = 0
 	)
 
-	now := time.Now().Unix()
-	rm_sheep.Baa( 3, "pushing reservations, %d in cache", len( i.cache ) )
+	rm_sheep.Baa( 4, "pushing reservations, %d in cache", len( i.cache ) )
 	for rname, p := range i.cache {							// run all pledges that are in the cache
-		if p != nil  &&  ! p.Is_pushed() {
-			if p.Is_active() || p.Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-
-				h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, ports and expiry are all we need
-
-				ip1 := name2ip( h1 )
-				ip2 = name2ip( h2 )
-
-				if ip1 != nil  &&  ip2 != nil {				// good ip addresses so we're good to go
-					plist := p.Get_path_list( )				// each path that is a part of the reservation
-
-					if push_count <= 0 {
-						rm_sheep.Baa( 1, "pushing proactive reservations; plistlen=%d", len( plist ) )
-					}
-					push_count++
-
-					timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
-
-					for i := range plist { 								// for each path, send fmod requests for each endpoint and each intermed link, both forwards and backwards
-						fmod := Mk_fqreq( &rname )						// default flow mod request with empty match/actions
-
-						if *p1 != "0" || *p2 != "0" {					// port oriented flow-mods get a slightly higher priority
-							fmod.Pri =	405								// override the defaults
-						} else {
-							fmod.Pri =	400								// no port specification, higher than most, but allow a match on port first
-						}
-						fmod.Cookie =	0xdead
-						fmod.Single_switch = false						// path involves multiple switches by default
-						fmod.Dscp, fmod.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
-
-						if p.Is_paused( ) {
-							fmod.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
-						} else {
-							if to_limit > 0 && expiry > now + to_limit {
-								fmod.Expiry = now + to_limit			// expiry must be capped so as not to overflow virtual switch variable size
-							} else {
-								fmod.Expiry = expiry
-							}
-						}
-						fmod.Id = &rname
-//rm_sheep.Baa( 1, ">>>>>> exp=%d fmod->exp=%d now=%d to_lim=%d now+to_li=%d", expiry, fmod.Expiry, now, to_limit, now+to_limit )
-
-						nlinks := plist[i].Get_nlinks() 				// if only one link, then we DONT set vlan later
-						extip := plist[i].Get_extip()					// if an external IP address is necessary on the fmod get it
-						if extip != nil {
-							fmod.Extip = extip
-						} else {
-							fmod.Extip = &empty_str
-						}
-
-						espq1, _ := plist[i].Get_endpoint_spq( &rname, timestamp )		// endpoints are saved h1,h2, but we need to process them in reverse here
-
-														//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
-						tptype_list := "none"							// default to no specific protocol 
-						if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
-							tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
-						}
-						tptype_toks := strings.Split( tptype_list, " " )
-		
-						for tidx := range( tptype_toks ) {				// must have a flow mod for each transport protocol type
-							fmod.Tptype = &tptype_toks[tidx]
-
-							fmod.Match.Tpsport= p1											// forward direction transport ports are h1==src h2==dest
-							fmod.Match.Tpdport= p2
-							fmod.Match.Ip1, _ = plist[i].Get_h1().Get_addresses()			// forward first, from h1 -> h2 (must use info from path as it might be split)
-							fmod.Match.Ip2, _ = plist[i].Get_h2().Get_addresses()
-							fmod.Exttyp = plist[i].Get_extflag()
-
-							rm_sheep.Baa( 1, "res_mgr/push_reg: sending i/e flow-mods for path %d: %s flag=%s tptyp=%s h1=%s --> h2=%s ip1= %s ip2=%s ext=%s exp/fm_exp=%d/%d",
-								i, rname, *fmod.Exttyp, tptype_toks[tidx], *h1, *h2, *fmod.Match.Ip1, *fmod.Match.Ip2, *fmod.Extip, expiry, fmod.Expiry )
-
-		
-							// ---- push flow-mods in the h1->h2 direction -----------
-							if espq1 != nil {													// data flowing into h2 from h1 over h2 to switch connection (ep0 handled with reverse path)
-																								// ep will be nil if both VMs are on the same switch
-								cfmod := fmod.Clone( )											// must send a copy since we put multiple flowmods onto the fq-mgr queue
-								cfmod.Dir_in = true
-								cfmod.Espq = espq1
-								msg = ipc.Mk_chmsg()
-								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-							} else {
-								fmod.Single_switch = true
-							}
-
-							cfmod := fmod.Clone( )
-							cfmod.Espq = plist[i].Get_ilink_spq( &rname, timestamp )				// send fmod to ingress switch on first link out from h1
-							cfmod.Dir_in = false
-							if nlinks > 1 && set_vlan {
-								cfmod.Action.Vlan_id = cfmod.Match.Ip1								// use mac address -- agent will convert to the vlan-id assigned to it
-							}
-							msg = ipc.Mk_chmsg()
-							msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )					// queue work to send to skoogi (errors come back asynch, successes do not generate response)
-
-							ilist := plist[i].Get_forward_im_spq( timestamp )						// get list of intermediate switch/port/qnum data in forward (h1->h2) direction
-							for ii := range ilist {
-								cfmod = fmod.Clone( )												// copy to pass which we'll alter a wee bit
-								cfmod.Espq = ilist[ii]
-								rm_sheep.Baa( 2, "send forward intermediate reserve: [%d] %s %d %d", ii, ilist[ii].Switch, ilist[ii].Port, ilist[ii].Queuenum )
-								msg = ipc.Mk_chmsg()
-								msg.Send_req( fq_ch, ch, REQ_IE_RESERVE, cfmod, nil )			// flow mod for each intermediate link in foward direction
-							}
-						}
+		if p != nil {
+			if (*p).Is_expired() {								// some reservations need to be explicitly undone at expiry
+				if (*p).Is_pushed() {							// no need if not pushed
+					switch (*p).(type) {
+						case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
+							undo_mirror_reservation( p, rname, ch )
 					}
 
-					p.Set_pushed()				// safe to mark the pledge as having been pushed.
+					(*p).Reset_pushed()
 				}
 			} else {
-				pend_count++
+				if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
+					switch (*p).(type) {
+						case *gizmos.Pledge_bwow:
+							bwow_push_res( p, &rname, ch, hto_limit, pref_v6 )
+							(*p).Set_pushed( )
+
+						case *gizmos.Pledge_bw:
+							bw_push_count++
+							bw_push_res( p, &rname, ch, hto_limit, alt_table, pref_v6 )
+	
+						case *gizmos.Pledge_steer:
+							st_push_count++
+							push_st_reservation( p, rname, ch, hto_limit )
+	
+						case *gizmos.Pledge_mirror:
+							push_mirror_reservation( p, rname, ch )
+					}
+
+					pushed_count++
+				} else {					// stil pending
+					pend_count++
+				}
 			}
-		} else {
-			pushed_count++
 		}
 	}
 
-	if push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
-		rm_sheep.Baa( 1, "push_bw_reservations: %d pushed, %d pending, %d already pushed", push_count, pend_count, pushed_count )
+	if st_push_count > 0 || bw_push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
+		rm_sheep.Baa( 1, "push_reservations: %d bandwidth, %d steering, %d pending, %d already pushed", bw_push_count, st_push_count, pend_count, pushed_count )
 	}
 
 	return pushed_count
@@ -396,7 +362,7 @@ func (i *Inventory) push_bw_reservations( ch chan *ipc.Chmsg, alt_table int, set
 */
 func (i *Inventory) pause_on( ) {
 	for _, p := range i.cache {
-		p.Pause( true )					// also reset the push flag		
+		(*p).Pause( true )					// also reset the push flag		
 	}
 }
 
@@ -405,7 +371,7 @@ func (i *Inventory) pause_on( ) {
 */
 func (i *Inventory) pause_off( ) {
 	for _, p := range i.cache {
-		p.Resume( true )					// also reset the push flag		
+		(*p).Resume( true )					// also reset the push flag		
 	}
 }
 
@@ -415,12 +381,12 @@ func (i *Inventory) pause_off( ) {
 */
 func (i *Inventory) reset_push() {
 	for _, p := range i.cache {
-		p.Reset_pushed( )	
+		(*p).Reset_pushed( )	
 	}
 }
 
 /*
-	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file. 
+	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.
 	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
 	seconds).
 */
@@ -437,11 +403,11 @@ func (i *Inventory) write_chkpt( ) {
 	}
 
 	for key, p := range i.cache {
-		s := p.To_chkpt()		
+		s := (*p).To_chkpt()		
 		if s != "expired" {
 			fmt.Fprintf( i.chkpt, "%s\n", s ) 					// we'll check the overall error state on close
 		} else {
-			if p.Is_extinct( 120 ) && p.Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
+			if (*p).Is_extinct( 120 ) && (*p).Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
 				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
 				delete( i.cache, key )
 			}
@@ -478,7 +444,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	if err != nil {
 		return
 	}
-	defer	f.Close( )
+	defer f.Close( )
 
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
@@ -494,30 +460,68 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 					}
 
 				default:
-					p = new( gizmos.Pledge )
-					p.From_json( &rec )
+					p, err = gizmos.Json2pledge( &rec )			// convert any type of json pledge to Pledge
 		
-					if  p.Is_expired() {
-						rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", p.To_str() )
-					} else {
-						h1, h2 := p.Get_hosts( )							// get the host names, fetch ostack data and update graph
-						update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
-						update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
-
-						req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-						req.Send_req( nw_ch, my_ch, REQ_RESERVE, p, nil )
-						req = <- my_ch										// should be OK, but the underlying network could have changed
-		
-						if req.Response_data != nil {
-							path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-							p.Set_path_list( path_list )
-							rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", p.Get_id, *h1, *h2, len( path_list ) )
-							err = i.Add_res( p )
+					if err == nil {
+						if  (*p).Is_expired() {
+							rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", (*p).String() )
 						} else {
-							rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", p.To_str() )
+							switch sp := (*p).(type) {									// work on specific pledge type, but pass the Pledge interface to add()
+								case *gizmos.Pledge_mirror:
+									err = i.Add_res( p )								// assume we can just add it back in as is
+
+								case *gizmos.Pledge_steer:
+									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
+
+								case *gizmos.Pledge_bwow:
+									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
+									push_block := h2 == nil
+									update_graph( h1, push_block, push_block )			// dig h1 info; push to netmgr if h2 isn't known and block on response
+									if h2 != nil {
+										update_graph( h2, true, true )					// dig h2 data and push to netmgr blocking for a netmgr response
+									}
+			
+									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
+									req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, sp, nil )
+									req = <- my_ch										// should be OK, but the underlying network could have changed
+					
+									if req.Response_data != nil {
+										gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
+										sp.Set_gate( gate )
+										rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
+										err = i.Add_res( p )
+									} else {
+										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
+									}
+
+								case *gizmos.Pledge_bw:
+									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
+									update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
+									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
+			
+									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
+									req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
+									req = <- my_ch										// should be OK, but the underlying network could have changed
+					
+									if req.Response_data != nil {
+										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+										sp.Set_path_list( path_list )
+										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
+										err = i.Add_res( p )
+									} else {
+										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
+									}
+
+								default:
+									rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )
+
+							}						// end switch on specific pledge type
 						}
+					} else {
+						rm_sheep.Baa( 0, "CRI: %s", err )
+						return			// quickk escape
 					}
-			}
+			}				// outer switch
 		}
 	}
 
@@ -542,7 +546,7 @@ func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error )
 	plist := make( []*gizmos.Pledge, len( inv.cache ) )
 	i := 0
 	for _, p := range inv.cache {
-		if p.Has_host( vmname ) && ! p.Is_expired()  && ! p.Is_paused() {
+		if (*p).Has_host( vmname ) && ! (*p).Is_expired()  && ! (*p).Is_paused() {
 			plist[i] = p
 			i++
 		}
@@ -597,19 +601,39 @@ func Mk_inventory( ) (inv *Inventory) {
 
 /*
 	Stuff the pledge into the cache erroring if the pledge already exists.
+	Expeect either a Pledge, or a pointer to a pledge.
 */
-func (inv *Inventory) Add_res( p *gizmos.Pledge ) (state error) {
-	state = nil
-	id := p.Get_id()
+func (inv *Inventory) Add_res( pi interface{} ) (err error) {
+	var (
+		p *gizmos.Pledge
+	)
+
+	err = nil
+
+	px, ok := pi.( gizmos.Pledge )
+	if ok {
+		p = &px
+	} else {
+		py, ok := pi.( *gizmos.Pledge )
+		if ok {
+			p = py
+		} else {
+			err = fmt.Errorf( "internal mishap in Add_res: expected Pledge or *Pledge, got neither" )
+			rm_sheep.Baa( 1, "%s", err )
+			return
+		}
+	}
+
+	id := (*p).Get_id()
 	if inv.cache[*id] != nil {
 		rm_sheep.Baa( 2, "reservation not added to inventory, already exists: %s", *id )
-		state = fmt.Errorf( "reservation already exists: %s", *id )
+		err = fmt.Errorf( "reservation already exists: %s", *id )
 		return
 	}
 
 	inv.cache[*id] = p
 
-	rm_sheep.Baa( 1, "resgmgr: added reservation: %s", p.To_chkpt() )
+	rm_sheep.Baa( 1, "resgmgr: added reservation: %s", (*p).To_chkpt() )
 	return
 }
 
@@ -628,15 +652,55 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 		return
 	}
 
-	if ! p.Is_valid_cookie( cookie ) &&  *cookie != *super_cookie {
+	if ! (*p).Is_valid_cookie( cookie ) &&  *cookie != *super_cookie {
 		rm_sheep.Baa( 2, "resgmgr: denied fetch of reservation: cookie supplied (%s) didn't match that on pledge %s", *cookie, *name )
 		p = nil
 		state = fmt.Errorf( "not authorised to access or delete reservation: %s", *name )
 		return
 	}
 
-	rm_sheep.Baa( 2, "resgmgr:: fetched reservation: %s", p.To_str() )
+	rm_sheep.Baa( 2, "resgmgr:: fetched reservation: %s", (*p).To_str() )
 	return
+}
+
+/*
+	Accept a reservation (pledge) and see if it matches any existing reservation in
+	the inventory. If it does, return the reservation id as data, set error if
+	we encounter problems.
+*/
+func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error ) {
+	rid = nil
+	state = nil
+
+	if inv == nil {
+		state = fmt.Errorf( "inventory is nil" )
+		return
+	}
+
+	for _, r := range inv.cache {
+		if !(*r).Is_expired()  && (*p).Equals( r ) {
+			rid = (*r).Get_id( )
+			return
+		}
+	}
+
+	return
+}
+
+
+func (inv *Inventory) Get_mirrorlist() ( string ) {
+	sep := ""
+	bs := bytes.NewBufferString("")
+	for _, gp := range inv.cache {
+		//if (*p).Is_mirroring() && !(*p).Is_expired() {
+		//if (*p).Is_ptype( gizmos.PT_MIRRORING ) && !(*p).Is_expired() {
+		p, ok := (*gp).(*gizmos.Pledge_mirror)
+		if ok  && !p.Is_expired() {
+			bs.WriteString(fmt.Sprintf("%s%s", sep, *p.Get_id()))
+			sep = " "
+		}
+	}
+	return bs.String()
 }
 
 /*
@@ -654,20 +718,26 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 
-	p, state := inv.Get_res( name, cookie )
-	if p != nil {
-		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", p.To_str() )
+	gp, state := inv.Get_res( name, cookie )
+	if gp != nil {
+		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", (*gp).To_str() )
 		state = nil
 
-		ch := make( chan *ipc.Chmsg )	
-		defer close( ch )										// close it on return
-		req := ipc.Mk_chmsg( )
-		req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
-		req = <- ch											// wait for response from network
-		state = req.State
+		switch p := (*gp).(type) {
+			case *gizmos.Pledge_mirror:
+				p.Set_expiry( time.Now().Unix() )					// expire the mirror NOW
+				p.Set_pushed()						// need this to force undo to occur
 
-		p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
-		p.Reset_pushed()									// force push of flow-mods that reset the expiry
+			case *gizmos.Pledge_bw, *gizmos.Pledge_bwow:			// network handles either type
+				ch := make( chan *ipc.Chmsg )	
+				defer close( ch )									// close it on return
+				req := ipc.Mk_chmsg( )
+				req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
+				req = <- ch											// wait for response from network
+				state = req.State
+				p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
+				(*gp).Reset_pushed()						// force push of flow-mods that reset the expiry
+		}
 	} else {
 		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
 	}
@@ -688,11 +758,14 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 
 	ndel = 0
 	
-	plist = make( []*string, len( inv.cache ) )
+	plist = make( []*string, len( inv.cache ) )			// build a list so we can safely remove from the map
 	for _, pledge := range inv.cache {
-		plist[i] = pledge.Get_id()
-		i++
+		if ! (*pledge).Is_expired( ) {
+			plist[i] = (*pledge).Get_id()
+			i++
+		}
 	}
+	plist = plist[:i]									// slice down to what was actually filled in
 
 	for _, pname := range plist {
 		rm_sheep.Baa( 2, "delete all attempt to delete: %s", *pname )
@@ -730,25 +803,31 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 	state = nil
 	p = inv.cache[*name]
 	if p != nil {
-		rm_sheep.Baa( 2, "resgmgr: yanked reservation: %s", p.To_str() )
-		cp := p.Clone( *name + ".yank" )				// clone but DO NOT set conclude time until after network delete!
+		switch pldg := (*p).(type) {
+			case *gizmos.Pledge_bw:
+				rm_sheep.Baa( 2, "resgmgr: yanked reservation: %s", (*p).To_str() )
+				cp := pldg.Clone( *name + ".yank" )				// clone but DO NOT set conclude time until after network delete!
 
-		inv.cache[*name + ".yank"] = cp					// insert the cloned pledge into the inventory
+				icp := gizmos.Pledge(cp)							// must convert to a pledge interface
+				inv.cache[*name + ".yank"] = &icp					// and then insert the address of the interface
 
-		inv.cache[*name] = nil							// yank original from the list
-		delete( inv.cache, *name )
-		p.Set_path_list( nil )							// no path list for this pledge 	
+				inv.cache[*name] = nil								// yank original from the list
+				delete( inv.cache, *name )
+				pldg.Set_path_list( nil )							// no path list for this pledge 	
 
-		ch := make( chan *ipc.Chmsg )	
-		defer close( ch )									// close it on return
-		req := ipc.Mk_chmsg( )
-		req.Send_req( nw_ch, ch, REQ_DEL, cp, nil )			// delete from the network point of view
-		req = <- ch											// wait for response from network
-		state = req.State
+				ch := make( chan *ipc.Chmsg )	
+				defer close( ch )									// close it on return
+				req := ipc.Mk_chmsg( )
+				req.Send_req( nw_ch, ch, REQ_DEL, cp, nil )			// delete from the network point of view
+				req = <- ch											// wait for response from network
+				state = req.State
 
-														// now safe to set these
-		cp.Set_expiry( time.Now().Unix() + 1 )			// force clone to be expired
-		cp.Reset_pushed( )								// force it to go out again
+																// now safe to set these
+				cp.Set_expiry( time.Now().Unix() + 1 )			// force clone to be expired
+				cp.Reset_pushed( )								// force it to go out again
+
+			// not supported for other pledge types
+		}
 	} else {
 		state = fmt.Errorf( "no reservation with name: %s", *name )
 		rm_sheep.Baa( 2, "resgmgr: unable to yank, no reservation with name: %s", *name )
@@ -765,7 +844,6 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 	var (
-		set_vlan	bool = true			// set the vlan tag on forward ingress flow mods
 		inv	*Inventory
 		msg	*ipc.Chmsg
 		ckptd	string
@@ -776,6 +854,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
 		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
 		rr_rate		int = 3600			// refresh rate (1 hour)
+		favour_v6 bool = true			// favour ipv6 addresses if a host has both defined.
 	)
 
 	super_cookie = cookie				// global for all methods
@@ -798,6 +877,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		alt_table = clike.Atoi( *p )
 	}
 
+	p = cfg_data["default"]["favour_ipv6"]
+	if p != nil {
+		favour_v6 = *p == "true"
+	}
+
 	if cfg_data["resmgr"] != nil {
 		cdp := cfg_data["resmgr"]["chkpt_dir"]
 		if cdp == nil {
@@ -811,10 +895,12 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			rm_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
 		}
 
+		/*
 		p = cfg_data["resmgr"]["set_vlan"]
 		if p != nil {
 			set_vlan = *p == "true"
 		}
+		*/
 
 		p = cfg_data["resmgr"]["super_cookie"]
 		if p != nil {
@@ -860,9 +946,9 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_NOOP:			// just ignore
 
 			case REQ_ADD:
-				p := msg.Req_data.( *gizmos.Pledge )	
-				msg.State = inv.Add_res( p )
+				msg.State = inv.Add_res( msg.Req_data )			// add will determine the pledge type and do the right thing
 				msg.Response_data = nil
+
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
 				all_sys_up = true
@@ -877,14 +963,20 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 			case REQ_DEL:											// user initiated delete -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
-				if *data[0] == "all" {
+				if data[0] != nil  &&  *data[0] == "all" {
 					inv.Del_all_res( data[1] )
 					msg.State = nil
 				} else {
 					msg.State = inv.Del_res( data[0], data[1] )
 				}
 
+				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// must force a push to push augmented (shortened) reservations
 				msg.Response_data = nil
+
+			case REQ_DUPCHECK:
+				if msg.Req_data != nil {
+					msg.Response_data, msg.State = inv.dup_check(  msg.Req_data.( *gizmos.Pledge ) )
+				}
 
 			case REQ_GET:											// user initiated get -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
@@ -903,11 +995,13 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
 				inv.pause_on()
+				res_refresh = 0;						// must force a push of everything on next push tickle
 				rm_sheep.Baa( 1, "pausing..." )
 
 			case REQ_RESUME:
 				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
+				res_refresh = 0;						// must force a push of everything on next push tickle
 				inv.pause_off()
 
 			case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
@@ -915,21 +1009,22 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
 					rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
 					tmsg := ipc.Mk_chmsg( )
-					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr
+					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr and trigger flow-mod push
 				}
 				last_qcheck = now
 
-			case REQ_PUSH:								// driven every few seconds to push new reservations
+			case REQ_PUSH:								// driven every few seconds to check for need to refresh because of switch max timeout setting
 				if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
 					now := time.Now().Unix()
 					if now > res_refresh {
 						rm_sheep.Baa( 2, "refreshing all reservations" )	
 						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
 						res_refresh = now + int64( rr_rate )		// push everything again in an hour
+
+						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// force a push of all
 					}
 				}
 
-				inv.push_bw_reservations( my_chan, alt_table, set_vlan, int64( hto_limit ) )
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
@@ -958,16 +1053,23 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				fq_data[FQ_QLIST] = msg.Response_data
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
+
+				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
 				
 			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
 				}
 
+			case REQ_GET_MIRRORS:									// user initiated get list of mirrors
+				t := inv.Get_mirrorlist()
+				msg.Response_data = &t;
+
 			default:
 				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )
 				msg.Response_data = nil
 				msg.State = fmt.Errorf( "res_mgr: unknown message (%d)", msg.Msg_type )
+				msg.Response_ch = nil				// we don't respond to these.
 		}
 
 		rm_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )

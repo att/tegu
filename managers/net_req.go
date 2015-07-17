@@ -6,7 +6,8 @@
 	Date:		16 November 2014
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		27 Feb 2015 - Changes to make steering work with lazy update.
+				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 */
 
 package managers
@@ -30,12 +31,16 @@ type Net_vm  struct {
 
 /*
 	Create a vm insertion structure. Not a good idea to create a nil named structure, but
-	we'll allow it and subs in unnamed.
+	we'll allow it and subs in the ip4 value as its name if provided, otherwise the string unnamed.
 */
 func Mk_netreq_vm( name, id, ip4, ip6, phost, mac, gw, cidr, fip *string, gwmap map[string]*string )  ( np *Net_vm ) {
 	if name == nil {
-		unv := "unnamed"
-		name = &unv
+		if ip4 != nil {				// no name, use ip4 if there
+			name = ip4
+		} else {
+			unv := "unnamed"
+			name = &unv
+		}
 	}
 
 	np = &Net_vm {
@@ -136,3 +141,56 @@ func  (vm *Net_vm) Add2graph( nw_ch chan *ipc.Chmsg ) {
 	msg := ipc.Mk_chmsg( )
 	msg.Send_req( nw_ch, nil, REQ_ADD, vm, nil )		
 }
+
+/*
+	Output in human readable form.
+*/
+func (vm *Net_vm) To_str() ( string ) {
+	if vm == nil {
+		return ""
+	}
+
+	str := ""
+	if vm.name != nil {
+		str = str + *vm.name + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.id != nil {
+		str = str + *vm.id + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.ip4 != nil {
+		str = str + *vm.ip4 + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.ip6 != nil {
+		str = str + *vm.ip6 + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.phost != nil {
+		str = str + *vm.phost + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.gw != nil {
+		str = str + *vm.gw + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.mac != nil {
+		str = str + *vm.mac + " "
+	} else {
+		str = str + "<nil> "
+	}
+	if vm.fip != nil {
+		str = str + *vm.fip
+	} else {
+		str = str + "<nil>"
+	}
+
+	return str
+}	

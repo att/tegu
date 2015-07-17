@@ -14,6 +14,8 @@
 #
 #	Mod:		27 Aug 2014 - Added protection against chef running 'service tegu standby' if the node
 #					has been put into active mode. 
+#				10 Mar 2015 - Made less chatty since it gets invoked every n seconds by tegu_ha and 
+#					thus pollutes the log.
 # --------------------------------------------------------------------------------------------------
 
 
@@ -63,7 +65,6 @@ case $1 in
 			verify_id
 			touch $standby_file
 			rm -f $active_file
-			echo "standby turned on"
 			;;
 
 	state)

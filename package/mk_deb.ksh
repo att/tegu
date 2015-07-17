@@ -9,6 +9,8 @@
 #	Date:		May 2014
 #
 #	Mod:		Added md5sum capture.
+#				27 Apr 2015 - Added package name (steer, qlite, etc) to the change log name 
+#					captured in the bundle directory.
 # -----------------------------------------------------------------------------------------------
 
 function clean_house
@@ -192,9 +194,9 @@ verbose "populate DEBIAN directory"
 cp /tmp/PID$$.md5 DEBIAN/md5sums
 
 edit=1
-if [[ -f ../changelog.$ver ]]						# if one from a previous run, don't make them edit it again
+if [[ -f ../changelog.$pkg_name.$ver ]]						# if one from a previous run, don't make them edit it again
 then
-	cp ../changelog.$ver DEBIAN/changelog
+	cp ../changelog.$pkg_name.$ver DEBIAN/changelog
 
 	if (( confirm ))
 	then
@@ -211,7 +213,7 @@ else
 	# CAUTION -- the change log parser is way too sensitive -- leading spaces tabs seem to matter
 	date=$(date -R)
 	cat <<endKat >DEBIAN/changelog
-attlr${pkg-name} (${ver}-1) UNRELEASED; urgency=low
+${full_pkg_name} (${ver}-1) UNRELEASED; urgency=low
 
   * Bug Fixes. (Closes: #xxx)
 
@@ -227,7 +229,7 @@ fi
 if (( edit ))
 then
 	vi DEBIAN/changelog
-	cp DEBIAN/changelog ../changelog.$ver
+	cp DEBIAN/changelog ../changelog.$pkg_name.$ver
 fi
 
 

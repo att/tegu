@@ -12,46 +12,40 @@
 
 	Mods:		05 May 2014 : Added ability to receive and process json data from the agent
 					and the function needed to process the output from a map_mac2phost request.
-					Added ability to send the map_mac2phost request to the agent. 
+					Added ability to send the map_mac2phost request to the agent.
 				13 May 2014 : Added support for exit-dscp value.
-				05 Jun 2014 : Fixed stray reference to net_sheep. 
+				05 Jun 2014 : Fixed stray reference to net_sheep.
 				29 Oct 2014 : Corrected potential core dump if agent msg received is less than
 					100 bytes.
 				06 Jan 2015 : Added support for wide area (wacc)
+				17 Jun 2105 : Added oneway reservation support.
 */
 
 package managers
 
 import (
-	//"bufio"
 	"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
 	"strings"
-	//"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
 	"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/connman"
 	"codecloud.web.att.com/gopkgs/ipc"
 	"codecloud.web.att.com/gopkgs/jsontools"
-	//"codecloud.web.att.com/tegu"
-	//"codecloud.web.att.com/tegu/gizmos"
 )
 
 // ----- structs used to bundle into json commands
 
 type action struct {			// specific action
 	Atype	string				// something like map_mac2phost, or intermed_queues
-	Aid		uint32				// request id used to map the response back to caller's request
+	Aid		uint32				// action id used to map the response back to caller's request
+	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
 	Hosts	[]string			// list of hosts to apply the action to
 	Dscps	string				// space separated list of dscp values
-	Data	map[string]string	// specific request data (parms likely)
 	Fdata	[]string			// flowmod command data
+	Qdata	[]string			// queue parms
 }
 
 type agent_cmd struct {			// overall command
@@ -68,9 +62,9 @@ type agent struct {
 }
 
 type agent_data struct {
-	agents	map[string]*agent					// hash for direct index (based on ID string given to the session) 
+	agents	map[string]*agent					// hash for direct index (based on ID string given to the session)
 	agent_list []*agent							// sequential index into map that allows easier round robin access for sendone
-	aidx	int									// next spot in index for round robin sends 
+	aidx	int									// next spot in index for round robin sends
 }
 
 /*
@@ -80,9 +74,9 @@ type agent_msg struct {
 	Ctype	string			// command type -- should be response, ack, nack etc.
 	Rtype	string			// type of response (e.g. map_mac2phost, or specific id for ack/nack)
 	Rdata	[]string		// response data
-	State	int				// if an ack/nack some state information 
+	State	int				// if an ack/nack some state information
 	Vinfo	string			// agent verion (dbugging mostly)
-	Rid		uint32			// the original request id
+	Rid		uint32			// original request id
 }
 
 type pend_req struct {		// pending request -- something is expecting a response on a channel
@@ -93,8 +87,8 @@ type pend_req struct {		// pending request -- something is expecting a response 
 // ---------------------------------------------------------------------------------------------------
 
 /*
-	Build the agent list from the map. The agent list is a 'sequential' list of all currently 
-	connected agents which affords us an easy means to roundrobin through them. 
+	Build the agent list from the map. The agent list is a 'sequential' list of all currently
+	connected agents which affords us an easy means to roundrobin through them.
 */
 func (ad *agent_data) build_list( ) {
 	ad.agent_list = make( []*agent, len( ad.agents ) )
@@ -125,11 +119,11 @@ func (ad *agent_data) Mk_agent( aid string ) ( na *agent ) {
 }
 
 /*
-	Send the message to one agent. The agent is selected using the current 
+	Send the message to one agent. The agent is selected using the current
 	index in the agent_data so that it effectively does a round robin.
 */
 func (ad *agent_data) send2one( smgr *connman.Cmgr,  msg string ) {
-	l := len( ad.agents ) 
+	l := len( ad.agents )
 	if l <= 0 {
 		return
 	}
@@ -146,11 +140,11 @@ func (ad *agent_data) send2one( smgr *connman.Cmgr,  msg string ) {
 }
 
 /*
-	Send the message to one agent. The agent is selected using the current 
+	Send the message to one agent. The agent is selected using the current
 	index in the agent_data so that it effectively does a round robin.
 */
 func (ad *agent_data) sendbytes2one( smgr *connman.Cmgr,  msg []byte ) {
-	l := len( ad.agents ) 
+	l := len( ad.agents )
 	if l <= 0 {
 		return
 	}
@@ -172,7 +166,7 @@ func (ad *agent_data) sendbytes2one( smgr *connman.Cmgr,  msg []byte ) {
 	
 */
 func (ad *agent_data) sendbytes2lra( smgr *connman.Cmgr,  msg []byte ) {
-	l := len( ad.agents ) 
+	l := len( ad.agents )
 	if l <= 0 {
 		return
 	}
@@ -187,7 +181,7 @@ func (ad *agent_data) sendbytes2lra( smgr *connman.Cmgr,  msg []byte ) {
 	
 */
 func (ad *agent_data) send2lra( smgr *connman.Cmgr,  msg string ) {
-	l := len( ad.agents ) 
+	l := len( ad.agents )
 	if l <= 0 {
 		return
 	}
@@ -208,7 +202,7 @@ func (ad *agent_data) send2all( smgr *connman.Cmgr,  msg string ) {
 /*
 	Deal with incoming data from an agent. We add the buffer to the cahce
 	(all input is expected to be json) and attempt to pull a blob of json
-	from the cache. If the blob is pulled, then we act on it, else we 
+	from the cache. If the blob is pulled, then we act on it, else we
 	assume another buffer or more will be coming to complete the blob
 	and we'll do it next time round.
 
@@ -224,7 +218,7 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 	a.jcache.Add_bytes( buf )
 	jblob := a.jcache.Get_blob()						// get next blob if ready
 	for ; jblob != nil ; {
-    	err := json.Unmarshal( jblob, &req )           // unpack the json 
+    	err := json.Unmarshal( jblob, &req )           // unpack the json
 
 		if err != nil {
 			am_sheep.Baa( 0, "ERR: unable to unpack agent_message: %s  [TGUAGT000]", err )
@@ -234,42 +228,42 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 	
 			switch( req.Ctype ) {					// "command type"
 				case "response":					// response to a request
-					switch( req.Rtype ) {
-						case "map_mac2phost":												// map goes to network manager (no pending request)
-							if req.State == 0 {
+					if req.State == 0 {				// successful response
+						switch( req.Rtype ) {
+							case "map_mac2phost":												// map goes to network manager (no pending request)
 								msg := ipc.Mk_chmsg( )
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// we don't expect a response
-							} else {
-								am_sheep.Baa( 1, "WRN: response for failed command received and ignored: %s  [TGUAGT002]", req.Rtype )
-							}
 
-						default:
-							if req.Rid > 0 {
-								pr := rt_map[req.Rid]
-								if pr != nil {
-									am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: %d", req.Rid )
-									msg := pr.req					// message block that was sent to us; fill out the response and return
-									msg.Response_data = req.Rdata
-									if req.State == 0 {
-										msg.State = nil
-									} else {
-										msg.State = fmt.Errorf( "rc=%d", req.State )
+									msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
+				
+							default:	
+								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )		// if we don't recognise it we assume it should be ignored
+								if am_sheep.Would_baa( 2 ) {
+									am_sheep.Baa( 2, "first few ignored messages from response:" )
+									for i := 0; i < len( req.Rdata ) && i < 10; i++ {
+										am_sheep.Baa( 2, "[%d] %s", i, req.Rdata[i] )
 									}
-
-									delete( rt_map, req.Rid )						// done with the pending request block
-									msg.Response_ch <- msg							// send response back to the process that caused the command to run
-								} else {
-									am_sheep.Baa( 1, "WRN: agent response ignored: request id in response didn't map to a pending request: %d [TGUAGTXXX]", req.Rid )   //FIX message id
 								}
-							} else {
-								am_sheep.Baa( 1, "WRN: agent response didn't have a request id  or match a generic type: %s [TGUAGTXXX]", req.Rtype )   //FIX message id
-							}
-					}
+						}								// end rtype switch
+					} else {							// failed request
+						switch( req.Rtype ) {
+							case "bwow_fmod":
+								am_sheep.Baa( 1, "ERR: oneway bandwidth flow-mod failed; check agent logs for details  [TGUAGT006]" )
+								for i := 0; i < len( req.Rdata ) && i < 20; i++ {
+									am_sheep.Baa( 1, "  [%d] %s", i, req.Rdata[i] )
+								}
 
+							default:
+								am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: %s  [TGUAGT002]", req.Rtype )
+								for i := 0; i < len( req.Rdata ) && i < 20; i++ {
+									am_sheep.Baa( 2, "  [%d] %s", i, req.Rdata[i] )
+								}
+						}
+					}
 
 				default:
 					am_sheep.Baa( 1, "WRN:  unrecognised command type type from agent: %s  [TGUAGT003]", req.Ctype )
-			}
+			}													// end ctype switch
 		}
 
 		jblob = a.jcache.Get_blob()								// get next blob if the buffer completed one and containe a second
@@ -347,7 +341,7 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 /*
 	Accepts a string of space separated dscp values and returns a string with the values
 	approprately shifted so that they can be used by the agent in a flow-mod command.  E.g.
-	a dscp value of 40 is shifted to 160. 
+	a dscp value of 40 is shifted to 160.
 */
 func shift_values( list string ) ( new_list string ) {
 	new_list = ""
@@ -434,7 +428,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
 	tklr.Add_spot( 10, ach, REQ_INTERMEDQ, nil, 1 );		  			// tickle once, very soon, to start an intermediate refresh asap
-	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping 
+	tklr.Add_spot( refresh, ach, REQ_MAC2PHOST, nil, ipc.FOREVER );  	// reocurring tickle to get host mapping
 	tklr.Add_spot( iqrefresh, ach, REQ_INTERMEDQ, nil, ipc.FOREVER );  	// reocurring tickle to ensure intermediate switches are properly set
 
 	sess_chan := make( chan *connman.Sess_data, 1024 )					// channel for comm from agents (buffers, disconns, etc)
@@ -500,7 +494,6 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						}
 				}
 
-	
 				if req != nil  &&  req.Response_ch != nil {				// if response needed; send the request (updated) back 
 					am_sheep.Baa( 3, "processing request finished %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
 					req.Response_ch <- req
@@ -509,12 +502,12 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 
 			case sreq := <- sess_chan:		// data from a connection or TCP listener
 				switch( sreq.State ) {
-					case connman.ST_ACCEPTED:		// newly accepted connection; no action 
+					case connman.ST_ACCEPTED:		// newly accepted connection; no action
 
 					case connman.ST_NEW:			// new connection
 						a := adata.Mk_agent( sreq.Id )
 						am_sheep.Baa( 1, "new agent: %s [%s]", a.id, sreq.Data )
-						if host_list != "" {											// immediate request for this 
+						if host_list != "" {											// immediate request for this
 							adata.send_mac2phost( smgr, &host_list )
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}

@@ -3,24 +3,24 @@
 /*
 
 	Mnemonic:	network
-	Abstract:	Manages everything associated with a network. This module contains a 
+	Abstract:	Manages everything associated with a network. This module contains a
 				goroutine which should be invoked from the tegu main and is responsible
 				for managing the network graph and responding to requests for information about
-				the network graph. As a part of the collection of functions here, there is also 
-				a tickler which causes the network graph to be rebuilt on a regular basis. 
+				the network graph. As a part of the collection of functions here, there is also
+				a tickler which causes the network graph to be rebuilt on a regular basis.
 
 				The network manager goroutine listens to a channel for requests such as finding
-				and reserving a path between two hosts, and generating a json representation 
+				and reserving a path between two hosts, and generating a json representation
 				of the network graph for outside consumption.
 
-				TODO: need to look at purging links/vlinks so they don't bloat if the network changes 
+				TODO: need to look at purging links/vlinks so they don't bloat if the network changes
 
 	Date:		24 November 2013
 	Author:		E. Scott Daniels
 
 	Mods:		19 Jan 2014 - Added support for host-any reservations.
-				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link. 
-				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint 
+				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link.
+				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint
 							loading until after the driver here has been entered and thus we've built
 							the first graph.
 				03 Apr 2014 - Support for endpoints on the path.
@@ -34,42 +34,48 @@
 				07 Jul 2014 - Added support for reservation refresh.
 				15 Jul 2014 - Added partial path allocation if one endpoint is in a different user space and
 							is not validated.
-				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when 
+				16 Jul 2014 - Changed unvalidated indicator to bang (!) to avoid issues when
 					vm names have a dash (gak).
 				29 Jul 2014 - Added mlag support.
-				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given. 
+				31 Jul 2014 - Corrected a bug that prevented using a VM ID when the project name/id was given.
 				11 Aug 2014 - Corrected bleat message.
 				01 Oct 2014 - Corrected bleat message during network build.
 				09 Oct 2014 - Turned 'down' two more bleat messages to level 2.
 				10 Oct 2014 - Correct bi-directional link bug (228)
-				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly 
+				30 Oct 2014 - Added support for !//ex-ip address syntax, corrected problem with properly
 					setting the -S or -D flag for an external IP (#243).
 				12 Nov 2014 - Change to strip suffix on phost map.
 				17 Nov 2014 - Changes for lazy mapping.
-				24 Nov 2014 - Changes to drop the requirement for both VMs to have a floating IP address 
-					if a cross tenant reservation is being made. Also drops the requirement that the VM 
+				24 Nov 2014 - Changes to drop the requirement for both VMs to have a floating IP address
+					if a cross tenant reservation is being made. Also drops the requirement that the VM
 					have a floating IP if the reservation is being made with a host using an external
 					IP address.
+				11 Mar 2015 - Corrected bleat messages in find_endpoints() that was causing core dump if the
+					g1/g2 information was missing. Corrected bug that was preventing uuid from being used
+					as the endpoint 'name'.
+				20 Mar 2014 - Added REQ_GET_PHOST_FROM_MAC code
+				25 Mar 2015 - IPv6 changes.
+				30 Mar 2014 - Added ability to accept an array of Net_vm blocks.
+				18 May 2015 - Added discount support.
+				26 May 2015 - Conversion to support pledge as an interface.
+				08 Jun 2015 - Added support for dummy star topo.
+					Added support for 'one way' reservations (non-virtual router so no real endpoint)
+				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
+				18 Jun 2015 - Added oneway rate limiting and delete support.
+ 				02 Jul 2015 - Extended the physical host refresh rate.
 */
 
 package managers
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
 	"strings"
-	//"time"
 
 	"codecloud.web.att.com/gopkgs/bleater"
 	"codecloud.web.att.com/gopkgs/clike"
 	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/tegu"
+	//"codecloud.web.att.com/tegu"
 	"codecloud.web.att.com/tegu/gizmos"
 	
 )
@@ -79,7 +85,7 @@ import (
 // this probably should be network rather than Network as it's used only internally
 
 /*
-	Defines everything we need to know about a network. 
+	Defines everything we need to know about a network.
 */
 type Network struct {				
 	switches	map[string]*gizmos.Switch	// symtable of switches
@@ -95,18 +101,12 @@ type Network struct {
 	vmid2ip		map[string]*string			// vmid to ip address	Tegu-lite
 	mac2phost	map[string]*string			// mac to phost map generated from OVS agent data (needed to include gateways in graph)
 	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
-	ip2fip		map[string]*string			// tenant/ip to floating ip address translation
-	fip2ip		map[string]*string			// floating ip address to tenant/ip translation
+	ip2fip		map[string]*string			// projects/ip to floating ip address translation
+	fip2ip		map[string]*string			// floating ip address to projects/ip translation
 	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
 	mlags		map[string]*gizmos.Mlag		// reference to each mlag link group by name
 	hupdate		bool						// set to true only if hosts is updated after gwmap has size (chkpt reload timing)
-}
-
-type host_pair struct {
-	usr	*string			// the user/tenant/project/squatter name/ID
-	h1	*string
-	h2	*string	
-	fip	*string			// floating IP address needed for this segment
+	relaxed		bool						// if true, we're in relaxed mode which means we don't path find or do admission control.
 }
 
 
@@ -131,6 +131,15 @@ func mk_network( mk_links bool ) ( n *Network ) {
 
 // -------------- map management (mostly tegu-lite) -----------------------------------------------------------
 /*
+	Set the relaxed mode in the network.
+*/
+func (n *Network) Set_relaxed( state bool ) {
+	if n != nil {
+		n.relaxed = state
+	}
+}
+
+/*
 	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
 */
 func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
@@ -143,20 +152,21 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 		}
 		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
 
-		for ip, mac := range n.ip2mac {				// add in regular VMs
+		for ip, mac := range n.ip2mac {							// add in regular VMs
 			vmid := n.ip2vmid[ip]
 			if vmid != nil && mac != nil {						// skip if we don't find a vmid
 				if n.vmid2phost[*vmid] != nil {
-					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					net_sheep.Baa( 2, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
 					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
 					i++
 				} else {
 					net_sheep.Baa( 1, "did NOT add host: mac=%s ip=%s phost=NIL", *mac, ip )
 				}
+			} else {
 			}
 		}
 
-		if n.gwmap != nil {						// add in the gateways which are not reported by openstack
+		if n.gwmap != nil {										// add in the gateways which are not reported by openstack
 			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
 				for mac, ip := range n.gwmap {
 					if n.mac2phost[mac] == nil {
@@ -187,13 +197,14 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 }
 
 /*
-	Using a net_vm struct update the various maps. Allows for lazy discovery of 
+	Using a net_vm struct update the various maps. Allows for lazy discovery of
 	VM information rather than needing to request everything all at the same time.
 */
 func (net *Network) insert_vm( vm *Net_vm ) {
 	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
-	if vname == nil {								// shouldn't happen, but be safe
-		return
+	if vname == nil || *vname == "" || *vname == "unknown" {								// shouldn't happen, but be safe
+		//return
+	
 	}
 
 	if net.vm2ip == nil {							// ensure everything exists
@@ -236,8 +247,6 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 		net.vmip2gw = make( map[string]*string )
 	}
 	
-
-
 	if vname != nil {
 		net.vm2ip[*vname] = vip4
 	}
@@ -269,7 +278,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 
 
 /*
-	Given a user name find a fence in the table, or copy the defaults and 
+	Given a user name find a fence in the table, or copy the defaults and
 	return those.
 */
 func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
@@ -316,7 +325,7 @@ func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 		if phost_suffix != nil {								// if we added a suffix to the host, we must strip it away
 			stoks := strings.Split( toks[0], *phost_suffix )
 			dup_str = stoks[0]
-		} 
+		}
 		n.mac2phost[toks[1]] = &dup_str
 	}
 
@@ -344,13 +353,14 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 		}
 	}
 
-	net_sheep.Baa( 2, "built ip2vm map: %d entires", len( i2v ) )
+	net_sheep.Baa( 2, "built ip2vm map: %d entries", len( i2v ) )
 	return
 }
 
+
 /*
 	Accepts a list (string) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
-	the list based on spaces and adds each information segment to the queue map.  If ep_only is true, 
+	the list based on spaces and adds each information segment to the queue map.  If ep_only is true,
 	then we drop all middle link queues (priority-in priority-out).
 
 	(Supports gen_queue_map and probably not useful for anything else)
@@ -374,10 +384,10 @@ func qlist2map( qmap map[string]int, qlist *string, ep_only bool ) {
 }
 
 /*
-	Traverses all known links and generates a switch queue map based on the queues set for 
-	the time indicated by the timestamp passed in (ts). 
+	Traverses all known links and generates a switch queue map based on the queues set for
+	the time indicated by the timestamp passed in (ts).
 
-	If ep_only is set to true, then queues only for endpoints are generated. 
+	If ep_only is set to true, then queues only for endpoints are generated.
 
 	TODO:  this needs to return the map, not an array (fqmgr needs to change to accept the map)
 */
@@ -385,14 +395,14 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	err = nil									// at the moment we are always successful
 	seen := make( map[string]int, 100 )			// prevent dups which occur because of double links
 
-	for _, link := range n.links {					// for each link in the graph
+	for _, link := range n.links {				// for each link in the graph
 		s := link.Queues2str( ts )
-		qlist2map( seen, &s, ep_only )						// add these to the map
+		qlist2map( seen, &s, ep_only )	// add these to the map
 	}
 
-	for _, link := range n.vlinks {					// and do the same for vlinks
+	for _, link := range n.vlinks {				// and do the same for vlinks
 		s := link.Queues2str( ts )
-		qlist2map( seen, &s, ep_only )						// add these to the map
+		qlist2map( seen, &s, ep_only )			// add these to the map
 	}
 
 	qmap = make( []string, len( seen ) )
@@ -408,15 +418,15 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 }
 
 /*
-	Returns the ip address associated with the name. The name may indeed be 
-	an IP address which we'll look up in the hosts table to verify first. 
-	If it's not an ip, then we'll search the vm2ip table for it. 
+	Returns the ip address associated with the name. The name may indeed be
+	an IP address which we'll look up in the hosts table to verify first.
+	If it's not an ip, then we'll search the vm2ip table for it.
 
-	If the name passed in has a leading bang (!) meaning that it was not 
-	validated, we'll strip it and do the lookup, but will return the resulting 
-	IP address with a leading bang (!) to propigate the invalidness of the address.
+	If the name passed in has a leading bang (!) meaning that it was not
+	validated, we'll strip it and do the lookup, but will return the resulting
+	IP address with a leading bang (!) to propagate the invalidness of the address.
 
-	The special case !/ip-addrss is used to designate an external address. It won't
+	The special case !/ip-address is used to designate an external address. It won't
 	exist in our map, and we return it as is.
 */
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
@@ -424,7 +434,13 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	err = nil
 	lname := *hname								// lookup name - we may have to strip leading !
 
-	if (*hname)[0:2] == "!/" {					// special external name (no tenant string following !)
+	if *hname == "" {
+		net_sheep.Baa( 1, "bad name passed to name2ip: empty" )
+		err = fmt.Errorf( "host unknown: empty name passed to network manager", *hname )
+		return 
+	}
+
+	if (*hname)[0:2] == "!/" {					// special external name (no project string following !)
 		ip = hname
 		return
 	}
@@ -438,11 +454,9 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	} else {
 		ip = n.vm2ip[lname]						// it's not an ip, try to translate it as either a VM name or VM ID
 		if ip == nil {							// maybe it's just an ID, try without 
-			idx := strings.Index( lname, "/" )
-			if idx >= 0 {
-				lname = lname[idx+1:]			// point past the slant
-				ip = n.vm2ip[lname]				// see if it's there just based on what we asssume is an ID
-			}
+			tokens := strings.Split( lname, "/" )				// could be project/uuid or just uuid
+			lname = tokens[len( tokens ) -1]	// local name is the last token
+			ip = n.vmid2ip[lname]				// see if it maps to an ip
 		}
 		if ip != nil {							// the name translates, see if it's in the known net
 			if n.hosts[*ip] == nil {			// ip isn't in the network scope as a host, return nil
@@ -456,7 +470,6 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 			}
 		} else {
 			err = fmt.Errorf( "host unknown: %s could not be mapped to an IP address", *hname )
-			//net_sheep.Baa( 1, "unable to map name/ID to an IP: %s", *hname )						// caller should bleat
 		}
 	}
 
@@ -545,6 +558,25 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 }
 
 /*
+	Find a virtual link between two switches -- used when in relaxed mode and no real path
+	between endpoints is found, but we still need to pretend there is a path. If we don't
+	have a link in the virtual table we'll create one and return that. 
+*/
+func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
+
+	id := fmt.Sprintf( "%s.%s", sw1, sw2 ) 			
+
+	l = n.vlinks[id]
+	if l == nil {
+		l = gizmos.Mk_link( &sw1, &sw2, int64( 10 * ONE_GIG ), 99, nil )		// create the link and add to virtual table
+		l.Set_ports( 1024, 1024 )
+		n.vlinks[id] = l
+	}
+
+	return
+}
+
+/*
 	Build a new graph of the network.
 	Host is the name/ip:port of the host where floodlight is running.
 	Old-net is the reference net that we'll attempt to find existing links in.
@@ -555,7 +587,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 	does _not_ contain a ':'. 
 	
 */
-func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int ) (n *Network) {
+func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
@@ -581,12 +613,16 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 	} else {
 		hlist = old_net.build_hlist()						// simulate output from floodlight by building the host list from openstack maps
 		links, err = gizmos.Read_json_links( *flhost )
-		if err != nil {
-			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
-			links = nil										// kicks us out later, but must at least create an empty network first
+		if err != nil || len( links ) <= 0 {
+			if host_list != nil {
+				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *flhost )
+				links = gizmos.Gen_star_topo( *host_list )				// generate a dummy topo based on the host list
+			} else {
+				net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
+				links = nil										// kicks us out later, but must at least create an empty network first
+			}
 		}
 	}
-
 
 	n = mk_network( old_net == nil )			// new network, need links and mlags only if it's the first network
 	if old_net == nil {
@@ -595,6 +631,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		n.links = old_net.links					// might it be wiser to copy this rather than reference and update the 'live' copy?
 		n.vlinks = old_net.vlinks
 		n.mlags = old_net.mlags
+		n.relaxed = old_net.relaxed
 	}
 
 	if links == nil {
@@ -659,22 +696,30 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 
 	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
-			if len( hlist[i].Ipv4 ) > 0 {
-				ip4 = hlist[i].Ipv4[0]; 		//TODO: we need to associate all ips with the host; for now just the first
-			} else {
-				ip4 = ""
-			}
-			if len( hlist[i].Ipv6 ) > 0 {
+			ip6 = ""
+			ip4 = ""
+
+			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this does snarf everything
+				if strings.Index( hlist[i].Ipv4[0], ":" ) >= 0 {	// if emulating floodlight, we get both kinds of IP in this field, one per hlist entry (ostack yields unique mac for each ip)
+					ip6 = hlist[i].Ipv4[0];
+				} else {
+					ip4 = hlist[i].Ipv4[0];
+				}
+			} 
+			if len( hlist[i].Ipv6 ) > 0 &&  hlist[i].Ipv6[0] != "" {			// if getting from floodlight, then it will be here, and we may have to IPs on the same NIC
 				ip6 = hlist[i].Ipv6[0]; 
-			} else {
-				ip6 = ""
-			}
+			} 
 
 			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
 			vmid := &empty_str
 			if old_net.ip2vmid != nil {
-				if old_net.ip2vmid[ip4] != nil {
-					vmid = old_net.ip2vmid[ip4]
+				key := ip4
+				if key == "" {
+					key = ip6
+				}
+				
+				if old_net.ip2vmid[key] != nil {
+					vmid = old_net.ip2vmid[key]
 					h.Add_vmid( vmid ) 
 				}
 			}
@@ -682,14 +727,14 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			for j := range hlist[i].AttachmentPoint {
 				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
 				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
-				if ssw != nil {							// it should always be known, but no chances
+				if ssw != nil {																	// it should always be known, but no chances
 					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
 					net_sheep.Baa( 4, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
 				}
 			}
 
 			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 3, "build: saving host ip4=%s as mac: %s", ip4, hlist[i].Mac[0] )
+			net_sheep.Baa( 2, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
 			if ip4 != "" {
 				n.hosts[ip4] = h
 			}
@@ -706,7 +751,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 
 /*
 	DEPRECATED
-	Given a tenant id, find the associated gateway.  Returns the whole tenant/ip string. 
+	Given a project id, find the associated gateway.  Returns the whole project/ip string. 
 
 	TODO: return list if multiple gateways
 	TODO: improve performance by maintaining a tid->gw map
@@ -722,473 +767,46 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 	return nil
 }
 
-// -------------------- path finding ------------------------------------------------------------------------------------------------------
-
-
 /*
-	Look at tid/h1 and tid/h2 and split them into two disjoint path endpoints, tid/gw,h1 and tid/gw,h2, if
-	the tenant ids for the hosts differ.  This will allow for reservations between tenant VMs that are both
-	known to Tegu.  If the endpoints are in different tenants, then we require each to have a floating point
-	IP address that is known to us.
-
-	If the tenant/project/user ID starts with a leading bang (!) then we assume it was NOT validated. If
-	both are not validated we reject the attempt. If one is validated we build the path from the other 
-	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
-	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
-	shortcut and thus not needing to supply the same authorisation token twice on the request. 
-
-	We now allow a VM to make a reservation with an external address without a floating point IP
-	since the VM's floating point IP is only needed on a reservation that would be made from 
-	the "other side".   If the VM doesn't have a floating IP, then it WILL be a problem if the reservation
-	is being made between two tennants, but if for some odd reason a truely external IP address is 
-	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
-	the VM doesn't have a floating IP. 
+	Given a host name, generate various bits of information like mac address, switch and switch port.
+	Error is set if we cannot find the box.
 */
-func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair ) {
+func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *string, swport int, err error ) {
 	var (
-		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different tenants
-		h2_auth bool = true
+		h	*gizmos.Host
+		ok 	bool
 	)
 
-	if strings.Index( *h1ip, "/" ) < 0 {					// no tenant id in the name we have to assume in the same realm
-		pair_list = make( []host_pair, 1 )
-		pair_list[0].h1 = h1ip
-		pair_list[0].h2 = h2ip
-		pair_list[0].usr = nil
+	mac = nil
+
+	if name == nil {
+		err = fmt.Errorf( "cannot translate nil name" )
 		return
 	}
 
-	nalloc := 2												// number to allocate if both validated
-	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out tenant ids
-	t1 := toks[0]
-	f1 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
-	if t1[0:1] == "!" {										// tenant wasn't validated, we use as endpoint, but dont create an end to end path
-		h1_auth = false
-		t1 =  t1[1:]										// drop the not authorised indicator for fip lookup later
-		ah1 :=  (*h1ip)[1:]									// must also adjust h1 string for fip translation
-		h1ip = &ah1
-		nalloc--											// need one less in return vector
-	}
+	if ip, ok = n.vm2ip[*name]; !ok {		// assume that IP was given instead of name (gateway)	
+		//err = fmt.Errorf( "cannot translate vm to an IP address: %s", *name )
+		//return
+		ip = name
+	} 
 
-	toks = strings.SplitN( *h2ip, "/", 2 )
-	t2 := toks[0]
-	f2 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
-	if  t2[0:1] ==  "!" {									// tenant wasn't validated, we use as endpoint, but dont create an end to end path
-		h2_auth = false
-		t2 =  t2[1:]
-		ah2 :=  (*h2ip)[1:]									// must also adjust h2 string for fip translation
-		h2ip = &ah2
-		nalloc--											// need one less in return vector
-	}
-
-	if nalloc <= 0 {
-		net_sheep.Baa( 1, "neither endpoint was validated, refusing to build a path for %s-%s", *h1ip, *h2ip )
-		return
-	}
-
-	if t1 == t2 {									// same tenant, just one pair to deal with and we don't care if one wasn't validated
-		pair_list = make( []host_pair, 1 )
-		pair_list[0].h1 = h1ip
-		pair_list[0].h2 = h2ip
-		pair_list[0].usr = &t1
-		return
-	}
-
-	if !h1_auth && t1 == "" {								// external address as src
-		h1_auth = false										// ensure this
-		f2 = n.ip2fip[*h2ip]								// must assume h2 is the good address, and it must have a fip
-	} else {												// external address as dest
-		if  !h2_auth && t2 == "" {							// external address specified as !//ip-address; we use f2 as captured earlier
-			h2_auth = false									// should be, but take no chances
-			f1 = n.ip2fip[*h1ip]							// must assume f1 is the good address and it musht have a fip
-		} else {											// both are VMs and should have mapped fips; alloc based on previous validitiy check
-			f1 = n.ip2fip[*h1ip]							// dig the floating point IP address for each host (used as dest for flowmods on ingress rules)
-			f2 = n.ip2fip[*h2ip]
-		}
-	}
-
-	zip := "0.0.0.0"										// dummy which allows vm-name,!//ipaddress without requiring vm to have a floating point ip
-	if f1 == nil {
-		f1 = &zip											// possible VM-name without fip -> !//IPaddr
-	}
-
-	if f2 == nil {
-		f2 = &zip											// possible !//IPaddr -> vm-name without fip
-	}
-
-	if f1 == f2 {											// one of the two must have had some kind of external address (floating IP or real IP)
-		net_sheep.Baa( 1, "find_endpoints: neither host had an external or floating IP: %s %s", *h1ip, *h2ip )
-		return
-	}
-
-	//g1 := n.gateway4tid( t1 )						// map tenant id to gateway which become the second endpoint
-	//g2 := n.gateway4tid( t2 )
-	g1 := n.vmip2gw[*h1ip]							// pick up the gateway for each of the VMs
-	g2 := n.vmip2gw[*h2ip]
-
-	h2i := nalloc - 1								// insertion point for h2 into pair list
-	pair_list = make( []host_pair, nalloc )			// build the list based on number of validated
-
-	if h1_auth {
-		pair_list[0].h1 = h1ip
-		pair_list[0].h2 = g1
-		pair_list[0].usr = &t1
-		pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
-	} else {
-		net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
-	}
-
-	if h2_auth {
-		pair_list[h2i].h2 = h2ip
-		pair_list[h2i].h1 = g2							// order is important to ensure bandwidth in/out limits if different
-		pair_list[h2i].usr = &t2
-		pair_list[h2i].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
-	} else {
-		net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
-	}
-
-	return
-}
-
-/*
-	This is a helper function for find_paths and is invoked when we are interested in just the shortest
-	path between two switches. It will find the shortest path, and then build a path structure which
-	represents it.  ssw is the starting switch and h2nm is the endpoint "name" (probably a mac that we 
-	are looking for. 
-	
-	The usr_max value is the percentage (1-100) that indicates the maximum percentage of a link that the 
-	user may reserve. 
-
-	This function assumes that the switches have all been initialised with a reset of the visited flag,
-	setting of inital cost, etc.
-*/
-func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, cap_trip bool ) {
-	h1nm := h1.Get_mac()
-	h2nm := h2.Get_mac()
-	path = nil
-
-	if usr_max <= 0 {
-		i41, _ := h1.Get_addresses()
-		i42, _ := h2.Get_addresses()
-		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *i41, *i42 )
-		return 
-	}
-
-	ssw.Cost = 0														// seed the cost in the source switch
-	tsw, cap_trip := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
-	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
-		path = gizmos.Mk_path( h1, h2 )
-		path.Set_reverse( true )								// indicate that the path is saved in reverse order 
-		path.Set_bandwidth( inc_cap )
-		net_sheep.Baa( 2,  "find_spath: found target on %s", tsw.To_str( ) )
-				
-		lnk := n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1, nil, nil )		// add endpoint -- a virtual link out from switch to h2
-		lnk.Add_lbp( *h2nm )
-		lnk.Set_forward( tsw )												// endpoints have only a forward link
-		path.Add_endpoint( lnk )
-
-		for ; tsw != nil ; {
-			if tsw.Prev != nil {								// last node won't have a prev pointer so no link
-				lnk = tsw.Prev.Get_link( tsw.Plink )
-				path.Add_link( lnk )
-			}	
-			path.Add_switch( tsw )
-
-			net_sheep.Baa( 2, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
-
-			if tsw.Prev == nil {													// last switch in the path, add endpoint 
-				lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1, nil, nil )		// endpoint is a virt link from switch to h1
-				lnk.Add_lbp( *h1nm )
-				lnk.Set_forward( tsw )												// endpoints have only a forward link
-				path.Add_endpoint( lnk )
-			}
-			tsw = tsw.Prev
-		}
-
-		path.Flip_endpoints()		// path expects them to be in h1,h2 order; we added them backwards so must flip
-	}
-
-	return
-}
-
-/*
-	This is a helper function for find_paths(). It is used to find all possible paths between h1 and h2 starting at ssw. 
-	The resulting path is a "scramble" meaning that the set of links is a unique set of links that are traversed by 
-	one or more paths. The list of links can be traversed without the need to dup check which is beneficial for 
-	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the 
-	middle switches are NOT maintaine. 
-
-	usr is the name of the user that the reservation is being processed for (tenant in openstack). The usr_max value
-	is a percentage (1-100)  that defines the maximum of any link that the user may have reservations against or a hard
-	limit if larger than 100. 
-
-*/
-func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
-
-	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and  %s", *(h1.Get_mac()), *(h2.Get_mac()) )
-
-	links, epsw, err := ssw.All_paths_to( h2.Get_mac(), commence, conclude, inc_cap, usr, usr_max )
-	if err != nil {
-		return
-	}
-
-	path = gizmos.Mk_path( h1, h2 )
-	path.Set_scramble( true )
-	path.Set_bandwidth( inc_cap )
-	path.Add_switch( ssw )
-	path.Add_switch( epsw )
-
-	lnk := n.find_vlink( *(ssw.Get_id()), h2.Get_port( ssw ), -1, nil, nil )			// add endpoint -- a virtual link out from switch to h1
-	lnk.Add_lbp( *(h1.Get_mac()) )
-	lnk.Set_forward( ssw )
-	path.Add_endpoint( lnk )
-
-	lnk = n.find_vlink( *(epsw.Get_id()), h2.Get_port( epsw ), -1, nil, nil )		// add endpoint -- a virtual link out from switch to h2
-	lnk.Add_lbp( *(h2.Get_mac()) )
-	lnk.Set_forward( epsw )
-	path.Add_endpoint( lnk )
-
-	for i := range links {
-		path.Add_link( links[i] )
-	}
-
-	return
-}
-
-/*
-	Find a set of connected switches that can be used as a path beteeen 
-	hosts 1 and 2 (given by name; mac or ip).  Further, all links between from and the final switch must be able to 
-	support the additional capacity indicated by inc_cap during the time window between
-	commence and conclude (unix timestamps).
-
-	If the network is 'split' a host may appear to be attached to multiple switches; one with a real connection and 
-	the others are edge switches were we see an 'entry' point for the host from the portion of the network that we
-	cannot visualise.  We must attempt to find a path between h1 using all of it's attached switches, and thus the 
-	return is an array of paths rather than a single path.
-
-
-	h1nm and h2nm are likely going to be ip addresses as the main function translates any names that would have
-	come in from the requestor.  
-
-	Extip is an external IP address that will need to be associated with the flow-mods and thus needs to be 
-	added to any path we generate.
-
-	If mlag_paths is true, then we will find shortest path but add usage to all related mlag links in the path. 
-
-	If find_all is set, and mlog_paths is false, then we will suss out all possible paths between h1 and h2 and not 
-	just the shortest path. 
-*/
-func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence int64, conclude int64, inc_cap int64, extip *string, ext_flag *string, find_all bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
-	var (
-		path	*gizmos.Path
-		ssw 	*gizmos.Switch		// starting switch
-		//tsw 	*gizmos.Switch; 		// target's linked switch
-		h1		*gizmos.Host
-		h2		*gizmos.Host
-		lnk		*gizmos.Link
-		plidx	int = 0
-		swidx	int = 0				// index into host's switch list
-		err		error
-		lcap_trip bool = false		// local capacity trip flag; indicates one or more paths blocked by capacity limits
-	)
-
-	h1 = n.hosts[*h1nm]
-	if h1 == nil {
-		path_list = nil
-		net_sheep.Baa( 1,  "find-path: cannot find host(1) in network -- not reported by SDNC? %s", *h1nm )
-		return
-	}
-	h1nm = h1.Get_mac()			// must have the host's mac as our flowmods are at that level
-
-	h2 = n.hosts[*h2nm]					// do the same for the second host
-	if h2 == nil {
-		path_list = nil
-		net_sheep.Baa( 1,  "find-path: cannot find host(2) in network -- not reported by the SDNC? %s", *h2nm )
-		return
-	}
-	h2nm = h2.Get_mac()
-
-	if h1nm == nil || h2nm == nil {			// this has never happened, but be parinoid
-		pcount = 0
-		path_list = nil
-		net_sheep.Baa( 0, "CRI: find-path: internal error: either h1nm or h2nm was nil after get mac  [TGUNET005]" )
-		return
-	}
-
-	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
-	pcount = 0
-
-	for {													// we'll break after we've looked at all of the connection points for h1 
-		if plidx >= len( path_list ) {
-			net_sheep.Baa( 0,  "CRI: find-path: internal error -- path size > num of links.  [TGUNET006]" )
+	mac = n.ip2mac[*ip]
+	if mac != nil {
+		if h, ok = n.hosts[*mac]; !ok {
+			err = fmt.Errorf( "cannot find host (representation) for host %s based on IP and MAC: %s %s", *name, *ip, *mac )
 			return
 		}
-
-		ssw, _ = h1.Get_switch_port( swidx )				// get next switch that lists h1 as attached; we'll work 'out' from it toward h2
-		swidx++
-		if ssw == nil {										// no more source switches which h1 thinks it's attached to
-			pcount = plidx
-			if pcount <= 0 || swidx == 0 {
-				net_sheep.Baa( 1, "find-path: early exit? no switch/port returned for h1 (%s) at index %d captrip=%v", *h1nm, swidx, lcap_trip )
-			}
-			path_list = path_list[0:pcount]					// slice it down to size
-			cap_trip = lcap_trip							// set with overall state
-			return
-		}
-
-		fence := n.get_fence( usr )
-		if ssw.Has_host( h1nm )  &&  ssw.Has_host( h2nm ) {			// if both hosts are on the same switch, there's no path if they both have the same port
-			p1 := h1.Get_port( ssw )
-			p2 := h2.Get_port( ssw )
-			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
-				m1 := h1.Get_mac( )
-				m2 := h2.Get_mac( )
-
-				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, m1, m2 )
-				has_room, err := lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 
-				if has_room {										// room for the reservation
-					lnk.Add_lbp( *h1nm )
-					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
-					path = gizmos.Mk_path( h1, h2 )							// empty path
-					path.Set_bandwidth( inc_cap )
-					path.Set_extip( extip, ext_flag )
-					path.Add_switch( ssw )
-					path.Add_link( lnk )
-	
-					path_list[plidx] = path
-					plidx++
-				} else {
-					lcap_trip = true
-					if err != nil {
-						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d: %s", plidx, inc_cap, err )
-					} else {
-						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", plidx, inc_cap )
-					}
-				}
-			}  else {					// debugging only
-				net_sheep.Baa( 2,  "find-path: path[%d]: found target (%s) on same switch with same port: %s  %d, %d", plidx, *h2nm, ssw.To_str( ), p1, p2 )
-				net_sheep.Baa( 2,  "find-path: host1-json= %s", h1.To_json( ) )
-				net_sheep.Baa( 2,  "find-path: host2-json= %s", h2.To_json( ) )
-			}
-		} else {						// usual case, two named hosts and hosts are on different switches
-			net_sheep.Baa( 1, "path[%d]: searching for path starting from switch: %s", plidx, ssw.To_str( ) )
-
-			for sname := range n.switches {					// initialise the network for the walk
-				n.switches[sname].Cost = 2147483647			// this should be large enough and allows cost to be int32
-				n.switches[sname].Prev = nil
-				n.switches[sname].Flags &= ^tegu.SWFL_VISITED
-			}
-
-			
-			if find_all {																		// find all possible paths not just shortest
-				path, err = n.find_all_paths( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )		// find a 'scramble' path
-				if err != nil {
-					net_sheep.Baa( 1, "find_paths: find_all failed: %s", err )
-				}
-			} else {
-				path, cap_trip = n.find_shortest_path( ssw, h1, h2, usr, commence, conclude, inc_cap, fence.Get_limit_max() )
-				if cap_trip {
-					lcap_trip = true
-				}
-			}
-
-			if path != nil {
-				path.Set_extip( extip, ext_flag )
-				path_list[plidx] = path
-				plidx++
-			}
-		}
-	}
-}
-
-/*
-	Find all paths that are associated with the reservation.  This splits the h1->h2 request into 
-	two paths if h1 and h2 are in different tenants.  The resulting paths in this case are between h1 and 
-	the gateway, and from the gateway to h2 (to preserve the h1->h2 directional signficance which is 
-	needed if inbound and outbound rates differ.  In order to build a good set of flow-mods for the split
-	reservation, both VMs MUST have an associated floating point address which is then generated as a 
-	match point in the flow-mod.  
-
-	If find_all is true we will find all paths between each host, not just the shortest.  This should not 
-	be confused with finding all paths when the network is split as that _always_ happens and by default
-	we find just the shortest path in each split network. 
-
-	Cap_trip indicates that one or more paths could not be found because of capacity issues. If this is 
-	set there is still a possibility that the path was not found because it doesn't exist, but a 
-	capacity limit was encountered before 'no path' was discovered.  The state of the flag is only 
-	valid if the pathcount returend is 0.
-
-	rpath is true if this function is called to build the reverse path.  It is necessary in order to 
-	properly set the external ip address flag (src/dest).
-*/
-func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool, rpath bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
-	var (
-		num int = 0				// must declare num as := assignment doesnt work when ipath[n] is in the list
-		src_flag string = "-S"	// flags that indicate which direction the external address is 
-		dst_flag string = "-D"
-		lcap_trip bool = false	// overall capacity caused failure indicator
-		ext_flag *string		// src/dest flag associated with the external ip address of the path component
-	)
-
-	path_list = nil
-	if n == nil { return }
-
-	pair_list := n.find_endpoints( h1nm, h2nm )					// determine endpoints based on names that might have different tenants
-	if pair_list == nil {										// likely no fip for one or the other VMs
+	} else {
+		err = fmt.Errorf( "cannot translate IP to MAC: %s", *ip )
 		return
 	}
 
-	total_paths := 0
-	ok_count := 0 
-	ipaths := make( [][]*gizmos.Path, len( pair_list ) )			// temp holder of each path list resulting from pair_list exploration
-
-	if rpath {
-		ext_flag = &src_flag
+	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network 
+	if sw != nil {
+		swid = sw.Get_id() 
 	} else {
-		ext_flag = &dst_flag
-	}
-	for i := range pair_list {
-		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
-		if num > 0 {
-			total_paths += num
-			ok_count++
-
-			for j := range ipaths[i] {
-				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation 
-			}
-		} else {
-			net_sheep.Baa( 1, "path not found between: %s and %s ctrip=%v", *pair_list[i].h1, *pair_list[i].h2, cap_trip )
-			if cap_trip {
-				lcap_trip = true
-			}
-		}
-
-		if rpath {													// flip the src/dest flag for the second side of the path if two components
-			ext_flag = &dst_flag
-		} else {
-			ext_flag = &src_flag
-		}
-	}
-
-	if ok_count < len( pair_list ) {								// didn't find a good path for each pair
-		net_sheep.Baa( 1, "did not find a good path for each pair; expected %d, found %d cap_trip=%v", len( pair_list ), ok_count, lcap_trip )
-		pcount = 0
-		cap_trip = lcap_trip
-		return 
-	}
-
-	if len( ipaths ) == 1 {
-		path_list = ipaths[0]
-		pcount = len( ipaths[0] )
-	} else {
-		path_list = make( []*gizmos.Path,  total_paths )
-		pcount = 0
-		for i := range ipaths {
-			for j := range ipaths[i] {
-				path_list[pcount] = ipaths[i][j]
-				pcount++
-			}
-		}
+		err = fmt.Errorf( "cannot generate switch/port for %s", *name )
+		return
 	}
 
 	return
@@ -1301,7 +919,7 @@ func (n *Network) to_json( ) ( jstr string ) {
 }
 
 /*
-	Transfer maps from an old network grah to this one
+	Transfer maps from an old network graph to this one
 */
 func (net *Network) xfer_maps( old_net *Network ) {
 	net.vm2ip = old_net.vm2ip
@@ -1330,17 +948,19 @@ func (net *Network) xfer_maps( old_net *Network ) {
 func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	var (
 		act_net *Network
-		req		*ipc.Chmsg
+		req				*ipc.Chmsg
 		max_link_cap	int64 = 0
-		refresh	int = 30
+		refresh			int = 30
 		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
 		mlag_paths 		bool = true			// can be set to false in config (mlag_paths); overrides find_all_paths
-		link_headroom int = 0				// percentage that each link capacity is reduced by
-		link_alarm_thresh = 0				// percentage of total capacity that when reached for a timeslice will trigger an alarm
-		limits map[string]*gizmos.Fence			// user link capacity boundaries
-		phost_suffix *string = nil
+		link_headroom 	int = 0				// percentage that each link capacity is reduced by
+		link_alarm_thresh int = 0			// percentage of total capacity that when reached for a timeslice will trigger an alarm
+		limits map[string]*gizmos.Fence		// user link capacity boundaries
+		phost_suffix 	*string = nil
+		discount 		int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
+		relaxed			bool = false				// set with relaxed = true in config
+		hlist			*string = &empty_str		// host list we'll give to build should we need to build a dummy star topo
 
-		ip2		*string
 	)
 
 	if *sdn_host  == "" {
@@ -1370,6 +990,18 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 														// suss out config settings from our section
 	if cfg_data["network"] != nil {
+		if p := cfg_data["network"]["discount"]; p != nil {
+			d := clike.Atoll( *p ); 			
+			if d < 0 {
+				discount = 0
+			} else {
+				discount = d
+			}
+		}
+
+		if p := cfg_data["network"]["relaxed"]; p != nil {
+			relaxed = *p ==  "true" || *p ==  "True" || *p == "TRUE"
+		}
 		if p := cfg_data["network"]["refresh"]; p != nil {
 			refresh = clike.Atoi( *p ); 			
 		}
@@ -1382,7 +1014,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 		if p := cfg_data["network"]["all_paths"]; p != nil {
 			find_all_paths = false
-			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use paths = {all|mlag|shortest}" )
+			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use find_paths = {all|mlag|shortest}" )
 		}
 
 		if p := cfg_data["network"]["find_paths"]; p != nil {
@@ -1407,7 +1039,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		}
 
 		if p := cfg_data["network"]["link_headroom"]; p != nil {
-			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacites down by
+			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacities down by
 		}
 
 		if p := cfg_data["network"]["link_alarm"]; p != nil {
@@ -1434,14 +1066,17 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )					// initial build of network graph; blocks and we don't enter loop until done (main depends on that)
+	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, &empty_str )
 	if act_net == nil {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!  [TGUNET011]" )		// this is bad and WILL cause a core dump
 	} else {
 		net_sheep.Baa( 1, "initial network graph has been built" )
 		act_net.limits = limits
+		act_net.Set_relaxed( relaxed )
 	}
 
+	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 						// tickle once, very soon after starting, to get a host list
+	tklr.Add_spot( int64( refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// get a host list from openstack now and again
 	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network 
 	
 	for {
@@ -1465,58 +1100,14 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.Response_data = state
 
 					case REQ_HASCAP:						// verify that there is capacity, and return the path, but don't allocate the path
-						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
-						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-						pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths, false ); 
-						pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths, true ); 	// reverse path
+						p, ok := req.Req_data.( *gizmos.Pledge_bw )
+						if ok {
+							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
+							net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
+							pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths, false ); 
+							pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths, true ); 	// reverse path
 
-						if pcount_out > 0  && pcount_in > 0  {
-							path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
-							pcount := 0
-							for j := 0; j < pcount_out; j++ {
-								path_list[pcount] = path_list_out[j]
-								pcount++
-							}
-							for j := 0; j < pcount_in; j++ {	
-								path_list[pcount] = path_list_in[j]
-							}
-
-							req.Response_data = path_list
-							req.State = nil
-						} else {
-							req.Response_data = nil
-							if i_cap_trip {
-								req.State = fmt.Errorf( "unable to generate a path: no capacity (h1<-h2)" )		// tedious, but we'll break out direction 
-							} else {
-								if o_cap_trip {
-									req.State = fmt.Errorf( "unable to generate a path: no capacity (h1->h2)" )
-								} else {
-									req.State = fmt.Errorf( "unable to generate a path:  no path" )
-								}
-							}
-						}
-
-					case REQ_RESERVE:
-						// host names are expected to have been vetted (if needed) and translated to tenant-id/name if IDs are enabled
-						p := req.Req_data.( *gizmos.Pledge )
-						h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
-						net_sheep.Baa( 1,  "network: reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
-
-						ip1, err := act_net.name2ip( h1 )
-						ip2 = nil
-						if err == nil {
-							ip2, err = act_net.name2ip( h2 )
-						}
-
-						if err == nil {
-							net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-							pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths, false ); 	// outbound path
-							pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths, true ); 		// inbound path
-
-							if pcount_out > 0  &&  pcount_in > 0  {
-								net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
-
+							if pcount_out > 0  && pcount_in > 0  {
 								path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
 								pcount := 0
 								for j := 0; j < pcount_out; j++ {
@@ -1525,20 +1116,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								}
 								for j := 0; j < pcount_in; j++ {	
 									path_list[pcount] = path_list_in[j]
-									pcount++
-								}
-
-								qid := p.Get_id()
-								p.Set_qid( qid )											// add the queue id to the pledge
-
-								for i := 0; i < pcount; i++ {								// set the queues for each path in the list (multiple paths if network is disjoint)
-									fence := act_net.get_fence( path_list[i].Get_usr() )
-									net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
-									path_list[i].Set_queue( qid, commence, expiry, path_list[i].Get_bandwidth(), fence )		// create queue AND inc utilisation on the link
-									if mlag_paths {
-										net_sheep.Baa( 1, "increasing usage for mlag members" )
-										path_list[i].Inc_mlag( commence, expiry, path_list[i].Get_bandwidth(), fence, act_net.mlags )
-									}
 								}
 
 								req.Response_data = path_list
@@ -1554,34 +1131,205 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 										req.State = fmt.Errorf( "unable to generate a path:  no path" )
 									}
 								}
-								net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
 							}
 						} else {
-							net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
-							req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
+							net_sheep.Baa( 1, "internal mishap: pledge passed to has capacity wasn't a bw pledge: %s", p )
+							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
+						}
+
+					case REQ_BWOW_RESERVE:								// one way bandwidth reservation, nothing really to vet, return a gate block
+						// host names are expected to have been vetted (if needed) and translated to project-id/IPaddr if IDs are enabled
+						var ipd *string
+
+						req.Response_data = nil
+						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
+						if ok {
+							src, dest := p.Get_hosts( )									// we assume project/host-name
+							net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
+
+							if src != nil && dest != nil {
+								usr := "nobody"											// default dummy user if not project/host
+								toks := strings.SplitN( *src, "/", 2 )					// suss out project name
+								if len( toks ) > 1 {
+									usr = toks[0]										// the 'user' for queue setting
+								}
+	
+								ips, err := act_net.name2ip( src )
+								if err == nil {
+									ipd, err = act_net.name2ip( dest )
+								}
+
+								sh := act_net.hosts[*ips]
+								dh := act_net.hosts[*ipd]						// this will be nil for an external IP
+								ssw, _ := sh.Get_switch_port( 0 )
+								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
+								if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address
+									gate.Set_extip( dest )
+								}
+
+								c, e := p.Get_window( )														// commence/expiry times
+								fence := act_net.get_fence( &usr ) 
+								max := int64( -1 )
+								if fence != nil {
+									max = fence.Get_limit_max()
+								}
+								if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
+									qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
+									p.Set_qid( qid ) 												// and add the queue id to the pledge
+
+									if gate.Add_queue( c, e, p.Get_bandwidth(), qid, fence ) {		// create queue AND inc utilisation on the link
+										req.Response_data = gate									// finally safe to set gate as the return data
+										req.State = nil												// and nil state to indicate OK
+									} else {
+										net_sheep.Baa( 1, "owreserve: internal mishap: unable to set queue for gate: %s", gate )
+										req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
+									}
+								} else {
+									net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
+									req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
+								}
+							} else {
+								net_sheep.Baa( 1, "owreserve: one/both host names were invalid" )
+								req.State = fmt.Errorf( "unable to create oneway reservation in network one or both host names invalid" )
+							}
+						} else {									// pledge wasn't a bw pledge
+							net_sheep.Baa( 1, "internal mishap: pledge passed to owreserve wasn't a bwow pledge: %s", p )
+							req.State = fmt.Errorf( "unable to create oneway reservation in network, internal data corruption." )
+						}
+
+					case REQ_BW_RESERVE:
+						var ip2		*string = nil					// tmp pointer for this block 
+
+						// host names are expected to have been vetted (if needed) and translated to project-id/name if IDs are enabled
+						p, ok := req.Req_data.( *gizmos.Pledge_bw )
+						if ok {
+							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
+							net_sheep.Baa( 1,  "network: bw reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
+
+							suffix := "bps"
+							if discount > 0 {
+								if discount < 101 {
+									bandw_in -=  ((bandw_in * discount)/100)
+									bandw_out -=  ((bandw_out * discount)/100)
+									suffix = "%"
+								} else {
+									bandw_in -= discount
+									bandw_out -= discount
+								}
+
+								if bandw_out < 10 {			// add some sanity, and keep it from going too low
+									bandw_out = 10
+								}
+								if bandw_in < 10 {
+									bandw_in = 10
+								}
+								net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", discount, suffix, bandw_in, bandw_out )
+							}
+
+							ip1, err := act_net.name2ip( h1 )
+							if err == nil {
+								ip2, err = act_net.name2ip( h2 )
+							}
+
+							if err == nil {
+								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
+								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths, false ); 	// outbound path
+								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths, true ); 		// inbound path
+
+								if pcount_out > 0  &&  pcount_in > 0  {
+									net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
+
+									path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
+									pcount := 0
+									for j := 0; j < pcount_out; j++ {
+										path_list[pcount] = path_list_out[j]
+										pcount++
+									}
+									for j := 0; j < pcount_in; j++ {	
+										path_list[pcount] = path_list_in[j]
+										pcount++
+									}
+
+									qid := p.Get_id()											// for now, the queue id is just the reservation id, so fetch
+									p.Set_qid( qid )											// and add the queue id to the pledge
+
+									for i := 0; i < pcount; i++ {								// set the queues for each path in the list (multiple paths if network is disjoint)
+										fence := act_net.get_fence( path_list[i].Get_usr() )
+										net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
+										path_list[i].Set_queue( qid, commence, expiry, path_list[i].Get_bandwidth(), fence )		// create queue AND inc utilisation on the link
+										if mlag_paths {
+											net_sheep.Baa( 1, "increasing usage for mlag members" )
+											path_list[i].Inc_mlag( commence, expiry, path_list[i].Get_bandwidth(), fence, act_net.mlags )
+										}
+									}
+
+									req.Response_data = path_list
+									req.State = nil
+								} else {
+									req.Response_data = nil
+									if i_cap_trip {
+										req.State = fmt.Errorf( "unable to generate a path: no capacity (h1<-h2)" )		// tedious, but we'll break out direction 
+									} else {
+										if o_cap_trip {
+											req.State = fmt.Errorf( "unable to generate a path: no capacity (h1->h2)" )
+										} else {
+											req.State = fmt.Errorf( "unable to generate a path:  no path" )
+										}
+									}
+									net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
+								}
+							} else {
+								net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
+								req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
+							}
+						} else {									// pledge wasn't a bw pledge
+							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bw pledge: %s", p )
+							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
 						}
 
 
 
 					case REQ_DEL:									// delete the utilisation for the given reservation
-						p := req.Req_data.( *gizmos.Pledge )
-						net_sheep.Baa( 1,  "network: deleting reservation: %s", *p.Get_id() )
-						commence, expiry := p.Get_window( )
-						path_list := p.Get_path_list( )
+						switch p := req.Req_data.( type ) {
+							case *gizmos.Pledge_bw:
+								net_sheep.Baa( 1,  "network: deleting bandwidth reservation: %s", *p.Get_id() )
+								commence, expiry := p.Get_window( )
+								path_list := p.Get_path_list( )
+		
+								qid := p.Get_qid()							// get the queue ID associated with the pledge
+								for i := range path_list {
+									fence := act_net.get_fence( path_list[i].Get_usr() )
+									net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
+									path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
+								}
 
-						qid := p.Get_qid()							// get the queue ID associated with the pledge
-						for i := range path_list {
-							fence := act_net.get_fence( path_list[i].Get_usr() )
-							net_sheep.Baa( 1,  "network: deleting path %d associated with usr=%s", i, *fence.Name )
-							//path_list[i].Set_queue( qid, commence, expiry, -bandw_in, -bandw_out, fence )				// reduce queues on the path as needed
-							path_list[i].Set_queue( qid, commence, expiry, -path_list[i].Get_bandwidth(), fence )		// reduce queues on the path as needed
+							case *gizmos.Pledge_bwow:
+								net_sheep.Baa( 1,  "network: deleting oneway reservation: %s", *p.Get_id() )
+								commence, expiry := p.Get_window( )
+								gate := p.Get_gate()
+								fence := act_net.get_fence( gate.Get_usr() )
+								gate.Set_queue( p.Get_qid(), commence, expiry, -p.Get_bandwidth(), fence )				// reduce queues 
+
+							default:
+								net_sheep.Baa( 1, "internal mishap: req_del wasn't passed a bandwidth or oneway pledge; nothing done by network" )
+							
 						}
 
 					case REQ_ADD:							// insert new information into the various vm maps
 						if req.Req_data != nil {
-							vm := req.Req_data.( *Net_vm )
-							act_net.insert_vm( vm )
-							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
+							switch req.Req_data.( type ) {
+								case *Net_vm:
+									vm := req.Req_data.( *Net_vm )
+									act_net.insert_vm( vm )
+
+								case []*Net_vm:
+									vlist := req.Req_data.( []*Net_vm )
+									for i := range vlist {
+										act_net.insert_vm( vlist[i] )
+									}
+							}
+
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 								act_net = new_net							// and finally use it
@@ -1670,9 +1418,50 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						ts := req.Req_data.( int64 )			// time stamp for generation
 						req.Response_data, req.State = act_net.gen_queue_map( ts, true )
 						
+					case REQ_GETGW:								// given a project ID (projects ID) map it to the gateway
+						if req.Req_data != nil {
+							tname := req.Req_data.( *string )
+							req.Response_data = act_net.gateway4tid( *tname )
+						} else {
+							req.Response_data = nil
+						}
+
+					case REQ_GETPHOST:							// given a name or IP address, return the physical host
+						if req.Req_data != nil {
+							var ip *string
+
+							s := req.Req_data.( *string )
+							ip, req.State = act_net.name2ip( s )
+							if req.State == nil {
+								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
+								if req.Response_data == nil {
+									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", ip )
+								}	
+							}
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" ) 
+						}
+						
 					case REQ_GETIP:								// given a VM name or ID return the IP if we know it. 
-						s := req.Req_data.( string )
-						req.Response_data, req.State = act_net.name2ip( &s )		// returns ip or nil
+						if req.Req_data != nil {
+							s := req.Req_data.( *string )
+							req.Response_data, req.State = act_net.name2ip( s )		// returns ip or nil
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" ) 
+						}
+					
+					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
+						if req.Req_data != nil {
+							ip, mac, swid, port, err := act_net.host_info(  req.Req_data.( *string ) )
+							if err != nil {
+								req.State = err
+								req.Response_data = nil
+							} else {
+								req.Response_data = fmt.Sprintf( "%s,%s,%s,%d", *ip, *mac, *swid, port )
+							}
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" ) 
+						}
 
 					case REQ_GETLMAX:							// DEPRECATED!  request for the max link allocation
 						req.Response_data = nil;
@@ -1680,7 +1469,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 					case REQ_NETUPDATE:											// build a new network graph
 						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
-						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh )
+						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
 						if new_net != nil {
 							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
 							act_net = new_net
@@ -1690,7 +1479,28 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
 						}
 
-						
+
+					case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
+																	// this is similar, yet different, than the code in fq_mgr (we don't need phost suffix here)
+						req.Response_ch = nil;						// regardless of source, we should not reply to this request
+
+						if req.State != nil || req.Response_data != nil {				// response from ostack if with list or error
+							if  req.Response_data.( *string ) != nil {
+								hls := strings.TrimLeft( *(req.Response_data.( *string )), " \t" )		// ditch leading whitespace
+								hl := &hls
+								if *hl != ""  {
+									hlist = hl										// ok to use it
+									net_sheep.Baa( 2, "host list received from osif: %s", *hlist )
+								} else {
+									net_sheep.Baa( 1, "empty host list received from osif was discarded" )
+								}
+							} else {
+								net_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
+							}
+						} else {
+							req_hosts( nch, net_sheep )					// send requests to osif for data
+						}
+								
 					//	------------------ user api things ---------------------------------------------------------
 					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
 						data := req.Req_data.( []*string )
@@ -1707,7 +1517,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_NETGRAPH:							// dump the current network graph
 						req.Response_data = act_net.to_json()
 
-					case REQ_LISTHOSTS:							// json list of hosts with name, ip, switch id and port
+					case REQ_LISTHOSTS:							// spew out a json list of hosts with name, ip, switch id and port
 						req.Response_data = act_net.host_list( )
 
 					case REQ_LISTULCAP:							// user link capacity list
@@ -1744,6 +1554,26 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							}
 						}
 
+					case REQ_GET_PHOST_FROM_MAC:			// try to map a MAC to a phost -- used for mirroring
+						mac := req.Req_data.( *string )
+						for k, v := range act_net.mac2phost {
+							if *mac == k {
+								req.Response_data = v
+							}
+						}
+
+					case REQ_SETDISC:
+						req.State = nil;	
+						req.Response_data = "";			// we shouldn't send anything back, but if caller gave a channel, be successful
+						if req.Req_data != nil {
+							d := clike.Atoll( *(req.Req_data.( *string )) )
+							if d < 0 {
+								discount = 0
+							} else {
+								discount = d
+							}
+						}
+
 					// --------------------- agent things -------------------------------------------------------------
 					case REQ_MAC2PHOST:
 						req.Response_ch = nil			// we don't respond to these
@@ -1761,4 +1591,3 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		}
 	}
 }
-

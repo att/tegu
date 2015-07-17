@@ -68,12 +68,12 @@ func TestNet( t *testing.T ) {			// must use bloody camel case to be recognised 
 			sw_list[links[i].Dst_switch] = dsw
 		}
 
-		l := gizmos.Mk_link( ssw.Get_id(), dsw.Get_id(), 100000000 );		// link in forward direction
+		l := gizmos.Mk_link( ssw.Get_id(), dsw.Get_id(), 100000000, 95, nil );		// link in forward direction
 		l.Set_forward( dsw )
 		l.Set_backward( ssw ) 
 		ssw.Add_link( l )
 
-		l = gizmos.Mk_link( dsw.Get_id(), ssw.Get_id(), 100000000 );		// link in backward direction
+		l = gizmos.Mk_link( dsw.Get_id(), ssw.Get_id(), 100000000, 95, nil );		// link in backward direction
 		l.Set_forward( ssw )
 		l.Set_backward( dsw ) 
 		dsw.Add_link( l )
@@ -82,7 +82,8 @@ func TestNet( t *testing.T ) {			// must use bloody camel case to be recognised 
 		ip := fmt.Sprintf( "10.0.0.%02d", i )
 		h := gizmos.Mk_host( mac, ip, "" )
 		h.Add_switch( ssw, i )				// add a host to each src switch
-		ssw.Add_host( &ip, i+200 )
+		vmname := "foobar-name"
+		ssw.Add_host( &ip, &vmname, i+200 )
 		fmt.Fprintf( os.Stderr, "adding host: %s\n", ip )
 
 		if fsw == nil {					// save first switch to use as start of search
@@ -93,13 +94,15 @@ func TestNet( t *testing.T ) {			// must use bloody camel case to be recognised 
 		ip = fmt.Sprintf( "10.0.0.1%02d", i )
 		h = gizmos.Mk_host( mac, ip, "" )
 		h.Add_switch( dsw, i )				// add a host to each dest switch 
-		dsw.Add_host( &ip, i+200 )
+		vmname2 := "foobar-name2"
+		dsw.Add_host( &ip, &vmname2, i+200 )
 
 		fmt.Fprintf( os.Stderr, "adding host: %s\n", ip )
 		last = ip
 	}
 
 	fmt.Fprintf( os.Stderr, ">>> searching for: %s\n", last );
-	fsw.All_paths_to( &last, 0, 0, 100 )
+	usrname := "username"
+	fsw.All_paths_to( &last, 0, 0, 100, &usrname, 95 )
 }
 
