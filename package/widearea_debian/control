@@ -1,0 +1,18 @@
+Source: attlrwidearea
+Section: net
+Priority: optional
+Maintainer: Scott Daniels <daniels@research.att.com>
+Package: attlrqwidearea
+Version: <VER>
+Architecture: amd64
+Depends: ksh
+Installed-Size: 4000
+description: provides tegu supported: q-lite, steering, mirroring, wa stitching
+  Tegu is a daemon which provides 
+  an API that allows external users 
+  to:
+    - request bandwidth reservations in the
+      cloud enivronment 
+    - request flow steering reservations
+    - request port mirroring reservations
+    - to stitch together two wide area nets
