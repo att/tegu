@@ -726,7 +726,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 
 	msg.Response_data = nil
 
-	tokens := strings.Split( msg.Req_data.( string ), "/" )			// break project/host into bits
+	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
 	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
 		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s bad tokens",  *(msg.Req_data.( *string )) )
 		msg.State = fmt.Errorf( "invalid project/hostname string: %s", *(msg.Req_data.( *string )) )
@@ -748,7 +748,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 		return
 	}
 
-	osif_sheep.Baa( 2, "lazy update: get host info setup complete for (%s) %s", tokens[0], msg.Req_data.( string ) )
+	osif_sheep.Baa( 2, "lazy update: get host info setup complete for (%s) %s", tokens[0], *(msg.Req_data.( *string )) )
 
 	search := *pid + "/" + tokens[1]							// search string must be id/hostname
 	name, id, ip4, fip4, mac, gw, cidr, phost, gwmap, _, err := p.Get_info( &search, creds, true )

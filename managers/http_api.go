@@ -1471,10 +1471,16 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		http_sheep.Baa( 1, "mirroring is disabled" )
 	}
 
+	// these are deprecated
 	http.HandleFunc( "/tegu/rest/ports", http_wa_ports )	// wide area rest api handlers
 	http.HandleFunc( "/tegu/rest/tunnels", http_wa_tunnel )
 	http.HandleFunc( "/tegu/rest/routes", http_wa_route )
 	http.HandleFunc( "/tegu/rest/connections", http_wa_conn )
+
+	http.HandleFunc( "/tegu/wa/ports", http_wa_ports )	// wide area rest api handlers
+	http.HandleFunc( "/tegu/wa/tunnels", http_wa_tunnel )
+	http.HandleFunc( "/tegu/wa/routes", http_wa_route )
+	http.HandleFunc( "/tegu/wa/connections", http_wa_conn )
 
 	isSSL = (ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "")			// global needed by mirroring
 	if isSSL {
