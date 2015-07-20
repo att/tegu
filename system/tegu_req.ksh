@@ -268,18 +268,18 @@ function gen_token
 	else
 		content_type="Content-type: application/json"
 		case $OS_AUTH_URL in
-			 */v2.0)
+			 */v2.0*)
 				url="$OS_AUTH_URL/tokens"
 				token_value=$( curl -s -d "{\"auth\":{ \"tenantName\": \"$OS_TENANT_NAME\", \"passwordCredentials\":{\"username\": \"$OS_USERNAME\", \"password\": \"$OS_PASSWORD\"}}}" -H "$content_type" $url  | v2_suss_token )
 				;;
 
-			*/v3)
+			*/v3*)
 				url="$OS_AUTH_URL/auth/tokens"
 				body="$( gen_v3_token_json )"			# body for the url
 				token_value=$( rjprt -h -J -m POST -d -D "$body" -t $url | v3_suss_token )
 				;;
 
-			*)	echo "version in OS_AUTH_URL ($OS_AUTH_URL) is not supported for -T"
+			*)	echo "version in OS_AUTH_URL ($OS_AUTH_URL) is not supported for -T" >&2
 				exit 1
 				;;
 		esac
