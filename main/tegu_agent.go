@@ -42,6 +42,8 @@
 					if the agent pops the timeout.
 				25 Jun 2015 : Now puts stderr out from a mirror command on failure or bleat level 2+.
 				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
+				17 Jul 2015 : Merge with steering, reference wa scripts from /var/lib/tegu/bin rather
+					than /opt/app/bin.
 
 	NOTE:		There are three types of generic error/warning messages which have 
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -210,30 +212,22 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 		pstr = fmt.Sprintf( "PATH=%s:$PATH ", *path )		// path to add if needed
 	}
 
-	//ssh_opts := "-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
 	parms := act.Data
 
 	switch cmd_type {
 		case "wa_port":
 				allow_exists = true
-				//cmd_str = fmt.Sprintf( `%s %s %s sudo /opt/app/bin/addWANPort %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0], parms["token"], parms["wan_uuid"], parms["subnet"] )
-				cmd_str = fmt.Sprintf( `%s sudo /opt/app/bin/addWANPort %s %s %s`, pstr, parms["token"], parms["wan_uuid"], parms["subnet"] )
+				cmd_str = fmt.Sprintf( `%s sudo /var/lib/tegu/bin/addWANPort %s %s %s`, pstr, parms["token"], parms["wan_uuid"], parms["subnet"] )
 
 		case "wa_tunnel":
-				//cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANTunnel %s %s %s`, ssh_cmd, ssh_opts, act.Hosts[0],  parms["localrouter"], parms["localip"], parms["remoteip"] )
-				cmd_str = fmt.Sprintf( `%s  sudo /opt/app/bin/addWANTunnel %s %s %s`, pstr, parms["localrouter"], parms["localip"], parms["remoteip"] )
+				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANTunnel %s %s %s`, pstr, parms["localrouter"], parms["localip"], parms["remoteip"] )
 
 		case "wa_route":
-				//cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/addWANRoute %s %s %s %s`, 
-						//ssh_cmd, ssh_opts, act.Hosts[0], parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
-				cmd_str = fmt.Sprintf( `%s  sudo /opt/app/bin/addWANRoute %s %s %s %s`, 
+				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANRoute %s %s %s %s`, 
 						pstr, parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
 
 		case "wa_del_conn":
-				// per dave's script:  token wan-subnet-uuid router-or-subnet-uuid CIDR [tos]
-				//cmd_str = fmt.Sprintf( `%s %s %s  sudo /opt/app/bin/deleteWANConnection %s %s %s %s`, ssh_cmd, ssh_opts, 
-						//act.Hosts[0],  parms["token"], parms["wan_uuid"], parms["router"], parms["remote_cidr"] )
-				cmd_str = fmt.Sprintf( `%s sudo /opt/app/bin/deleteWANConnection %s %s %s %s`,  pstr, parms["token"], parms["wan_uuid"], parms["router"], parms["remote_cidr"] )
+				cmd_str = fmt.Sprintf( `%s sudo /var/lib/tegu/bin/deleteWANConnection %s %s %s %s`,  pstr, parms["token"], parms["wan_uuid"], parms["router"], parms["remote_cidr"] )
 	}
 
 	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )
@@ -909,6 +903,10 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 			case "wa_port", "wa_tunnel", "wa_route", "wa_del_conn":									// execute one of the wa commands
 					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype, broker, nil, 5 )		// no path needed at the moment for these
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
 
 			case "mirrorwiz":
 					do_mirrorwiz(req.Actions[i], broker, path)
