@@ -10,11 +10,11 @@
 	Author:		E. Scott Daniels
 
 	Mods:		13 May 2014 -- Added toks2map function.
-				29 Sep 2014 -  The toks2map() funciton now stops parsing when the 
-					first token that does not match a key=value pair in order to 
-					prevent issues with the huge openstack tokens that are base64 
+				29 Sep 2014 -  The toks2map() funciton now stops parsing when the
+					first token that does not match a key=value pair in order to
+					prevent issues with the huge openstack tokens that are base64
 					encoded and thus may contain tailing equal signs and look like
-					a key=value when they are not.  If the the first token is 
+					a key=value when they are not.  If the the first token is
 					key=value, and the openstack auth token is also a key=value
 					pair, then all will be well.  In other words, the caller should
 					not mix things up if values will also contain equal signs.
@@ -46,7 +46,7 @@ import (
 
 
 /*
-	Split a string into a start/end UNIX time stamp assuming the string is in one of the 
+	Split a string into a start/end UNIX time stamp assuming the string is in one of the
 	following formats:
 		+nnnn		start == now	end == now + nnn
 		timestamp	start == now	end == timestamp
@@ -107,7 +107,7 @@ func Str2host1_host2( tok string ) ( h1 string, h2 string ) {
 }
 
 /*
-	Parse a set of tokens passed in, assuming they are name=value pairs, and generate a map. 
+	Parse a set of tokens passed in, assuming they are name=value pairs, and generate a map.
 	Parsing stops with the first token that isn't name=value and the map is returned as is.
 */
 func Toks2map( toks []string ) ( m map[string]*string ) {
@@ -127,8 +127,8 @@ func Toks2map( toks []string ) ( m map[string]*string ) {
 }
 
 /*
-	Given a tegu name which is likely has the form token/project/host where host could be 
-	one of the combinations listed below, separate off the port value and return the 
+	Given a tegu name which is likely has the form token/project/host where host could be
+	one of the combinations listed below, separate off the port value and return the
 	two separate strings. Possible host format:
 		ipv4
 		ipv4:port
@@ -136,20 +136,20 @@ func Toks2map( toks []string ) ( m map[string]*string ) {
 		[ipv6]:port
 		name:port
 
-	In the case of an IPv6 address, the brackets will be removed from the return name 
+	In the case of an IPv6 address, the brackets will be removed from the return name
 	portion. It is also assumed that an ip6 address will have more than one colon as
-	a part of the address regardless of whether a port is supplied. 
+	a part of the address regardless of whether a port is supplied.
 */
 func Split_port( host *string ) ( name *string, port *string ) {
 	zstr := "0"
-	name = host										// default 
+	name = host										// default
 	port = &zstr
 
 	if host == nil {
 		return
 	}
 
-	if strings.Index( *host, ":" ) < 0 {				// no port at all, not ipv6; default case 
+	if strings.Index( *host, ":" ) < 0 {				// no port at all, not ipv6; default case
 		return
 	}
 
@@ -187,8 +187,8 @@ func Split_port( host *string ) ( name *string, port *string ) {
 		name:port
 		name
 
-	and {vlan} is optional (brackets and braces are in the syntax not 
-	meta syntax here), return the three components: host name, port and 
+	and {vlan} is optional (brackets and braces are in the syntax not
+	meta syntax here), return the three components: host name, port and
 	vlan. Strings are nil if missing.
 */
 func Split_hpv( host *string ) ( name *string, port *string, vlan *string ) {
@@ -209,7 +209,7 @@ func Split_hpv( host *string ) ( name *string, port *string, vlan *string ) {
 
 
 /*
-	Given a host name of the form token/project/address return with the address string in 
+	Given a host name of the form token/project/address return with the address string in
 	square brackets if it seems to be an ipv6 address.
 */
 func Bracket_address( oa string ) (ba *string) {
@@ -234,17 +234,17 @@ func Bracket_address( oa string ) (ba *string) {
 
 /*
 	Mixed tokens (key=value and positional) to map.
-	Given an array of tokens (strings), and a list of names, generate a map of tokens 
+	Given an array of tokens (strings), and a list of names, generate a map of tokens
 	referenced by the corresponding name.  If tokens list is longer than the name list
-	the remaining tokens are not mapped.  If leading tokens are of the form key=value, 
+	the remaining tokens are not mapped.  If leading tokens are of the form key=value,
 	then they are mapped directly and tokens after the last key=value pair in the tokens
 	array are then mapped in order. Thus splitting the string
 		action=parse verbose=true  300  usera userb
-	split into tokens, and the names string of "duration u1 u2" would result in a 
+	split into tokens, and the names string of "duration u1 u2" would result in a
 	map:
 		{ action: "parse", verbose: true, duration: 300, u1: usera, u2: userb }
 
-	TODO: this needs to handle quoted tokens so that "xxx = yyyy" isn't treated as key 
+	TODO: this needs to handle quoted tokens so that "xxx = yyyy" isn't treated as key
 		a value pair.
 */
 func Mixtoks2map( toks []string, names string ) ( tmap map[string]*string ) {
@@ -278,12 +278,12 @@ func Mixtoks2map( toks []string, names string ) ( tmap map[string]*string ) {
 
 /*
 	Accepts a map and a space separated list of keys that are expected to exist in the map
-	and reference non-nil or non-empyt elements. Returns true when all elements in the 
-	list are present in the map, and false otherwise. If false is returned, a string 
+	and reference non-nil or non-empty elements. Returns true when all elements in the
+	list are present in the map, and false otherwise. If false is returned, a string
 	listing the key(s) missing is non-empty. Map can be one of [string]string, [string]*string,
 	[string]int. If int is given, than missing is true only if the key isn't in the map.
 
-	It is not an error if the map has more than the listed elements (the function can be 
+	It is not an error if the map has more than the listed elements (the function can be
 	used to check for required elements etc.)
 */
 func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
@@ -331,7 +331,7 @@ func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
 /*
 	Accepts two string pointers and returns true if both strings are the same
 	(could be pointed at different strings, true means that they are identical
-	in value). If both pointers are nil, then true is returned. False otherwise. 
+	in value). If both pointers are nil, then true is returned. False otherwise.
 */
 func Strings_equal( s1 *string, s2 *string ) ( bool ) {
 	if s1 == nil  {
@@ -347,7 +347,7 @@ func Strings_equal( s1 *string, s2 *string ) ( bool ) {
 
 /*
 	Given a string with a list of host names, this function generates
-	an array of floodlight link structures in a star arrangement as 
+	an array of floodlight link structures in a star arrangement as
 	though wwe received the json from floodlight.
 
 	CAUTION: we are making flood-light style links, _not_ our link object
@@ -370,11 +370,11 @@ func Gen_star_topo( hosts string ) ( links []FL_link_json ) {
 		}
 	}
 
-	return 
+	return
 }
 
 /*
-	Given a pointer to string, return the string or "null". We use null so this can 
+	Given a pointer to string, return the string or "null". We use null so this can
 	be used to generate legit json.
 */
 func Safe_string( p interface{} ) ( string ) {
@@ -385,4 +385,77 @@ func Safe_string( p interface{} ) ( string ) {
 	}
 
 	return *sp
+}
+
+
+/*
+	Given a map[string]T where T is of known, simple, type (bool, int, int64, string, *string) return true
+	if the map has any key in the array of keys passed in. This needs to support the openstack interface
+	where we have an array of roles, but to make it consistant with the has_all function above,
+	we'll support the keys as either a list in a string, or an array of string.
+*/
+func Map_has_any(  ui interface{}, ki interface{} ) (bool) {
+	var (
+		keys []string
+	)
+
+	switch ki.( type ) {
+		case string:
+			keys = strings.Split( ki.( string ), " " )
+
+		case *string:
+			keys = strings.Split( *(ki.( *string )), " " )
+
+		case []string:
+			keys = ki.( []string )
+
+		default:
+			return false						// unsported key list type
+	}
+
+	switch m := ui.( type ) {
+		case map[string]bool:
+			for _, k := range keys {
+				if _, ok := m[k]; ok {
+					return true
+				}
+			}
+
+		 case map[string]int:
+			for _, k := range keys {
+				if _, ok := m[k]; ok {
+					return true
+				}
+			}
+
+		case map[string]int64:
+			for _, k := range keys {
+				if _, ok := m[k]; ok {
+					return true
+				}
+			}
+
+		case map[string]float64:
+			for _, k := range keys {
+				if _, ok := m[k]; ok {
+					return true
+				}
+			}
+
+		case map[string]string:
+			for _, k := range keys {
+				if _, ok := m[k]; ok {
+					return true
+				}
+			}
+
+		case map[string]*string:
+			for _, k := range keys {
+				if _, ok := m[k]; ok {
+					return true
+				}
+			}
+	}
+
+	return false
 }
