@@ -78,6 +78,7 @@
 				02 Jul 2015 - No longer bail from host list when a request turns up empty.
 				13 Jul 2015 - Added work round openstack v2/v3 keystone issue with role verification
 						now must try all roles in our known universe.
+				21 Jul 2015 - Extended has_role function to accept either a token or token/project pair.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -96,7 +97,7 @@ import (
 	"codecloud.web.att.com/gopkgs/ipc"
 	"codecloud.web.att.com/gopkgs/ostack"
 	"codecloud.web.att.com/gopkgs/token"
-	//"codecloud.web.att.com/tegu/gizmos"
+	"codecloud.web.att.com/tegu/gizmos"
 )
 
 //var (
@@ -113,6 +114,13 @@ import (
 	if using reference creds fails, we'll (cough) run the list of other creds, yes making
 	an API call for each, until we find one that works or we exhaust the list.  Bottom line
 	is that we'll fail only if we cannot figure it out someway.
+
+	Dispite openstack doc, which implies that a token has a project scope, it does not.
+	this forces us to loop through every project we know about to see if the token is 
+	valid for the user and the project.   This could very easily return the wrong 
+	project if the token can be used to access more than one set of project information. 
+
+	Bottom line: use of this should be avoided!
 */
 func token2project(  os_refs map[string]*ostack.Ostack, token *string ) ( pname *string, idp *string, err error ) {
 	ostk := os_refs["_ref_"]					// first attempt: use our reference creds to examine the token
@@ -266,18 +274,44 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 	return err
 }
 
+
 /*
 	Given a token, return true if the token is valid for one of the roles listed in role.
-	Role is a list of space separated role names. 
-
-	2015 Jul 13
-		Bloody openstack is just broken.  we must run every project we know about in order to 
-		suss this information out becuase openstack doesn't return a proejct as a part of token information 
-		and given just a token it's not possible to tell whether it's associated with a project unless 
-		making a call that directly tries with the project name. Further, this opens a HUGE hole in security
-		as a user's roles are now valid across all projects, but I guess that's the openstack way.
+	Role is a list of space separated role names.  If token is actually tokken/project, then
+	we will test only with the indicated project. Otherwise we will test the token against
+	every project we know about and return true if any of the roles in the list is defined
+	for the user in any project.  This _is_ needed to authenticate Tegu requests which are not
+	directly project oriented (e.g. set capacities, graph, etc.), so it is legitimate for
+	a token to be submitted without a leading project/ string.
 */
-func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( found bool, err error ) {
+func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( has_role bool, err error ) {
+	rtoks := strings.Split( *roles, "," )		// simple tokenising of role list
+
+	has_role = false
+	if strings.Contains( *token, "/" ) {				// assume it's token/project
+		const p int = 1			// order in split tokens (project)
+		const t int = 0			// order in split tokens (actual token)
+
+		toks := strings.Split( *token, "/" )
+		if toks[p] == "" {
+			osif_sheep.Baa( 2, "has_any_role: project/token had empty project" )
+			return false, fmt.Errorf( "project portion of token/project was empty" )
+		}	
+
+		stuff, err := admin.Crack_ptoken( &toks[t], &toks[p], false )			// crack user info based on project and token
+		if err == nil {
+			state := gizmos.Map_has_any( stuff.Roles, rtoks )				// true if any from rtoks list matches any in Roles
+			if state {
+				osif_sheep.Baa( 2, "has_any_role: token/project validated for roles: %s", *roles )
+				return true, nil
+			} else {
+				err = fmt.Errorf( "none matched" );
+			}
+		}
+
+		osif_sheep.Baa( 2, "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
+		return false, fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
+	}
 
 	for _, v := range os_refs {
 		pname, _ := v.Get_project( )
@@ -285,26 +319,24 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 
 		stuff, err := admin.Crack_ptoken( token, pname, false )			// return a stuff struct with details about the token
 
-		found = false													// assume the worst
 		if err == nil {
-			err = fmt.Errorf( "role not defined; %s", *roles )			// asume not
-			rtoks := strings.Split( *roles, "," )
-			for i := range rtoks {
-				if  stuff.Roles[rtoks[i]] {
-					osif_sheep.Baa( 1, "has_any_role: verified in %s", *pname )
-					return	true, nil									// short out
-				}
+			err = fmt.Errorf( "role not defined; %s", *roles )			// asume error
+			state := gizmos.Map_has_any( stuff.Roles, rtoks )			// true if any role token matches anything from ostack
+			if state {
+				osif_sheep.Baa( 2, "has_any_role: verified in %s", *pname )
+				return true, nil
 			}
+		} else {
+			osif_sheep.Baa( 2, "has_any_role: crack failed for project=%s: %s", *pname, err )
 		}
 	}
 
-	if err != nil {
-		osif_sheep.Baa( 1, "unable to verify role: %s: %s", roles, err )
-	} else {
-		osif_sheep.Baa( 1, "unable to verify role: %s", roles )
+	if err == nil {
+		err = fmt.Errorf( "undetermined reason" )
 	}
 
-	return
+	osif_sheep.Baa( 1, "unable to verify role: %s: %s", *roles, err )
+	return false, err
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
