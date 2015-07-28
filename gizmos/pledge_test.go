@@ -32,6 +32,7 @@ func new_pw( c int64, e int64 ) ( *pledge_window ) {
 	return p
 }
 
+
 func Test_pwo( t *testing.T ) {
 	failures :=0
 	now := time.Now().Unix()
@@ -86,6 +87,40 @@ func Test_pwo( t *testing.T ) {
 	}
 
 	fmt.Fprintf( os.Stderr, "\n" )
+}
+
+/*
+*/
+func Test_ob_validtime( t *testing.T ) {
+	fmt.Fprintf( os.Stderr, "\n------- valid obligattion tests ---------\n" );
+
+	if Valid_obtime( 1735707600-1 ) { 				// expect pass, time just under bounds
+		fmt.Fprintf( os.Stderr, "OK:     max-1 time returned valid\n" )
+	} else {
+		fmt.Fprintf( os.Stderr, "FAIL:   max-1 time didn't return valid\n" )
+		t.Fail()
+	}
+
+	if Valid_obtime( time.Now().Unix() + 1 ) { 				//expect pass, time just under bounds
+		fmt.Fprintf( os.Stderr, "OK:     now+1 time returned valid\n" )
+	} else {
+		fmt.Fprintf( os.Stderr, "FAIL:   now+1 time didn't return valid\n" )
+		t.Fail()
+	}
+
+	if Valid_obtime( 1735707600+1 ) {			// expect failure, time out of bounds
+		fmt.Fprintf( os.Stderr, "FAIL:   max+1 time returned valid\n" )
+		t.Fail()
+	} else {
+		fmt.Fprintf( os.Stderr, "OK:     max+1 time returned invalid\n" )
+	}
+
+	if Valid_obtime( time.Now().Unix() - 1 ) {			// expect failure, time out of bounds
+		fmt.Fprintf( os.Stderr, "FAIL:   now-1 time returned valid\n" )
+		t.Fail()
+	} else {
+		fmt.Fprintf( os.Stderr, "OK:     now-1 time returned invalid\n" )
+	}
 }
 
 func Test_bw_equals( t *testing.T ) {
