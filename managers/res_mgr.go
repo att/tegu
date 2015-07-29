@@ -680,6 +680,7 @@ func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error )
 	for _, r := range inv.cache {
 		if !(*r).Is_expired()  && (*p).Equals( r ) {
 			rid = (*r).Get_id( )
+			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
 			return
 		}
 	}

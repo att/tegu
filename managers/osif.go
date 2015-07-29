@@ -79,6 +79,8 @@
 				13 Jul 2015 - Added work round openstack v2/v3 keystone issue with role verification
 						now must try all roles in our known universe.
 				21 Jul 2015 - Extended has_role function to accept either a token or token/project pair.
+				29 Jul 2015 - Added lazy update of project info when a token/proj or token/proj/host 
+						is validated.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -538,6 +540,64 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 	return
 }
 
+/*
+	Fetch new maps and update the project list.
+	Returns:
+		osack reference map
+		project name to id map
+		id to project name map	
+
+	On error err is set, and nil values returned for conversion maps and the old os_list is returned
+*/
+func update_project( os_admin *ostack.Ostack, old_os_refs map[string]*ostack.Ostack, os_projects map[string]*osif_project, old_pname2id map[string]*string, old_id2pname map[string]*string, update_list bool ) (
+	os_refs map[string]*ostack.Ostack, 
+	id2pname map[string]*string, 
+	pname2id map[string]*string ) {
+
+	new_name2id, new_id2pname, err := os_admin.Map_tenants( )			// fetch new maps, overwrite only if no errors
+	if err == nil {
+		pname2id = new_name2id
+		id2pname = new_id2pname
+	} else {
+		osif_sheep.Baa( 1, "WRN: unable to get tenant name/ID translation data: %s  [TGUOSI010]", err )
+		return old_os_refs, old_pname2id, old_id2pname
+	}
+
+	if update_list  {																	// asked to update the os_refs too
+		os_refs, _ = refresh_creds( os_admin, old_os_refs, id2pname )					// periodic update of project cred list
+		add2projects( os_projects, os_refs, pname2id, 2 )								// add refernces to the projects list
+		if osif_sheep.Would_baa( 2 ) {
+			for _, v := range os_projects {
+				osif_sheep.Baa( 2, "update project sees: %s", *v.name )
+			}
+		}
+	} else {
+		os_refs = old_os_refs
+	}
+
+	osif_sheep.Baa( 1, "credentials were updated from openstack" )
+
+	return os_refs, pname2id, id2pname
+}
+
+/*
+	Splits a token/project[/host] tuple and returns true if we have the project in the list.
+*/
+func have_project( raw *string,  pname2id map[string]*string, id2pname map[string]*string ) ( bool ) {
+	toks := strings.Split( *raw, "/" )
+	if len( toks ) < 2 {
+		return false
+	}
+
+	_, ok := pname2id[toks[1]]
+	if ! ok {
+		_, ok = id2pname[toks[1]]
+	}
+
+	osif_sheep.Baa( 2, "have project verification: %s = %v", *raw, ok )
+	return ok
+}
+
 
 // --- Public ---------------------------------------------------------------------------
 
@@ -629,8 +689,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		os_admin = get_admin_creds( def_url, def_usr, def_passwd, def_project, def_region )		// this will block until we authenticate
 		if os_admin != nil {
 			osif_sheep.Baa( 1, "admin creds generated, mapping tenants" )
-			pname2id, id2pname, _ = os_admin.Map_tenants( )		// get the initial translation maps
-			//pname2id, id2pname, _ = os_admin.Map_all_tenants( )		// get the translation maps
+			pname2id, id2pname, _ = os_admin.Map_tenants( )						// list only projects we belong to
 			for k, v := range pname2id {
 				osif_sheep.Baa( 1, "project known: %s %s", k, *v )				// useful to see in log what projects we can see
 			}
@@ -645,7 +704,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 
 		if os_list == "all" {
-			os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )		// get a list of all projects and build creds for each
+			os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )		// for each project in id2pname get current ostack struct (auth)
 			for k := range os_refs {
 				osif_sheep.Baa( 1, "inital os_list member: %s", k )
 			}
@@ -690,10 +749,10 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	// ---------------- end config parsing ----------------------------------------
 
 
-	//tklr.Add_spot( 3, my_chan, REQ_GENMAPS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
-	//tklr.Add_spot( int64( refresh_delay ), my_chan, REQ_GENMAPS, nil, ipc.FOREVER );  	
-	tklr.Add_spot( 3, my_chan, REQ_GENCREDS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
-	tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER );  	
+	if os_admin != nil {														// only if we are using openstack as a database
+		//tklr.Add_spot( 3, my_chan, REQ_GENCREDS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
+		tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER );  	
+	}
 
 	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
 	for {
@@ -705,23 +764,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			case REQ_GENMAPS:								// driven by tickler
 					// deprecated with switch to lazy update
 
-			case REQ_GENCREDS:								// driven by tickler
+			case REQ_GENCREDS:								// driven by tickler now and then
 				if os_admin != nil {
-					//new_name2id, new_id2pname, err := os_admin.Map_tenants( )		// fetch new maps, overwrite only if no errors
-					new_name2id, new_id2pname, err := os_admin.Map_all_tenants( )		// fetch new maps, overwrite only if no errors
-					if err == nil {
-						pname2id = new_name2id
-						id2pname = new_id2pname
-					} else {
-						osif_sheep.Baa( 1, "WRN: unable to get tenant name/ID translation data: %s  [TGUOSI010]", err )
-					}
-	
-					if os_list == "all" {
-						os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )						// periodic update of project cred list
-						add2projects( os_projects, os_refs, pname2id, 2 )								// add refernces to the projects list
-					}
-
-					osif_sheep.Baa( 2, "credentials were updated from openstack" )
+					os_refs, pname2id, id2pname = update_project( os_admin, os_refs, os_projects, pname2id, id2pname, os_list == "all"  )
 				}
 
 	/* ---- before lite ----
@@ -777,6 +822,9 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				if msg.Response_ch != nil {
 					s := msg.Req_data.( *string )
 					*s += "/"								// add trailing slant to simulate "data"
+					if ! have_project( s, pname2id, id2pname ) {				// ensure that we have creds for this project, if not attempt to get
+						os_refs, pname2id, id2pname = update_project( os_admin, os_refs, os_projects, pname2id, id2pname, os_list == "all"  )
+					}
 					msg.Response_data, msg.State = validate_token( s, os_refs, pname2id, req_token )
 				}
 
@@ -801,16 +849,25 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string
 				if msg.Response_ch != nil {
+					if ! have_project(  msg.Req_data.( *string ), pname2id, id2pname ) {				// ensure that we have creds for this project, if not attempt to get
+						os_refs, pname2id, id2pname = update_project( os_admin, os_refs, os_projects, pname2id, id2pname, os_list == "all"  )
+					}
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, req_token )
 				}
 
 			case REQ_XLATE_HOST:						// accepts a [token/][project/]host name and translate project to an ID
 				if msg.Response_ch != nil {
+					if ! have_project( msg.Req_data.( *string ), pname2id, id2pname ) {				// ensure that we have creds for this project, if not attempt to get
+						os_refs, pname2id, id2pname = update_project( os_admin, os_refs, os_projects, pname2id, id2pname, os_list == "all"  )
+					}
 					msg.Response_data, msg.State = validate_token( msg.Req_data.( *string ), os_refs, pname2id, false )		// same process as validation but token not required
 				}
 
 			case REQ_VALIDATE_TEGU_ADMIN:					// validate that the token is for the tegu user
 				if msg.Response_ch != nil {
+					if ! have_project( msg.Req_data.( *string ), pname2id, id2pname ) {				// ensure that we have creds for this project, if not attempt to get
+						os_refs, pname2id, id2pname = update_project( os_admin, os_refs, os_projects, pname2id, id2pname, os_list == "all"  )
+					}
 					msg.State = validate_admin_token( os_admin, msg.Req_data.( *string ), def_usr )
 					msg.Response_data = ""
 				}
