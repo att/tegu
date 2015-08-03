@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -8,24 +26,24 @@
 				a fraction of the total amount that has been pledged to a particular
 				host's traffic.
 
-				The object is designed to be managed as a link list member. The 
-				'owner' of the object may arrange the list as needed and methods like 
-				split() will automatically insert new time_slice objects into the list 
-				when needed. Similarly, Amt is exported so that the object owner may 
-				easily manipulate it without a method call. 
+				The object is designed to be managed as a link list member. The
+				'owner' of the object may arrange the list as needed and methods like
+				split() will automatically insert new time_slice objects into the list
+				when needed. Similarly, Amt is exported so that the object owner may
+				easily manipulate it without a method call.
 
-				The timeslice may optionally be given queue information.  Adding a 
+				The timeslice may optionally be given queue information.  Adding a
 				queue to the set will increase the timeslice's amount used (amt). Removing
 				a queue will decrement the amount used.  Queue numbering is tricky because
-				it is desired to keep the same queue number for a port/host from the 
-				start until the end of the reservation for the host which may span more 
-				than one timeslice. 
+				it is desired to keep the same queue number for a port/host from the
+				start until the end of the reservation for the host which may span more
+				than one timeslice.
 
 	Date:		23 November 2013
 	Author:		E. Scott Daniels
 
 	Mods:		29 Jun 2014 - Changes to support user link limits.
-				07 Jul 2014 - Now generates queue strings if the bandwidth amount is 
+				07 Jul 2014 - Now generates queue strings if the bandwidth amount is
 					greater than zero.
 				18 Jun 2015 - Allow a queue to be added only if the amount is positive.
 				22 Jun 2015 - Added check for nil qid pointer on add.
@@ -44,7 +62,7 @@ import (
 	//"strings"
 	"time"
 
-	//"codecloud.web.att.com/gopkgs/clike"
+	//"github.com/att/att/gopkgs/clike"
 )
 
 /*
@@ -55,7 +73,7 @@ type Time_slice struct {
 	Prev		*Time_slice
 	Amt			int64			// amount promissed for this time period	
 	commence	int64			// start timestamp (UNIX) of the time period
-	conclude	int64			// ending timestamp 
+	conclude	int64			// ending timestamp
 	queues		map[string]*Queue			// list of queues that further define the slice
 	limits		map[string]*Fence			// user fences that limit their capacity on the link
 }
@@ -90,16 +108,16 @@ func (ts *Time_slice) Nuke( ) {
 /*
 	Split a time slice on a given time boundary. The new object is inserted
 	into the list. The return values are ts1 and ts2 where ts1 is the timeslice
-	occuring chronologicly before ts2. The queues will be shared between the 
+	occuring chronologicly before ts2. The queues will be shared between the
 	two slices. The split point becomes the commence time for the inserted
 	block. For example, if the slice spans time 100 to 500 and the split at
 	200 is requested, the existing block will span 100 to 199, and the inserted
-	block will span 200 to 500. 
+	block will span 200 to 500.
 
-	If the split point is exactly equal to the start/end timestamp for to, then 
+	If the split point is exactly equal to the start/end timestamp for to, then
 	no action is taken and only ts1 is returned (ts2 will be nil).
 
-	If the split point is not inside of the timeslice referenced then two 
+	If the split point is not inside of the timeslice referenced then two
 	nil pointers are returned.
 */
 func (ts *Time_slice) Split( split_pt int64 ) ( ts1, ts2 *Time_slice ) {
@@ -142,8 +160,8 @@ func (ts *Time_slice) Split( split_pt int64 ) ( ts1, ts2 *Time_slice ) {
 }
 
 /*
-	change the concluding time. we will vet it to ensure that it's not 
-	before the commence time and is the last block as that is the only 
+	change the concluding time. we will vet it to ensure that it's not
+	before the commence time and is the last block as that is the only
 	one allowed to have it's time extended.
 */
 func (ts *Time_slice) Extend( timestamp int64 ) {
@@ -175,14 +193,14 @@ func (ts *Time_slice) Is_after( timestamp int64 ) (  bool ) {
 }
 
 /*
-	Return true if the time window passed in overlaps with this slice. 
+	Return true if the time window passed in overlaps with this slice.
 */
 func (ts *Time_slice) Overlaps( wstart int64, wend int64 ) ( bool ) {
 	return ts.Includes( wstart ) || ts.Includes( wend )	
 }
 
 /*
-	Extracts the queue numbers from each queue in the list and builds an 
+	Extracts the queue numbers from each queue in the list and builds an
 	array with the numbers. Returns the list and the number of queues
 	that were present.
 */
@@ -202,13 +220,13 @@ func (ts *Time_slice) Get_qnums( ) ( nqueues int, list []int ) {
 }
 
 /*
-	Check to see if the capacity provided for the named user would bust the user's limit. 
+	Check to see if the capacity provided for the named user would bust the user's limit.
 	Returns true if the capacity can be added without going over the fence.
 
 	If the user is not in the set of users which have a reservation over this time_slice,
-	then we return true with the assumption that some earlier process has checked the 
+	then we return true with the assumption that some earlier process has checked the
 	user's request against either the default cap, or the user's cap; this saves us from
-	having to install every user into the has everytime a timeslice is created. 
+	having to install every user into the has everytime a timeslice is created.
 */
 func (ts *Time_slice) Has_usr_capacity( usr *string, cap int64 ) ( result bool, err error ) {
 	if ts.limits != nil  &&  usr != nil {
@@ -218,14 +236,14 @@ func (ts *Time_slice) Has_usr_capacity( usr *string, cap int64 ) ( result bool, 
 				err = fmt.Errorf( "user exceeds limit: need %d have %d", have, need )
 				return false, err
 			}
-		} 
+		}
 	}
 
 	return true, nil
 }
 
 /*
-	Return queue info for the queue matching the ID passed in. 
+	Return queue info for the queue matching the ID passed in.
 */
 func (ts *Time_slice) Get_queue_info( id *string ) ( qnum int, swdata *string ) {
 	qnum = -1
@@ -235,14 +253,14 @@ func (ts *Time_slice) Get_queue_info( id *string ) ( qnum int, swdata *string ) 
 	if q != nil {
 		qnum = q.Get_num( )
 		swdata = q.Get_eref()			// get the switch data (external reference in queue terms)
-	} 
+	}
 
 	return
 }
 
 /*
 	Add a queue to the slice. If the queue id exsits, then we'll inc the amount already set
-	by amt rather than creating a new one.  
+	by amt rather than creating a new one.
 */
 func (ts *Time_slice) Add_queue( qnum int, id *string, swdata *string, amt int64 ) {
 	if ts == nil {
@@ -266,17 +284,17 @@ func (ts *Time_slice) Add_queue( qnum int, id *string, swdata *string, amt int64
 }
 
 /*
-	Increases the amount consumed by the user during this timeslice. The usr in this 
-	case is a fence containing default values should we need to create a new fence for 
-	the user in this slice.  This function does NOT check to see if the increase would 
-	bust the limit, but the underlying fence might chop the requested capacity at the limit. 
+	Increases the amount consumed by the user during this timeslice. The usr in this
+	case is a fence containing default values should we need to create a new fence for
+	the user in this slice.  This function does NOT check to see if the increase would
+	bust the limit, but the underlying fence might chop the requested capacity at the limit.
 */
 func (ts *Time_slice) Inc_usr(	usr *Fence, amt int64, cap int64  ) {
 	if usr == nil {
 		return
 	}
 
-	f := ts.limits[*usr.Name] 
+	f := ts.limits[*usr.Name]
 	if f == nil {
 		f = usr.Clone( cap )
 		ts.limits[*f.Name] = f
@@ -309,7 +327,7 @@ func ( ts *Time_slice ) Queues2json( ) ( string ) {
 }
 
 /*
-	Generates a set of newline separated information about each queue in the timeslice. 
+	Generates a set of newline separated information about each queue in the timeslice.
 */
 func ( ts *Time_slice ) Queues2str( ) ( string ) {
 	s := ""

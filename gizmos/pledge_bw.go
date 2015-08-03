@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -30,7 +48,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codecloud.web.att.com/gopkgs/clike"
+	"github.com/att/att/gopkgs/clike"
 )
 
 type Pledge_bw struct {
@@ -81,7 +99,7 @@ type Json_pledge_bw struct {
 // ---- private -------------------------------------------------------------------
 
 /*
-	Formats v1 and v2 in the {n} format for adding to a host representation which is 
+	Formats v1 and v2 in the {n} format for adding to a host representation which is
 	now   token/project/vm:port{vlan}.
 */
 func ( p *Pledge_bw ) bw_vlan2string( ) (v1 string, v2 string) {
@@ -319,14 +337,14 @@ func (p *Pledge_bw) Clone( name string ) ( *Pledge_bw ) {
 }
 
 /*
-	Accepts another pledge (op) and compairs the two returning true if the following values are 
+	Accepts another pledge (op) and compairs the two returning true if the following values are
 	the same:
 		hosts, protocol, transport ports, vlan match value, window
 
 	The test for window involves whether the reservation overlaps. If there is any
 	overlap they are considerd equal windows, otherwise not.
 
-	It gets messy.... if p1.h1 == p2.h2 (hosts reversed), then we must match the 
+	It gets messy.... if p1.h1 == p2.h2 (hosts reversed), then we must match the
 	reverse of port since port and host must align.
 */
 func (p *Pledge_bw) Equals( op *Pledge ) ( state bool ) {
@@ -542,12 +560,12 @@ func (p *Pledge_bw) String( ) ( s string ) {
 }
 
 /*
-	Generate a json representation of the pledge. This is different than the checkpoint 
-	string as it is safe to use this in a reservation list that will be presented to 
-	some user -- no cookie or other 'private' information should be exposed in the 
+	Generate a json representation of the pledge. This is different than the checkpoint
+	string as it is safe to use this in a reservation list that will be presented to
+	some user -- no cookie or other 'private' information should be exposed in the
 	json generated here.
-	We do NOT use the json package because we don't put the object directly in; we render 
-	useful information, which excludes some of the raw data, and we don't want to have to 
+	We do NOT use the json package because we don't put the object directly in; we render
+	useful information, which excludes some of the raw data, and we don't want to have to
 	expose the fields publicly that do go into the json output.
 */
 func (p *Pledge_bw) To_json( ) ( json string ) {
@@ -590,7 +608,7 @@ func (p *Pledge_bw) To_chkpt( ) ( chkpt string ) {
 	commence, expiry := p.window.get_values()
 	v1, v2 := p.bw_vlan2string( )
 
-	chkpt = fmt.Sprintf( `{ "host1": "%s:%s%s", "host2": "%s:%s%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`, 
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%s%s", "host2": "%s:%s%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`,
 			*p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, commence, expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, PT_BANDWIDTH )
 
 	return

@@ -1,9 +1,27 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	lite
-	Abstract:	Functions specifically added to support qos-lite. 
+	Abstract:	Functions specifically added to support qos-lite.
 				These should later be broken into better organised files, but since
 				this is a deathmarch they are all stuck in here to make it easy (but
 				messy).
@@ -48,7 +66,7 @@ func Read_json_links( fname string ) ( links []FL_link_json, err error ) {
 	// for now we strip @interface name from the switch id
 /*
 	for i := range links {
-		n := strings.Index( links[i].Dst_switch, "@" ) 
+		n := strings.Index( links[i].Dst_switch, "@" )
 		if  n >= 0 {											// if this is indicates the interface name
 			links[i].Dst_switch = links[i].Dst_switch[0:n]		// ditch it for now
 		}
@@ -60,7 +78,7 @@ func Read_json_links( fname string ) ( links []FL_link_json, err error ) {
 
 
 /*
-	Request vm information from openstack and generate the 'host json' that is a 
+	Request vm information from openstack and generate the 'host json' that is a
 	match for the floodlight dev api output:
 		dev[0]:
     		entityClass = DefaultEntityClass
@@ -73,7 +91,7 @@ func Read_json_links( fname string ) ( links []FL_link_json, err error ) {
     		lastSeen = 1398705932064.00
 
 
-	This must be a part of network manger because the net struct is where all the maps are and it's 
-	just easier to keep it there. 
+	This must be a part of network manger because the net struct is where all the maps are and it's
+	just easier to keep it there.
 */
 	

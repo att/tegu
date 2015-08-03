@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -32,7 +50,7 @@ import (
 	"fmt"
 	"strings"
 
-	"codecloud.web.att.com/tegu"
+	"github.com/att/att/tegu"
 )
 
 
@@ -156,10 +174,10 @@ func (s *Switch) Get_id( ) ( *string ) {
 
 /*
 	Return the ith link in our index or nil if i is out of range.
-	Allows the user programme to loop through the list if needed. Yes, 
-	this _could_ have been implemented to drive a callback for each 
+	Allows the user programme to loop through the list if needed. Yes,
+	this _could_ have been implemented to drive a callback for each
 	list element, but that just makes the user code more complicated
-	requiring an extra function or closure and IMHO adds uneeded 
+	requiring an extra function or closure and IMHO adds uneeded
 	maintence and/or learning curve issues.
 */
 func (s *Switch) Get_link( i int ) ( l *Link ) {
@@ -437,7 +455,7 @@ func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, i
 
 /*
 	Checks all links to determine if they _all_ have the capacity to support
-	additional outbound traffic (inc_cap).  Used to check for gating when a 
+	additional outbound traffic (inc_cap).  Used to check for gating when a
 	path isn't built, but rate limiting at ingress is needed.
 */
 func (s *Switch) Has_capacity_out( commence, conclude, inc_cap int64, usr *string, usr_max int64 ) ( bool ) {
@@ -454,7 +472,7 @@ func (s *Switch) Has_capacity_out( commence, conclude, inc_cap int64, usr *strin
 	}
 
 	obj_sheep.Baa( 2, "switch/cap_out: %s has capacity", s.id )
-	return true 
+	return true
 }
 
 // -------------------- formatting ----------------------------------------------------
