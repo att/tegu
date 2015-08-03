@@ -1,4 +1,24 @@
 #!/usr/bin/env ksh
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
+#!/usr/bin/env ksh
 # vi: ts=4:
 
 #
@@ -39,10 +59,10 @@ function tty_rewrite
 
 
 
-# Delete the iptables rules in mangle that do the right thing for our DSCP marked traffic 
-# This must also handle all of the bloody routers that are created in namespaces, so we first generate a 
+# Delete the iptables rules in mangle that do the right thing for our DSCP marked traffic
+# This must also handle all of the bloody routers that are created in namespaces, so we first generate a
 # set of commands for the main iptables, then generate the same set for each nameespace. This all goes
-# into a single command file which is then fed into ssh to be executed on the target host. 
+# into a single command file which is then fed into ssh to be executed on the target host.
 #
 # we assume that this funciton is run asynch and so we capture all output into a file that can be spit out
 # at the end.
@@ -60,7 +80,7 @@ function purge_iptables
 	if (( $? != 0 ))
 	then
 		echo "unable to get network name space list from target-host: ${thost#* }  [FAIL]" >&2
-		sed 's/^/purge_iptables:/' $err_file >&2 
+		sed 's/^/purge_iptables:/' $err_file >&2
 		return 1
 	fi
 
@@ -71,11 +91,11 @@ function purge_iptables
 	typeset iptables_del_mid="iptables -f -D POSTROUTING -t mangle -m dscp --dscp"			# reset for the name space specific command
 	
 	(																# create the commands to send; first the master iptables rules, then rules for each name space
-		echo "$iptables_del_base 0 $iptables_tail 1:2;" 
+		echo "$iptables_del_base 0 $iptables_tail 1:2;"
 		for d in ${diffserv//,/ }													# d will be 4x the value that iptables needs
 		do
 			echo "$iptables_del_base $((d/4)) $iptables_tail 1:6;"					# add in delete commands
-		done 
+		done
 
 		while read ns 																# for each name space we found
 		do
@@ -83,8 +103,8 @@ function purge_iptables
 			for d in ${diffserv//,/ }
 			do
 				echo "$iptables_nsbase $ns $iptables_del_mid $((d/4)) $iptables_tail 1:6;"			# add in delete commands
-			done 
-		done <$nslist 
+			done
+		done <$nslist
 	) >$cmd_file
 
 	if [[ -z $thost  || $thost == "localhost" ]]	# local host -- just pump into ksh
@@ -94,7 +114,7 @@ function purge_iptables
 		typeset ssh_cmd="ssh -T $ssh_opts $thost" 	# different than what we usually use NO -n supplied!!
 	fi
 
-	rc=0											# overall return code 
+	rc=0											# overall return code
 	if [[ -z $really ]]								# empty string means we're live
 	then
 		$forreal timeout 100 $ssh_cmd <$cmd_file >$err_file 2>&1
@@ -143,7 +163,7 @@ agent_driven=0
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-a)		agent_driven=1;;
 		-F)		do_fmods=0;;
 		-Q)		do_queues=0;;

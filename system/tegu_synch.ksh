@@ -1,13 +1,33 @@
 #!/usr/bin/env ksh
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
+#!/usr/bin/env ksh
 
 #
 #	Mnemonic:	tegu_synch
-#	Abstract:	Simple script to take a snapshot of the checkpoint environment and push it off to 
-#				the stand-by hosts.  Stand-by hosts are expected to be listed one per line in 
+#	Abstract:	Simple script to take a snapshot of the checkpoint environment and push it off to
+#				the stand-by hosts.  Stand-by hosts are expected to be listed one per line in
 #				If the first parameter on the command line is "recover" then this script will
-#				attempt to restore the most receent synch file into the chkpt directory. 
+#				attempt to restore the most receent synch file into the chkpt directory.
 #
-#				CAUTION:  A _huge_ assumption is made here -- the TEGU_ROOT directory on each 
+#				CAUTION:  A _huge_ assumption is made here -- the TEGU_ROOT directory on each
 #					host is the same!
 #
 #   Exit:		an exit code of 1 is an error while an exit code of 2 is a warning and the calling
@@ -19,7 +39,7 @@
 #
 #	Mod:		14 Jan - added provision to reload that will search for an old style name (no host)
 #					if one with a host cannot be found.
-#				02 Jul 2015 - correct bug that allowed an old gzip file to be used when newer 
+#				02 Jul 2015 - correct bug that allowed an old gzip file to be used when newer
 #					checkpoint files exist.
 # --------------------------------------------------------------------------------------------------
 
@@ -90,7 +110,7 @@ ssh_opts="-o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
 standby_file=$etcd/standby
 restore=0
 
-case $1 in 
+case $1 in
 	restore)	#restore the latest sync into the chkpt directory
 		restore=1
 		;;
@@ -183,7 +203,7 @@ else
 		echo "synch file ($synch_file) was restored into $PWD/chkpt    [OK]"
 
 		# chef gets pissy if we do this, so we don't any more.
-		#restore_config chkpt/tegu.cfg					# restore the config files 
+		#restore_config chkpt/tegu.cfg					# restore the config files
 		#ls chkpt/*.json | while read jfile
 		#do
 		#	restore_config $jfile
