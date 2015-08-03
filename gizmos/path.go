@@ -28,10 +28,21 @@
 				Endpoints only have 'forward' switches and so when we set their queue we always
 				set the forward queue.
 
+				If the path is marked as a scramble, then it's not a true path between the endpoints.
+				For a scramble, the list of links represents only the unique set of links that are 
+				involved in all possible paths between the end points. 
+
 	Date:		26 November 2013
 	Author:		E. Scott Daniels
 
-	Mod:		03 Apr 2014 (sd) - Added support for endpoints
+	Mod:		03 Apr 2014 - Added support for endpoints
+				11 Jun 2014 - Changes to support finding all paths rather than shortest
+				13 Jun 2014 - Added to the doc.
+				29 Jun 2014 - Changes to support user link limits.
+				07 Jul 2014 - Changed to fix queue deletion when a reservation is deleted.
+				29 Jul 2014 - Mlag support
+				19 Oct 2014 - Support setting queues only on outbound direction of path.
+				29 Oct 2014 - Added Get_nlinks() function.
 */
 
 package gizmos
@@ -48,18 +59,23 @@ import (
 	//"strings"
 	//"time"
 
-	//"forge.research.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/clike"
 )
 
 type Path struct {
+	usr		*string			// user that this path is associated with -- needed to delete the user based utilisation on links
 	links	[]*Link
 	lidx	int
 	switches []*Switch
 	sidx	int
 	h1		*Host
 	h2		*Host
+	bw_amt	int64			// amount of bandwidth reserved along this path
 	endpts	[]*Link			// virtual links that represent the switch to vm endpoint 'link'
+	extip	*string			// external IP address to be added to the flow mod when needed
+	extflag	*string			// flag indicating whether external IP is source (-S) or dest (-D) needed by flow mod generator
 	is_reverse	bool		// set to indicate that the path was saved in reverse order
+	is_scramble bool		// if the path is not a true path, but a list of links involved in all possible paths between hosts
 }
 
 // ---------------------------------------------------------------------------------------
@@ -74,6 +90,7 @@ func Mk_path( h1 *Host, h2 *Host ) ( p *Path ) {
 		lidx:	0,
 		sidx:	0,
 		is_reverse: false,
+		is_scramble: false,
 	}
 
 	p.endpts = make( []*Link, 2 )
@@ -112,11 +129,55 @@ func (p *Path) Set_reverse( state bool ) {
 }
 
 /*
+	Set the amount of bandwith that has been reserved along this path.
+*/
+func (p *Path) Set_bandwidth( bw int64 ) {
+	if( bw > 0 ) {
+		p.bw_amt = bw;
+	}
+
+	return
+}
+
+/*
+	Causes the is_scramble indicator to be set to the value passed in.
+*/
+func (p *Path) Set_scramble( state bool ) {
+	p.is_scramble = state
+}
+
+/*
+	Return the current amount of bandwidth reserved on the path
+*/
+func (p *Path) Get_bandwidth( ) ( int64 )  {
+	return p.bw_amt
+}
+
+/*
+	Return the number of links in the path.
+*/
+func (p *Path) Get_nlinks( ) ( int ) {
+	return p.lidx
+}
+
+/*
+	Returns the state of the scramble setting.
+*/
+func (p *Path) Is_scramble( ) ( bool ) {
+	return p.is_scramble
+}
+
+/*
 	Adds the link passed in to the path. Links should be added in 
 	order from the origin switch to the termination switch.  If
 	the links are added in reverse, the reverse indicator should
 	be set for the path (see Set_reverse() method).  Adding links
 	out of order will cause interesting and likely undesired, results. 
+
+	If the is_scramble indicator is set, then the links represent only
+	a unique set of links necessary to construct one or more paths
+	between the end points. A scramble is generated (probably) when 
+	all paths are found rather than a single, shortest, path.
 */
 func (p *Path) Add_link( l *Link ) {
 	var (
@@ -190,41 +251,94 @@ func ( p *Path) Add_endpoint( l *Link ) {
 }
 
 /*
-	Increases the utilisation of the path by adding delta to all links. This assumes that the
-	link has already been tested and indicated it could accept the change. 
+	Reverses the endpoints. The expectation is that they are in h1, h2 order, but if they were 
+	pushed backwards then this allows that to be corrected by the user.
 */
-func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
+func (p *Path) Flip_endpoints( ) {
+	ep := p.endpts[0]
+	p.endpts[0] =  p.endpts[1]
+	p.endpts[1] =  ep
+}
+
+/*
+	Increases the utilisation of the path by adding delta to all links. This assumes that each
+	link has already been tested and indicated it could accept the change.  The return value
+	does inidcate wheter or not the assignment was successful to all (true) or if one or more
+	links could not be increased (false).
+*/
+func (p *Path) Inc_utilisation( commence, conclude, delta int64, qid *string, usr *Fence ) ( r bool ){
 	r = true
 
 	for i := 0; i < p.lidx; i++ {
-		if ! p.links[i].Inc_utilisation( commence, conclude, delta ) {
-			r = false
+		if qid != nil {
+			p.links[i].Inc_queue( qid, commence, conclude, delta, usr ) 
+		} else {
+			if ! p.links[i].Inc_utilisation( commence, conclude, delta, usr ) {
+				r = false
+			}
 		}
 	}
 
 	return
 }
 
+/*
+	Increase the utilisation of all related links to those that are in the path. We assume that
+	the links in the path have already been increased.
+*/
+func (p *Path) Inc_mlag( commence int64, conclude int64, delta int64, usr *Fence, mlags map[string]*Mlag ) {
+	for i := 0; i < p.lidx; i++ {
+		m := p.links[i].Get_mlag() 
+		if m != nil {
+			mlag := mlags[*m]
+			if mlag != nil {
+				mlag.Inc_utilisation( commence, conclude, delta, usr, p.links[i].Get_allotment() )		// bump everything except the link in our path 
+			}
+		}
+	}
+}
+
+/*
+	Sets the user name associated with the path
+*/
+func (p *Path) Set_usr( usr *string ) {
+	p.usr = usr
+}
+
+/*
+	Accept a new external ip address associated with the path.
+*/
+func (p *Path) Set_extip( extip *string, flag *string ) {
+	if p == nil {
+		return
+	}
+
+	p.extip = extip
+	p.extflag  = flag
+}
 
 /*
 	Add the necessary queues to the path that increase the utilisation of the links in the path.
 	If is_reverse is set to true, the queue is added from last to first in the list. 
 
-	The amt_in and amt_out values are the bandwidth outbound from the host1 and inbound to the host1 relative 
-	to the direction of the path.  These values are used to properly set the queues for data traveling
-	from host1 to host2 (out) and in the reverse direction (in).  To that end four queue types are 
-	created on the links:
+	The bw_amt value is the bandwidth being reserved relative to the direction of the path.  This value
+	is used to set the amount on the queue.
+	To that end four queue types are created on the links:
 		1) priority-in the priority queue (1) for data returning to host1
 		2) priority-out the priority queue (1) for date outbound toward host 2
 		3) qid - the queue (n) set on the first link in the path for data flowing outbound
 		4) Rqid - the queue (n) set on the last link in the path for the data flowing from host2 toward host1
 
+
 	The process of adding a queue to a link increases the obligation (allotment) for that link. 
+
+	The user fence that is passed in provides the user name and the set of defaults that are to be used if
+	this is the first time a queue has been set for the user on a link that the path traverses.
+
 */
-func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in int64, amt_out int64 ) (err error) {
+func (p *Path) Set_queue( qid *string, commence int64, conclude int64, bw_amt int64, usr *Fence ) (err error) {
 	err = nil
 	poutstr := "priority-out"		// names for priority queue in the proper direction
-	pinstr := "priority-in"
 
 	if p == nil {
 		obj_sheep.Baa( 0, "set_queue: p is nil!" )
@@ -239,67 +353,80 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 	}
 
 	if p.is_reverse {				// path was saved backwards, so we run it from last to first
-		err = p.links[p.lidx-1].Set_forward_queue( qid, commence, conclude, amt_out )		// set first outbound queue from h1 on the ingress to a specific queue
+		err = p.links[p.lidx-1].Set_forward_queue( qid, commence, conclude, bw_amt, usr )		// set first outbound queue from h1 on the ingress to a specific queue
 		if err != nil { return }
-
-		if p.lidx > 1 {																			// if this is only link, there'll not be a priority queue set toward h1
-			err = p.links[p.lidx-1].Set_backward_queue( &pinstr, commence, conclude, amt_in )	// add inbound amount to the priority queue for this link in direction of h1
-			if err != nil { return }
-		}
 
 		for i := p.lidx-2; i > 0; i-- {						// set priority queues for all interediate links; set in both directions
-			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, amt_out )
+			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, bw_amt, usr )
 			if err != nil { return }
 
-			err = p.links[i].Set_backward_queue( &pinstr, commence, conclude, amt_in  )
-			if err != nil { return }
 		}
 
-		rqid := "R" + *qid
-		err = p.links[0].Set_backward_queue( &rqid, commence, conclude, amt_in )			// and the 'reverse' (outbound from h2) gets a specific queue num set to inbound h1 amt
-		if err != nil { return }
 		if p.lidx > 1 {																		// when only one link, there is no priority queue inbound to h2
-			err = p.links[0].Set_forward_queue( &poutstr, commence, conclude, amt_out )		// for the last link set the last priority in direction of h2 to amt-out
+			err = p.links[0].Set_forward_queue( &poutstr, commence, conclude, bw_amt, usr )		// for the last link set the last priority in direction of h2 to amt-out
 		}
 
 	} else {
-		err = p.links[0].Set_forward_queue( qid, commence, conclude, amt_out )			// set the specific queue on the ingress switch side of the link
+		err = p.links[0].Set_forward_queue( qid, commence, conclude, bw_amt, usr )			// set the specific queue on the ingress switch side of the link
 		if err != nil { return }
-
-		if p.lidx > 1 {																	// when more than one link we need a priority queue on the far end of the link
-			p.links[0].Set_backward_queue( &pinstr, commence, conclude, amt_in )		// set the inbound amount on the priority queue of the first link
-		}
 
 		for i := 1; i < p.lidx-1; i++ {
-			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, amt_out )
-			if err != nil { return }
-
-			err = p.links[i].Set_backward_queue( &pinstr, commence, conclude, amt_in )
+			err = p.links[i].Set_forward_queue( &poutstr, commence, conclude, bw_amt, usr )
 			if err != nil { return }
 		}
 
-		rqid := "R" + *qid
-		err = p.links[p.lidx-1].Set_backward_queue( &rqid, commence, conclude, amt_in )			// for last link, inbound limit for h1 gates the outbound queue on last switch
-		if err != nil { return }
 		if p.lidx > 1 {																				// when just one link there is no priority queue into last switch
-			err = p.links[p.lidx-1].Set_forward_queue( &poutstr, commence, conclude, amt_out )		// and priority for this is the limit out from h1
+			err = p.links[p.lidx-1].Set_forward_queue( &poutstr, commence, conclude, bw_amt, usr )		// and priority for this is the limit out from h1
 			if err != nil { return }
 		}
 	}
 
-	if p.endpts[0] != nil {			// endpoints are added in h1, h2 order regardless of path order, so no need for special handeling here
-		eqid := "E0" + *qid;
-		err = p.endpts[0].Set_forward_queue( &eqid, commence, conclude, amt_in )		// amount back to h1 
-		if err != nil { return }
-	}
-
-	if p.endpts[1] != nil {					
+	if p.endpts[1] != nil {			// endpoints are added in h1,h2 order (regardless of path order), so always looking for ep[1] here	
 		eqid := "E1" + *qid;
-		err = p.endpts[1].Set_forward_queue( &eqid, commence, conclude, amt_out )		// amount out from h1 into h2
+		err = p.endpts[1].Set_forward_queue( &eqid, commence, conclude, bw_amt, usr )		// amount out from h1 into h2
 		if err != nil { return }
 	}
 
 	return
+}
+
+/*
+	Return the usr name associated with the path.
+*/
+func (p *Path) Get_usr( ) ( *string ) {
+	return p.usr
+}
+
+/*
+	Return the external IP address or nil.
+*/
+func (p *Path) Get_extip( ) ( *string ) {
+	if p != nil {
+		return p.extip
+	}
+
+	return nil
+}
+
+/*
+	Return the external id direction for this path.
+*/
+func (p *Path) Get_extflag( ) ( *string ) {
+	return p.extflag
+}
+
+/* 
+	Return pointer to host. 
+*/
+func (p *Path) Get_h1( ) ( *Host ) {
+	return p.h1
+}
+
+/* 
+	Return pointer to host. 
+*/
+func (p *Path) Get_h2( ) ( *Host ) {
+	return p.h2
 }
 
 /*
@@ -578,7 +705,7 @@ func (p *Path) To_json( ) (json string) {
 		sep string = ""
 	)
 
-	json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", *p.h1, "h2", *p.h2, "links" )
+	json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", *p.h1.Get_mac(), "h2", *p.h2.Get_mac(), "links" )
 	for i := 0; i < p.lidx; i++ {
 		json += fmt.Sprintf( "%s%s ", sep, p.links[i].To_json() )
 		sep = ","

@@ -14,6 +14,10 @@
 				the host.  At the moment, it does not appear that it is possible to 
 				map the IP address to the switch/port as the list of IPs and the list
 				of attachment points seem not to be ordered.
+
+	Mod:		29 Jun 2014 - Changes to support user link limits.
+				26 Mar 2015 - Added Get_address() function to return one address with 
+					favourtism if host has both addresses defined.
 */
 
 package gizmos
@@ -31,6 +35,7 @@ import (
 	defines a host
 */
 type Host struct {
+	vmid	*string			// id given to host by virtulation manager (e.g. ostack)
 	mac		string
 	ip4		string
 	ip6		string
@@ -40,7 +45,7 @@ type Host struct {
 }
 
 /*
-	constructor
+	Create the object setting defaults and adding user supplied IP address strings.
 */
 func Mk_host( mac string, ip4 string, ip6 string ) (h *Host) {
 
@@ -61,8 +66,20 @@ func Mk_host( mac string, ip4 string, ip6 string ) (h *Host) {
 	Destruction
 */
 func ( h *Host ) Nuke() {
+
+	if h == nil {
+		return
+	}
+
 	h.conns = nil
 	h.ports = nil
+}
+
+/*
+	Adds the vmid to the host (usually not known at mk time, so it's not a part of the mk process.
+*/
+func (h *Host) Add_vmid( vmid *string ) {
+	h.vmid = vmid
 }
 
 /*
@@ -73,6 +90,10 @@ func (h *Host) Add_switch( sw *Switch, port int ) {
 		new_conns	[]*Switch
 		new_ports	[]int
 	)
+
+	if h == nil {
+		return
+	}
 
 	if h.cidx >= len( h.conns ) {						// out of room, extend and copy to new
 		new_conns = make( []*Switch, h.cidx + 10 )
@@ -99,7 +120,7 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 	s = nil
 	p = -1
 
-	if i < len( h.conns ) {
+	if h != nil  &&  i < len( h.conns ) {
 		s = h.conns[i]
 		p = h.ports[i]
 	}
@@ -114,6 +135,10 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 */
 func (h *Host) Get_port( s *Switch ) ( int ) {
 	var p int
+
+	if h == nil {
+		return -1
+	}
 
 	for p = 0; p < h.cidx; p++ {
 		if h.conns[p] == s {
@@ -139,29 +164,69 @@ func (h *Host) Iterate_switch_port( data interface{}, cb func( *Switch, int, int
 	Return both IP address strings or nil
 */
 func ( h *Host ) Get_addresses( ) ( ip4 *string, ip6 *string ) {
+	if h == nil {
+		return nil, nil
+	}
+
 	ip4 = &h.ip4
 	ip6 = &h.ip6
 	return
 }
 
 /*
-	Return the number of connections
+	Return one of the IP addresses associated with the host. If both are defined the IPv6 addr
+	is returned in favour of the IP v4 address if pref_v6 is true.
+*/
+func( h *Host ) Get_address( pref_v6 bool ) ( *string ) {
+	if h == nil {
+		return nil
+	}
+
+	if (h.ip6 != "" && pref_v6) || h.ip4 == "" {
+		return &h.ip6
+	}
+	
+	return &h.ip4
+}
+
+/*
+	Return the number of connections.
 */
 func ( h *Host ) Get_nconns( ) ( int ) {
+	if h == nil {
+		return 0
+	}
+
 	return h.cidx
 }
 
 /*
-	return a pointer to the string that has the mac address
+	Return a pointer to the string that has the mac address.
 */
 func (h *Host) Get_mac( ) (s *string) {
+	if h == nil {
+		return nil
+	}
+
 	return &h.mac
 }
 
 /*
-	generate a string of the basic info
+	Generate a string of the basic info
+	Deprecated in favour of stringer interface method.
 */
 func (h *Host) To_str( ) ( s string ) {
+	return h.String()
+}
+
+/*
+	Generate a string of the basic info
+*/
+func (h *Host) String( ) ( s string ) {
+	if h == nil {
+		return "--nil--"
+	}
+
 	s = fmt.Sprintf( "{ host: %s ",  h.mac )
 	if h.ip4 != "" {
 		s += fmt.Sprintf( "ip4: %s ",  h.ip4 )
@@ -173,15 +238,23 @@ func (h *Host) To_str( ) ( s string ) {
 	if h.cidx > 0 {
 		s += fmt.Sprintf( " connections [ " )
 		for i := 0; i < h.cidx; i++ {
-			s += fmt.Sprintf( "%s ", *(h.conns[i].Get_id()) )
+			if h.conns[i] != nil {
+				id := h.conns[i].Get_id()
+				if id != nil {
+					s += fmt.Sprintf( "%s ", *id )
+				}
+			} else {
+				s += "==nil-connection== "
+			}
 		}
+		s += "]"
 	}
 
 	return
 }
 
 /*
-	jsonise the whole object
+	Jsonise the whole object.
 */
 func (h *Host) To_json( ) ( s string ) {
 	var (
@@ -193,7 +266,12 @@ func (h *Host) To_json( ) ( s string ) {
 		return
 	}
 
-	s = fmt.Sprintf( `{ "mac": %q`, h.mac )
+	if h.vmid != nil {
+		s = fmt.Sprintf( `{ "vmid": %q, "mac": %q`, *h.vmid, h.mac )
+	} else {
+		s = fmt.Sprintf( `{ "vmid": "missing", "mac": %q`, h.mac )
+	}
+
 	if h.ip4 != "" {
 		s += fmt.Sprintf( `, "ip4": %q`,  h.ip4 )
 	}
@@ -232,6 +310,9 @@ func (h *Host) Ports2json( ) ( s string ) {
 	var (
 		sep string = ""
 	)
+	if h == nil {
+		return `{ "mac": "null-host" }`
+	}
 
 	s = fmt.Sprintf( `{ "host": { "ip4": %q, "mac": %q, "conns": [`, h.ip4, h.mac )
 	for i := 0; i < h.cidx; i++ {

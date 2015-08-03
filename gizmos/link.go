@@ -30,6 +30,16 @@
 	Date:		22 November 2013
 	Author:		E. Scott Daniels
 
+	Mods:		29 Apr 2014 - Changes to support Tegu-lite
+				11 Jun 2014 - Changes to support finding all paths
+				29 Jun 2014 - Changes to support user link limits.
+				07 Jul 2014 - Inc queue changed to return status and fail if unable to increase
+					the utilisation of the link. 
+				28 Jul 2014 - Added mlag support
+				18 Aug 2014 - Has_capacity now passes back error message.
+				05 Sep 2014 - Pick up late binding port info if port is <0 rather than 0.
+				19 Oct 2014 - Comment change
+				18 Jun 2015 - Added nil pointer check.
 */
 
 package gizmos
@@ -38,7 +48,7 @@ import (
 	//"bufio"
 	"fmt"
 	//"os"
-	//"strings"
+	"strings"
 	//"time"
 )
 
@@ -54,9 +64,11 @@ type Link struct {
 	backward	*Switch				// switch in the reverse direction
 	port1		int					// the port on sw1 in the direction of sw2
 	port2		int					// the port on sw2 in the direction of sw1
+	lbport		*string				// latebinding port ident (used in place of port in Tegu-lite mode)
 	id			*string				// reference id for the link	
 	sw1			*string				// human name for forward switch
 	sw2			*string				// human name for backward switch
+	mlag		*string				// mlag group this link belongs to
 	allotment	*Obligation			// the obligation that exsists for the link (obligations are timesliced)
 
 	Cost		int					// the cost of traversing the link for shortest path computation
@@ -67,23 +79,32 @@ type Link struct {
 	If bond is supplied, it is assumed to be a one element slice containing another
 	link from which the allotment obligation is fetched and will be referenced by the 
 	link rather than creating a new obligation. Binding two links to an obligation
-	allows for easy accounting of total usage allocated (both directions) for the
-	bidirectional path that the two links represent. 
+	allows for easy accounting of total usage allocated (both directions) if the link
+	isn't full dupliex.
 */
-func Mk_link( sw1 *string, sw2 *string, capacity int64, bond ...*Link ) ( l *Link ) {
+func Mk_link( sw1 *string, sw2 *string, capacity int64, alarm_thresh int, mlag *string, bond ...*Link ) ( l *Link ) {
 	var id string
 
 	id = fmt.Sprintf( "%s-%s", *sw1, *sw2 )
+
+	tokens := strings.SplitN( *sw1, "@", 2 )		// for host@interface names we want only the host as the switch name
+	sw1 = &tokens[0]
+
+	tokens = strings.SplitN( *sw2, "@", 2 )
+	sw2 = &tokens[0]
 
 	l = &Link { 
 		id: &id,
 		sw1: sw1,
 		sw2: sw2,
+		mlag: mlag,
 		Cost:	1,				// for now all links are equal
+		port1:	-2,
+		port2:	-2,
 	}
 
 	if bond == nil || bond[0] == nil {
-		l.allotment = Mk_obligation( capacity )
+		l.allotment = Mk_obligation( capacity, alarm_thresh )
 	} else {
 		l.allotment = bond[0].Get_allotment( )
 	}
@@ -113,10 +134,12 @@ func Mk_vlink( sw *string, p1 int, p2 int, capacity int64, bond ...*Link ) ( l *
 		sw1: sw,
 		sw2: sw,
 		Cost:	1,				// for now all links are equal
+		port1:	p1,
+		port2:	p2,
 	}
 
 	if bond == nil || bond[0] == nil {
-		l.allotment = Mk_obligation( capacity )
+		l.allotment = Mk_obligation( capacity, 0 )			// virtual links don't alarm
 	} else {
 		l.allotment = bond[0].Get_allotment( )
 	}
@@ -141,6 +164,20 @@ func (l *Link) Nuke() {
 */
 func (l *Link) Get_allotment( ) ( *Obligation ) {
 	return l.allotment
+}
+
+/*
+	Return a poitner to the mlag name, or nil if this link isn't an mlag associated link.
+*/
+func (l *Link) Get_mlag( ) ( *string ) {
+	return l.mlag
+}
+
+/*
+	Returns the link id.
+*/
+func (l *Link) Get_id( ) ( *string ) {
+	return l.id
 }
 
 /*
@@ -206,7 +243,7 @@ func (l *Link) Comes_from( sw *Switch ) ( bool ) {
 /*
 	Returns the pointer to the switch in the forward direction.
 */
-func (l *Link) Get_foward_sw( ) ( *Switch ) {
+func (l *Link) Get_forward_sw( ) ( *Switch ) {
 	return l.forward
 }
 
@@ -214,7 +251,7 @@ func (l *Link) Get_foward_sw( ) ( *Switch ) {
 	Returns the pointer to the switch in the backward direction.
 */
 func (l *Link) Get_backward_sw( ) ( *Switch ) {
-	return l.forward
+	return l.backward
 }
 
 /*
@@ -232,6 +269,17 @@ func (l *Link) Get_sw_ports( ) ( int, int ) {
 }
 
 /*
+	Return the latebinding port.
+*/
+func (l *Link) Get_lb_port( ) ( *string ) {
+	if l == nil {
+		return nil
+	}
+
+	return l.lbport
+}
+
+/*
 	Returns true if the link connects to the swtich (in either direction).
 */
 func (l *Link) Connects( sw *Switch ) ( bool ) {
@@ -241,9 +289,48 @@ func (l *Link) Connects( sw *Switch ) ( bool ) {
 /*
 	Return true if this link can accept the indicated amount in addition to the current
 	obligation for the time window indicated by commence and conclude.
+
+	usr_max is a percentage (0-100) which is the maximum amount that the user is 
+	allowed to have reserved on any link or a hard limit if > 100. We check it here against 
+	the total link capacity to ensure that the request isn't larger than the link itself can 
+	support.  Underlying functions check to see what the user's current reservation alotment is
+	for the link during the time window, but assume that if there is no reservation yet
+	for the user that the overall limit was chekced here.  This function returns false, without
+	checking deeper, if the request itself cannot be handled by the link. 
+
+	Capacity error messages only propigate to this point and are only shown at higher
+	verbose levels.  This is mostly because we expect some links in path finding to be
+	at capacity which is not always an error, and the higher level path finding doesn't
+	know or care that some paths are not available. It may, however, be important during
+	debugging or verification to know which links are causing the reservation to fail, so 
+	we provide the mechanism to bleat that information here.
 */
-func (l *Link) Has_capacity( commence int64, conclude int64, amt int64 ) ( bool ) {
-	return l.allotment.Has_capacity( commence, conclude, amt )
+func (l *Link) Has_capacity( commence int64, conclude int64, amt int64, usr *string, usr_max int64 ) ( able bool, err error ) {
+	if l == nil {
+		return false, fmt.Errorf( "nil pointer" )
+	}
+
+	able = false
+	if usr_max < 101 {
+		if amt > (l.allotment.Get_max_capacity() * int64( usr_max ))/100 {
+			obj_sheep.Baa( 1, "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			err = fmt.Errorf( "no capacity on link %s: %d is more than user allowed pctg (%d%%) of link capacity %d", *l.id, amt, usr_max, l.allotment.Get_max_capacity()  )
+			return 
+		}
+	} else {
+		if amt > usr_max {				// seems silly to check, but we will
+			obj_sheep.Baa( 1, "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			err = fmt.Errorf( "no capacity on link %s: %d is more than user allowed value (%d) on link", *l.id, amt, usr_max  )
+			return 
+		}
+	}
+
+	able, err = l.allotment.Has_capacity( commence, conclude, amt, usr )
+	//if err != nil {
+		//obj_sheep.Baa( 2, "no capacity on link %s: %s", *l.id, err )
+	//}
+
+	return 
 }
 
 /*
@@ -296,11 +383,18 @@ func (l *Link) Get_allocation( utime int64 ) ( int64 ) {
 	maximum capacity for the link. If adding amount does not exceed the maximum
 	capacity, the amount is added to the link's utilisation and true is returned. 
 	Otherwise, no change in the utilisation is made and false is returned. 
+	The usr fence supplies the user name and default values; we pass it through and it may be nil
+	if no per user caps are to be checked/placed on link usage.
 */
-func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( r bool ) {
-	r = l.allotment.Has_capacity( commence, conclude, amt )
+func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64, usr *Fence ) ( r bool ) {
+	r, err := l.allotment.Has_capacity( commence, conclude, amt, usr.Name )
 	if r {
-		l.allotment.Inc_utilisation( commence, conclude, amt )
+		msg := l.allotment.Inc_utilisation( commence, conclude, amt, usr )
+		if msg != nil {
+			obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )		// likely a warning regarding encroaching on the limit
+		} 
+	} else {
+		obj_sheep.Baa( 1, "WRN: inc utilisation failed %s: %s", *l.id, err )
 	}
 
 	return
@@ -312,11 +406,32 @@ func (l *Link) Inc_utilisation( commence int64, conclude int64, amt int64 ) ( r 
 	Qid is a string that is used to identify the queue -- useful for digging out queue/port
 	information that are needed for reservations and thus is probably the reservation ID or 
 	some derivation, but is up to the user of the link.
-*/
-func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( error ) {
 
-	swdata := fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
-	return l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	The usr fence passed in provides the user name and the set of defaults that are used if
+	this is the first time we've set values for the user. It may be nil if no limits are to be placed. 
+*/
+func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) ( err error ) {
+	var (
+		swdata string
+	)
+
+	if l == nil {
+		err = fmt.Errorf( "link: null pointer passed in" )
+		return
+	}
+		
+	if l.port1 <= 0 && l.lbport != nil {
+		swdata = fmt.Sprintf( "%s/%s", *l.sw1, *l.lbport )			// if port is 0 then we'll return the latebinding port value
+	} else {
+		swdata = fmt.Sprintf( "%s/%d", *l.sw1, l.port1 )			// switch and port data that will be necessary to physically set the queue
+	}
+
+	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude, usr )
+	if msg != nil {													// warning message that we must presernt
+		obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )
+	}
+
+	return
 }
 
 /*
@@ -325,19 +440,37 @@ func (l *Link) Set_forward_queue( qid *string, commence int64, conclude int64, a
 	Qid is a string that is used to identify the queue -- useful for digging out queue/port
 	information that are needed for reservations and thus is probably the reservation ID or 
 	some derivation, but is up to the user of the link.
+
+	The usr fence passed in provides the user name and a set of defaults that are used if this
+	is the first time we've seen this user. It may be nil if no limits are to be placed. 
 */
-func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, amt int64 ) ( error ) {
+func (l *Link) Set_backward_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) ( error ) {
 
 	swdata := fmt.Sprintf( "%s/%d", *l.sw2, l.port2 )			// switch and port data that will be necessary to physically set the queue
-	return l.allotment.Add_queue( qid, &swdata, amt, commence, conclude )
+	err, msg := l.allotment.Add_queue( qid, &swdata, amt, commence, conclude, usr )
+	if msg != nil {													// warning message that we must presernt
+		obj_sheep.Baa( 0, "WRN: link %s: %s", *l.id, *msg )
+	}
+
+	return err
 }
 
 /*
-	Add an amount to the indicated queue number. This is probably used just to increase the 
-	generic priority queue for middle links, but who knows. 
+	Add an amount to the indicated queue if the obligation has room for it.  True returned if the amount could
+	be aded, and was, false otherwise. 
 */
-func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64 ) {
-	l.allotment.Inc_queue( qid, amt, commence, conclude )
+func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64, usr *Fence ) ( r bool, err error ) {
+	r = true
+	err = nil
+	if amt > 0 {
+		r, err = l.allotment.Has_capacity( commence, conclude, amt, usr.Name )
+	}
+
+	if r {
+		l.allotment.Inc_queue( qid, amt, commence, conclude, usr )
+	} 
+
+	return r, err
 }
 
 /*
@@ -374,6 +507,17 @@ func (l *Link) Get_backward_info( qid *string, tstamp int64 ) ( swid string, por
 	queue = l.allotment.Get_queue( qid, tstamp )
 
 	return
+}
+
+/*
+	Add a late binding port string.
+*/
+func (l *Link) Add_lbp( s string ) {
+	if l == nil {
+		return
+	}
+
+	l.lbport = &s
 }
 
 // -------- human and/or interface output generation -------------------------------------------------------------
@@ -419,6 +563,11 @@ func (l *Link) To_json( ) ( s string ) {
 		return
 	}
 
-	s = fmt.Sprintf( `{ "id": %q, "sw1": %q, "sw1port": %d, "sw2": %q,  "sw2port": %d, "allotment": %s }`, *l.id, *l.sw1, l.port1, *l.sw2,  l.port2, l.allotment.To_json() )
+	mlag := ""
+	if l.mlag != nil {
+		mlag = *l.mlag
+	} 
+
+	s = fmt.Sprintf( `{ "id": %q, "sw1": %q, "sw1port": %d, "sw2": %q,  "sw2port": %d, "allotment": %s, "mlag": %q }`, *l.id, *l.sw1, l.port1, *l.sw2,  l.port2, l.allotment.To_json(), mlag )
 	return
 }

@@ -1,0 +1,350 @@
+.\"
+.\"		tegu_req Manual Page
+.\"
+.\"     Date:		03 Jul 2015
+.\"		Author:		Robert Eby (eby@research.att.com)
+.\"
+.\"     Mods:		03 Jul 2015 - Created
+.\"
+.TH TEGU.CFG 5 "Tegu Manual"
+.CM 4
+.SH NAME
+tegu.cfg \- configuration file for Tegu
+.SH DESCRIPTION
+This describes the format and values for the file used to configure Tegu.
+
+.SH CONFIGURATION
+The configuration file is a text file divided into named sections.
+Except for the initial, default section, each section starts with a tag consisting of
+the section name, on a line by itself prefixed with a colon.
+E.g., the \fInetwork\fP section starts with ":network".
+Values in each section are stored as \fIname = value\fP.
+Comments are lines starting with zero or more white space characters and a hash symbol (#).
+
+.SS Default Section
+The initial section in the configuration file is the default section.
+It can also be reintroduced later in the file with the tag \fB:default\fP.
+It contains parameters that configure Tegu globally.
+.TP 8
+.B alttable
+An integer specifying the OVS table number to be used for metadata marking.
+If more than one table is required, then this is the base, lowest number table to use.
+.TP 8
+.B favour_ipv6
+A boolean flag.
+If set (with any value), then IPv6 addresses will be favored if a host has both
+IPv4 and IPv6 addresses.
+.TP 8
+.B log_dir
+A directory name that sets the directory where log files are written (cycled daily).
+Use "stderr" to write log messages to standard error.
+If not specified, the default directory to use is the directory that Tegu is started in.
+.TP 8
+.B pri_dscp
+A space separated list of DSCP (diffserv) values that might be set by applications
+that are running on VMs that have reservations.
+These values are preserved in packets as they exit the environment.
+It is not possible to preserve all by default as that would require 64 flow-mods per
+reservation on both the ingress and egress switches.
+.TP 8
+.B queue_type
+Either of the values \fIendpoint\fP or \fIall\fP.
+When \fIendpoint\fP is supplied (the default) then the queue settings generated are only
+applied to the endpoints of the path (egress and ingress) assuming that intermediate
+switches have generic flow-mod rules and queues for pushing prioritised traffic.
+It also affects the flow-mods generated.
+When \fIendpoint\fP is supplied, flow-mods at the ingress and egress switches are all
+that are generated.
+.TP 8
+.B sdn_host
+The DNS name or IP address of the SDN host to be used by the Flow Queue Manager.
+.TP 8
+.B shell
+The shell to use when Tegu needs to run a shell command.
+The default is \fI/bin/ksh\fP.
+.TP 8
+.B static_phys_graph
+The file name containing the static graph which is simulated OpenFlow controller
+output (JSON) when not using an OpenFlow controller (tegu-lite).
+Supplying both sdn_host and graph file, results in the SDN being used and not the static file.
+The default value is \fI/etc/tegu/phys_net_static.json\fP.
+.TP 8
+.B verbose
+An integer that controls the master verbosity level for logging.
+This controls what level of logging is performed by all parts of Tegu.
+The default level is 0.
+Higher levels cause more information to be logged.
+
+.SS Agent Manager Section
+The Agent Manager section starts with the tag \fB:agent\fP.
+It configures the Agent Manager, the part of Tegu which communicates with the Tegu agent processes.
+.TP 8
+.B iqrefresh
+An integer specifying the intermediate queue refresh interval (in seconds).
+This value must be at least 90, and is, by default, set to 1800.
+.TP 8
+.B port
+An integer specifying the port that Tegu uses to listen for connections from its agents.
+If not specified, the default is 29055.
+Note that this is NOT the port that the Tegu API listens on (which is specified by the
+\fB-p\fP option described in the \fBtegu(8)\fP manual page).
+.TP 8
+.B refresh
+An integer specifying the refresh interval (in seconds).
+This interval determines how often to query each host for a list of MAC addresses served
+by that host.
+The default is 60 seconds.
+.TP 8
+.B verbose
+An integer that controls the verbosity level for agent manager logging.
+The default level is 0, and can be overridden by the master verbose level.
+
+.SS Flow Queue Manager Section
+The Flow Queue Manager section starts with the tag \fB:fqmgr\fP.
+It configures the Flow Queue Manager, the part of Tegu that is responsible for sending
+flow mods and Open vSwitch (OVS) commands to the agents.
+.TP 8
+.B default_dscp
+An integer specifying the DSCP value that is used to mark a priority flow over intermediate
+switches.
+.TP 8
+.B host_check
+An integer specifying the frequency (in seconds) that OpenStack is queried for a physical
+host list.
+.TP 8
+.B phost_suffix
+A string to add as a suffix to physical host strings for agent commands.
+Used to map a simple name (e.g. \fInode1\fP) to a DNS name (e.g.\fInode1.foo.com\fP).
+.TP 8
+.B queue_check
+An integer specifying the frequency (in seconds) of checks for expiring queues.
+.TP 8
+.B ssq_cmd
+The command to execute when needing to adjust switch queues
+(e.g. /opt/app/set_switch_queues).
+.TP 8
+.B switch_hosts
+A space separated list of hosts to set switch queues on; used to override OpenStack.
+.TP 8
+.B verbose
+An integer that controls the verbosity level for flow queue manager logging.
+The default level is 0, and can be overridden by the master verbose level.
+
+.SS HTTP Manager Section
+The HTTP Manager section starts with the tag \fB:httpmgr\fP.
+It configures the HTTP Manager, that serves HTTP requests from clients,
+and provides the Tegu API.
+.TP 8
+.B admin_roles
+A comma separated list of OpenStack roles, used to determine who may issue many of
+the non-mirroring API calls.
+The default admin role is \fIadmintegu_admin\fP.
+.TP 8
+.B cert
+The name of a file containing the certificate to use for the TLS (HTTPS) server Tegu
+will provide.
+Both cert and key must be provided to start a secure HTTPS server, or else Tegu will
+start a non-TLS (HTTP) server.
+.TP 8
+.B create_cert
+If set to \fItrue\fP, Tegu will create a self-signed certificate and store the components
+in the files specified by cert and key.
+.TP 8
+.B key
+The name of a file containing the private key to use for the TLS (HTTPS) server Tegu
+will provide.
+Both cert and key must be provided to start a secure HTTPS server, or else Tegu will
+start a non-TLS (HTTP) server.
+.TP 8
+.B priv_auth
+This parameter must have one of the values \fInone\fP, \fIlocal\fP, \fIlocalhost\fP,
+or \fItoken\fP.
+It defaults to \fIlocalhost\fP.
+It determines how to authorize a requestor when making API requests to the server.
+When \fInone\fP, all requests are authorized.
+When \fIlocal\fP or \fIlocalhost\fP, the request must have originated from the localhost
+or have a valid token.
+When \fItoken\fP the user \fBmust\fP have sent a valid token, regardless of where the
+request originated.
+A valid token is a token which contains a role name that is listed in the for the roles
+for the command in question.
+.TP 8
+.B sysproc_roles
+A comma separated list of OpenStack roles, used to determine who may issue the
+the \fIgraph\fP and \fIlisthosts\fP API calls.
+The default admin role is \fItegu_sysproc\fP.
+.TP 8
+.B verbose
+An integer that controls the verbosity level for HTTP manager logging.
+The default level is 0, and can be overridden by the master verbose level.
+
+.SS Mirror Section
+The Mirror section starts with the tag \fB:mirror\fP.
+It configures the part of the API that is responsible for handling mirrors in the network.
+Note that if the Mirror section is missing from the configuration file, mirroring will be disabled.
+.TP 8
+.B allowed_gre_addr
+This is a comma separated list of allowed GRE tunnel endpoints, written in CIDR form.
+.TP 8
+.B enable
+Mirroring may also be disabled by giving this parameter a value of \fIno\fP or \fIfalse\fP.
+.TP 8
+.B min_mirror_expiration
+An integer specifying the smallest allowable time period that a mirror may be put in place
+(in seconds).
+If missing, 0 is assumed.
+30 minutes seems like a reasonable preset value.
+.TP 8
+.B mirror_roles
+A comma separated list of OpenStack roles, used to determine who may issue mirroring commands.
+The default mirror role is \fItegu_mirror\fP, combined with the list of admin roles
+(see admin_roles above).
+.TP 8
+.B <labelname>
+A GRE endpoint can be symbolicly named here via <label>=<IPv4 value>,
+e.g. \fBsamplelabel = 12.7.20.15\fP
+
+.SS Network Manager Section
+The Network Manager section starts with the tag \fB:network\fP.
+It configures the Network Manager, that communicates with the Tegu agent processes.
+.TP 8
+.B all_paths
+Deprecated.  Use \fIfind_paths\fP instead.
+.TP 8
+.B discount
+A non-negative integer value specifying the discount value to reduce bandwidth reservations by.
+If the value is between 0 and 100, it is specifies the percentage of bandwidth requested.
+If the value is greater than 100, then it is treated as an absolute discount in terms of
+bits per second.
+.TP 8
+.B find_paths
+Controls how path searching happens.
+Values may be one of: \fBall\fP, \fBmlag\fP, or \fBshortest\fP.
+If not supplied, \fBmlag\fP is used as the default.
+.TP 8
+.B link_alarm
+A percentage indicating the percentage of a link's capacity that once reserved for a
+given time period will cause an alarm.
+.TP 8
+.B link_headroom
+A percentage indicating the percentage of headroom that each link is to be given;
+reservations may use up to the link capacity less this percentage.
+.TP 8
+.B link_max_cap
+Specify the maximum capacity for each link.
+If not specified, 10,737,418,240 (10G) is assumed.
+.TP 8
+.B refresh
+An integer specifying the delay between refreshes of the network topology,
+either from the static file or from the SDN controller (floodlight).
+.TP 8
+.B relaxed
+A boolean.  If set to \fItrue\fP, then relaxed mode is turned on.
+In relaxed mode, Tegu does not do path find or admission control.
+By default, relaxed mode is off.
+.TP 8
+.B user_link_cap
+The percentage of link capacity that any single user will be allowed to reserve.
+This limit can be increased on a per user basis by sending a \fBsetulcap\fP request via the API.
+If the value given here is set to 100, then no limits for any users are set,
+EXCEPT if an api call is made to set a limit on a specific user.
+.TP 8
+.B verbose
+An integer that controls the verbosity level for Network Manager logging.
+The default level is 0, and can be overridden by the master verbose level.
+
+.SS OpenStack Interface Section
+The OpenStack Interface section starts with the tag \fB:osif\fP.
+It configures the OpenStack Manager, which communicates with OpenStack (Keystone, Neutron,
+and Nova).
+.TP 8
+.B ostack_list
+A comma or space separated list of section names that appear later in the config file,
+and/or project (tenant) names.
+When a project name is given, it is assumed to use the default values for usr, password
+and url that are given in the main \fB:osif\fP section.
+If a section name is given, the values for usr, password and url in that section,
+if supplied, will override the default values.
+The project name must always be supplied in a section if a section is used.
+If the value \fIall\fP is used, Tegu will dig out a list of all tenants that are known
+to the default user and use those.
+The list will be refreshed on a periodic basis, so adding a new tenant when \fIall\fP
+is used will automatically be noticed.
+If the value \fIoff\fP is used, or if this parameter is not supplied,
+the OpenStack Manager is disabled.
+.TP 8
+.B passwd
+The OpenStack password to use when communicating with OpenStack.
+.TP 8
+.B project
+The OpenStack project (tenant) name to use when communicating with OpenStack.
+.TP 8
+.B refresh
+Deprecated. The refresh delay to use (in seconds) when updating OpenStack maps.
+If less than 15, Tegu will complain and change the value to 15.
+Note that because of design changes, this is not really used anymore.
+.TP 8
+.B region
+The region value to use when getting OpenStack credentials.
+.TP 8
+.B require_token
+If present and set to \fItrue\fP, causes tegu to require that host names on a reservation
+request be of the form token/tenantid/hostname, and will confirm that the supplied token
+is valid for the tenant.
+The tenant ID may be a project name.
+.TP 8
+.B url
+The base URL (without the API version suffix) for the Identity API (Keystone) in your
+OpenStack installation.
+If the URL does have a version suffix, it will be stripped.
+Tegu uses the Keystone Identity API v2.0.
+.TP 8
+.B usr
+The OpenStack user name to use when communicating with OpenStack.
+.TP 8
+.B verbose
+An integer that controls the verbosity level for OpenStack Interface logging.
+The default level is 0, and can be overridden by the master verbose level.
+
+.SS Reservation Manager Section
+The Reservation Manager section starts with the tag \fB:resmgr\fP.
+It configures the Reservation Manager, which maintains the list of reservations,
+and is responsible for starting and stopping reservations.
+.TP 8
+.B chkpt_dir
+A directory name that sets the directory where the reservation manager stores its checkpoint files.
+If not specified, the default checkpoint directory is \fI/var/lib/tegu\fP.
+.TP 8
+.B hto_limit
+An integer specifying the hard timeout limit that should be used to reset flow-mods on
+long reservations.
+The default value is 64800 (18 hours).
+.TP 8
+.B res_refresh
+An integer specifying the rate (in seconds) that reservations are refreshed if hto-limit
+is non-zero.
+Tegu will complain if this value is too low (less than 900 seconds), and will reset the
+value to 1800 if this value is less than 120 seconds.
+.TP 8
+.B super_cookie
+Provides the value for a "super cookie" that can be used to manage any reservation.
+.TP 8
+.B verbose
+An integer that controls the verbosity level for reservation manager logging.
+The default level is 0, and can be overridden by the master verbose level.
+
+.SH FILES
+.TP
+/etc/tegu/tegu.cfg
+The normal location for the Tegu configuration file.
+.TP
+/etc/tegu/phys_net_static.json
+The physical network description file, in Floodlight format.
+See https://floodlight.atlassian.net/wiki/display/floodlightcontroller/Floodlight+REST+API
+.TP
+/etc/tegu/standby_list
+A list of standby hosts that can receive checkpoints of Tegu reservations, and take over
+in the event that the running Tegu host dies.
+
+.SH SEE ALSO
+tegu(8)

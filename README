@@ -5,7 +5,14 @@ provides a request interface that yields a complete network graph (as described
 by floodlight), and the ability to map an IP address, VM name or VM ID to a 
 switch port combination. 
 
+There is also an agent compoent which is a standalone process that provides a direct
+interface to the various real and virtual switches.  The underlying agent scripts are 
+contained in the agent directory and the agent binary is in the main directory. 
+
 The tegu src is divided into two packages and the main:
+	agent	--	Directories containing various direct interfaces to things like
+				OVS, Arista switches, floodlight (skoogie), mirroring, etc.
+
 	managers -- functions that are driven as goroutines and thus implement
 				major components of the application (reservation manager,
 				fq manager, etc.).  
@@ -15,6 +22,10 @@ The tegu src is divided into two packages and the main:
 				pledge, etc.).
 
 	main	--  Entry point functions (tegu and tegu_agent)
+	
+	package --	Scripts and metadata templates used to build a package files (.deb)
+
+	system	--	Scripts used to start/stop/manage tegu in a q-lite environment.
 
 
 Gizmos:
@@ -25,7 +36,11 @@ Gizmos:
 	flight_if.go	floodlight interface providing methods that allow queries to the 
 					controller for gathering link and host information. 
 
+	fence.go		Implements a user limit fence mechanism.
+
 	host.go			represents a single host in the network graph and in a path
+
+	init.go			package level initialisation.
 
 	light.go		functions that were implemented quickly to support tegu-lite. These
 					probably should be moved to separate files, or likely into tools, but
@@ -34,11 +49,20 @@ Gizmos:
 
 	link.go			represents a link between switches in the network graph and in a path
 
+	mbox.go			middlebox representation for steering reserations.
+
 	obligation.go	used to manage an obligation of something over time; references may time slices
 
 	path.go			manages a path that has been created with a given amout of bandwith
 
-	pledge.go		used by res_mgr to track reservations in it's inventory
+	pledge.go		an interface representing a reservation tracked by resmgr. Implemented
+					by pledge_* structs in the pledge_* files.
+						pledge_bw.go
+						pledge_mirror.go
+						pledge_steer.go
+
+	pledge_window.go Manages a time window for pledges and provides basic is_active, is_expired
+					functions. 
 
 	queue.go   		manages information needed to set individual queues for a reservation
 
@@ -54,16 +78,25 @@ Managers:
 	globals.go  	Globals needed by all manager functions and init function
 	agent.go   		Manages sessions with agents
 	http_api.go		provides the http "rest-ish" interface
+	http_mirror_api.go  HTTP interface for mirroring
 	network.go		manages the network graph
 	net_req.go   	Network manager request struct and related functions
-	res_mgr.go		provides the resevation management logic
+	res_mgr.go		provides the resevation management logic, suplemented by
+					three support modules:
+						res_mgr_bw.go	
+						res_mgr_mirror.go
+						res_mgr_steer.go
+
 	osif.go			openstack interface manager.
+	osif_proj.go	project specific openstack interface functions.
+
 	fqmgr.go		flowmod/queue manager
 	fq_req.go   	Fqmgr request structure and related functions
+	fq_mgr_steer.go	Steering based fq-mgr support
 
-
-
-
+	res_mgr_bw.go
+	res_mgr_mirror.go
+	res_mgr_steer.go
 
 Testing
 	tegu_test.go	run 'go -v test'  to run the tests
@@ -74,7 +107,6 @@ but are general enough to warrent their not being included here.  They are all a
 of the gopkgs/* package library.  To use them, clone the git project as described below. 
 They will be referenced as needed during the build process (unlike C, there is no need
 to build a library to link against).
-
 		
 Go Environment:
 The GOPATH variable must be set to the top level directory in your source 
@@ -100,3 +132,11 @@ Build tegu by:
 	1) cd main
 	2) go build tegu.go   		# generates tegu binary
 	3) go build tegu_agent.go	# builds agent
+
+Export/create a deb file:
+	1) cd packages
+	2) ksh export.ksh qlite 1.xx
+	3) ksh mk_deb.ksh qlite 1.xx
+
+  Replace 1.xx with the deb version number
+  Deb file will be created in /tmp/<user>/exports

@@ -1,0 +1,12 @@
+# crontab for qos-lite
+#
+MAILTO=""
+TEGU_ROOT=/var
+#
+# --- clean up log files and straggling data files from /tmp ------
+5 * * * *  find /tmp -name "*tegu_setq_*" -mtime +1 -exec rm {} \; >$TEGU_ROOT/log/tegu/tmp_cleanup 2>&1
+5 * * * *  find $TEGU_ROOT/log/tegu -mtime +30 -exec rm {} \; >$TEGU_ROOT/log/tegu/log_cleanup 2>&1
+#
+# --- copy chckpoint information to standby hosts ----
+*/1 * * * * tegu_synch >$TEGU_ROOT/log/tegu/synch.log 2>&1
+

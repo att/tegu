@@ -9,6 +9,9 @@
 	Date:		06 February 2014
 	Author:		E. Scott Daniels
 
+	Mods:		07 Jul 2014 - Added To_str_pos() function to generate strings
+					only if the bandwidth for the queue is greater than zero.
+				18 Jun 2015 - Ensure bandwidth amount doesn't go negative.
 */
 
 package gizmos
@@ -25,7 +28,7 @@ import (
 	//"strings"
 	//"time"
 
-	//"forge.research.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/clike"
 )
 
 type Queue struct {
@@ -75,6 +78,9 @@ func (q *Queue) Clone( ) ( cq *Queue ) {
 func (q *Queue) Inc( amt int64 ) {
 	if q != nil {
 		q.bandwidth += amt
+		if q.bandwidth < 0 {
+			q.bandwidth = 0
+		}
 	}
 }
 
@@ -84,6 +90,9 @@ func (q *Queue) Inc( amt int64 ) {
 func (q *Queue) Dec( amt int64 ) {
 	if q != nil {
 		q.bandwidth -= amt
+		if q.bandwidth < 0 {
+			q.bandwidth = 0
+		}
 	}
 }
 
@@ -152,6 +161,19 @@ func (q *Queue) Get_eref( ) ( *string ) {
 func ( q *Queue ) To_str( ) ( string ) {
 
 	if q == nil {
+		return ""
+	}
+
+	st := fmt.Sprintf( "%s,%s,%d,%d,%d,%d", *q.exref, *q.Id, q.qnum, q.bandwidth, q.bandwidth, q.pri );
+	return st
+}
+
+/*
+	Return a string only if bandwidth value is positive. 
+*/
+func ( q *Queue ) To_str_pos( ) ( string ) {
+
+	if q == nil || q.bandwidth <= 0 {
 		return ""
 	}
 

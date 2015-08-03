@@ -8,6 +8,9 @@
 	Authors:	E. Scott Daniels, Matti Hiltnuen, Kaustubh Joshi
 
 	Modifed:	19 Apr 2014 : Added generic Skoogi request. 
+				05 May 2014 : Added function to build a FL_host_json from raw data rather
+					than from json response data (supports running w/o floodlight).
+				29 Jul 2014 : Mlag support
 ------------------------------------------------------------------------------------------------
 */
 
@@ -47,10 +50,8 @@ type host struct {
 	the parser. 
 	
 	Bloody floodlight uses names that cannot be legally mapped to Go variable names (e.g.
-	dst-port).  We (blindly for now) will convert all '-' characters followed by a lowercase
-	alpha character to _. This will have the side effect of changing the actual data in 
-	addition to the names, but I don't think that's an issue for this prototype and I 
-	don't want to take the time to parse out the names and convert just those.  
+	dst-port).  All structure definitions where this occurs have been 'tagged' which allow
+	us to change the json name into something actually usable a s a variable/field name. 
 
 	A side effect of using the in-built json functions of go is that all of the elements 
 	of the structs must be externally accessable. 
@@ -99,29 +100,29 @@ type FL_host_json struct {
 }
 
 // ...wm/topology/links/json generates one struct
+// tags needed to recognise the awful json names given to these fields by some script kiddie. 
 type FL_link_json struct {
-	Src_switch string
-	Src_port int
-	Dst_switch string
-	Dst_port int
+	Src_switch string	`json:"Src-switch"`			// bloody java programmers using - in names; gack
+	Src_port int		`json:"Src-port"`
+	Dst_switch string	`json:"Dst-switch"`
+	Dst_port int		`json:"Dst-port"`
 	Type string
 	Direction string
+	Capacity int64
+
+	Mlag	*string		// extension for q-lite (floodlight did NOT return this)
 }
 
 // -----------------------------------------------------------------------------------------
 
 
-const (
-	CVT_DASHES	bool = true
-	NO_CVT		bool = false
-)
 
 // ---------------------------- private:  direct floodlight communications and response cracking ------------------------
-// sends a get request to floodlight and extracts the resulting value if successful
-// if cvt dashes is true, then the dash matching all /[a-z]-/ occurences will blindly be 
-// converted to '_'.  See the note at the top with the other json issues
-//
-func get_flinfo( uri *string, cvt_dashes bool ) (jdata []byte, err error) {
+
+/*
+	sends a get request to floodlight and extracts the resulting value if successful
+*/
+func get_flinfo( uri *string ) (jdata []byte, err error) {
 	
 	jdata = nil
 
@@ -129,20 +130,6 @@ func get_flinfo( uri *string, cvt_dashes bool ) (jdata []byte, err error) {
 	if err == nil {
 		jdata, err = ioutil.ReadAll( resp.Body )
 		resp.Body.Close( )
-
-		if cvt_dashes  && err == nil {
-			prev_alpha := false
-			for i := range jdata {				// bloody floodlight uses unacceptable names (dash separated)
-				if jdata[i] >= 'a'  &&  jdata[i] <= 'z' {
-					prev_alpha = true
-				} else {
-					if prev_alpha && jdata[i] == '-' {
-						jdata[i] = '_'
-					}
-					prev_alpha = false
-				}
-			}
-		}
 	}
 
 	return
@@ -166,6 +153,26 @@ func post_flreq( uri *string ) (rstring string, err error) {
 // --------------------- public functions --------------------------------------------------
 
 /*
+	Create a FL_host entry when needing to simulate the return list from a FL_hosts() call.
+*/
+func FL_mk_host( ipv4 string, ipv6 string, mac string, swname string, port int ) ( flhost FL_host_json ) {
+
+	flhost  = FL_host_json { }			// new struct
+	flhost.Mac = make( []string, 1 )
+	flhost.Ipv4 = make( []string, 1 )
+	flhost.Ipv6 = make( []string, 1 )
+	flhost.Mac[0] = mac
+	flhost.Ipv4[0] = ipv4
+	flhost.Ipv6[0] = ipv6
+
+	flhost.AttachmentPoint = make( []FL_attachment_json, 1 ) 
+	flhost.AttachmentPoint[0].SwitchDPID = swname
+	flhost.AttachmentPoint[0].Port = port
+
+	return
+}
+
+/*
 	  make the necessary get api calls to floodlight (listening on host_port)
 	  and build an array of host elements. 
 	
@@ -184,7 +191,7 @@ func FL_hosts( host_port *string ) ( hlist []FL_host_json ) {
 	hlist = nil;
 
 	uri := fmt.Sprintf( "http://%s/wm/device/", *host_port )		// for some unknown reason, the trailing slant after dev is required
-	jdata, err := get_flinfo( &uri, NO_CVT ) 
+	jdata, err := get_flinfo( &uri ) 
 	if err != nil {
 		obj_sheep.Baa( 0, "WRN: FL_hosts: error during api get call: %s", err )
 		return
@@ -217,13 +224,12 @@ func FL_links( host_port *string ) ( llist []FL_link_json ) {
 
 
 	uri := fmt.Sprintf( "http://%s/wm/topology/links/json", *host_port )
-	jdata, err := get_flinfo( &uri, CVT_DASHES ) 
+	jdata, err := get_flinfo( &uri ) 
 	if err != nil {
 		obj_sheep.Baa( 0, "WRN: FL_links: error during api get call: %s", err )
 		llist = nil
 		return
 	}
-
 
 	llist = make( []FL_link_json, 4096 )
 	err = json.Unmarshal( jdata, &llist )			// unpack the json into the host list

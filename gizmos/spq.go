@@ -9,24 +9,16 @@
 
 	Date:		18 February 2013
 	Author:		E. Scott Daniels
+	Mod:		11 Jun 2015 - corrected comment, removed uneeded import commented things.
 
 */
 
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
-	//"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
-	//"strings"
-	//"time"
+	"fmt"
 
-	//"forge.research.att.com/gopkgs/clike"
+	//"codecloud.web.att.com/gopkgs/clike"
 )
 
 type Spq struct {
@@ -40,7 +32,7 @@ type Spq struct {
 // ---------------------------------------------------------------------------------------
 
 /*
-	Creates an empty path representation between two hosts.
+	Creates a switch/port/queue representation for an endpoint.
 */
 func Mk_spq( sw string, p int, q int ) (s *Spq) {
 	s = &Spq {
@@ -52,3 +44,10 @@ func Mk_spq( sw string, p int, q int ) (s *Spq) {
 	return
 }
 
+func (s *Spq) String( ) ( string ) {
+	if s == nil {
+		return "==nil=="
+	}
+
+	return fmt.Sprintf( "spq: %s %d %d", s.Switch, s.Port, s.Queuenum )
+}

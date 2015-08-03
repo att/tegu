@@ -1,0 +1,277 @@
+.\"
+.\"		tegu Manual Page
+.\"
+.\"     Date:		04 Jul 2015
+.\"		Author:		Robert Eby (eby@research.att.com)
+.\"
+.\"     Mods:		04 Jul 2015 - Created
+.\"
+.TH TEGU 8 "Tegu Manual"
+.CM 4
+.SH NAME
+tegu \- the main Tegu process
+.SH SYNOPSIS
+\fBtegu\fP [\fB-C config-file\fP] [\fB-c checkpoint_file\fP] [\fB-f host[:port]\fP] [\fB-p port\fP] [\fB-s admin-cookie\fP] [\fB-v\fP]
+
+.SH DESCRIPTION
+\fItegu(8)\fR is the main process in the Tegu system.
+It provides the HTTP API interface,
+maintains a view of the network,
+communicates with Openstack to determine tenants, ports, etc.,
+communicates with Floodlight (if configured) to determine switch topology,
+communicates with agents that distribute commands to other physical nodes (via \fIssh\fP),
+and keeps track of scheduling of reservations and other operations.
+.PP
+The API interface provided by Tegu is described in the API INTERFACE section below.
+The HTTP server may require that its clients use SSL, if so configured.
+
+.SH COMMAND LINE OPTIONS
+\fITegu\fR interprets the following options:
+.\" ==========
+.TP 8
+.B \-C config-file
+Configure tegu using \fIconfig-file\fP.
+The structure and contents of the configuration file are described in \fItegu.cfg(5)\fP.
+.\" ==========
+.TP 8
+.B \-c checkpoint_file
+Specifies a checkpoint file that Tegu should initialize from.
+
+.\" ==========
+.TP 8
+.B \-f host[:port]
+Specifies the Floodlight host and port to use.
+This can also be specified via the configuration file.
+.\" ==========
+.TP 8
+.B \-p port
+Causes Tegu to start an HTTP server on \fIport\fP.
+The default port is 29444.
+The decision as to whether this is an HTTP or HTTPS server is determined by the presence
+or absence of a private key and certificate in the configuration file.
+.\" ==========
+.TP 8
+.B \-s admin-cookie
+Set the "super cookie" used by Tegu to \fIadmin-cookie\fP.
+This cookie can be used anywhere a cookie must be provided to affect a reservation.
+If not set, a pre-determined super-cookie is used (compiled into the code).
+.TP 8
+.B \-v
+Turns on verbose logging (changes the logging level to 1).
+
+.SH OPERATIONS
+Tegu is packaged as a .deb file for installation on Ubuntu Linux.
+It can be started and stopped as the \fItegu\fP service using the standard Linux
+service facility; e.g.
+.IP
+\f(CWservice tegu start\fP
+.P
+In normal operation, Tegu runs as a number of processes under the \fItegu\fP login;
+a Python script \fItegu_ha\fP  which makes sure that Tegu is running, and fails over to a backup server if need be,
+a \fItegu\fP process which provides the main functionality of the service,
+and a number (usually 5) of \fItegu_agent\fP processes which pass commands from
+Tegu to other physical hosts in a network of machines (via \fIssh\fP).
+
+.SH "API INTERFACE"
+Commands to Tegu from a client such as \fItegu_req\fP are packaged as HTTP requests to
+the Tegu HTTP server.
+For the most part, these are sent as POSTs to the URL /tegu/api (however,
+mirroring commands follow a more ReST-ful paradigm; see below).
+The body of the POST should have a Content-type of text, and contains a command line
+that lists the command and arguments.
+Authentication, if required, is provided via a prefix of \f(CWauth=token\fP
+containing a Keystone token that is used to verify the user.
+The response to each Tegu request is a JSON body containing any requested information as
+well as error status.
+.P
+If Tegu has just started and is still not accepting commands,
+then most commands (with the exception of \fIping\fP and \fIverbose\fP) will fail.
+The error message that is returned will indicate this.
+
+.SS Bandwidth Allocation Commands
+.TP 8
+.B reserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie dscp
+Makes a bandwidth reservation.
+.TP 8
+.B [auth=token] reservation reservation-id [cookie]
+This command is issued as a DELETE, not a POST.
+This caused the named reservation to be cancelled.
+The cookie is required if the initial reservation was made with a cookie, and must
+match either the initial reservation's cookie or the super cookie.
+.TP 8
+.B [auth=token] setdiscount value
+Sets the discount value to either a percentage, or an absolute value.
+See the description of \fIsetdiscount\fP on tegu_req(1) for details of the value.
+.TP 8
+.B [auth=token] setulcap tenant percentage
+description
+.TP 8
+.B [auth=token] listulcap
+description
+.TP 8
+.B [auth=token] listres [key=value ...]
+description
+.TP 8
+.B [auth=token] qdump
+This is the API equivalent of the \fItegu_req listqueue\fP command.
+It returns a JSON list of all queues on the switches or bridges being managed.
+
+.SS Topology Commands
+.TP 8
+.B [auth=token] graph [key=value ...]
+description
+.TP 8
+.B [auth=token] listhosts [key=value ...]
+description
+
+.SS Flow Steering Commands
+.TP 8
+.B steer {[start-]end|+seconds} tenant src-host dest-host mbox-list cookie
+description
+
+.SS Mirroring Commands
+Mirroring commands follow a ReST-ful paradigm, so this section is a little bit different.
+All mirroring URL's are located under /tegu/mirrors/.
+Mirroring commands that expect input should receive a JSON string in the content body,
+with the Content-type set to \f(CWapplication/json\fP, although Tegu will not (currently)
+complain if the Content-type header is wrong.
+In addition, the authorization token for mirroring requests is passed in the
+\fBX-Auth-Tegu\fP header, rather than in the content body.
+.TP 8
+.B add-mirror [start-]end port1[,port2...] output [cookie] [vlan]
+To add a mirror, a POST is done to the URL /tegu/mirrors.
+The body of the post should look like:
+.IP
+.nf
+.ft CW
+{
+	"start_time": "nnn",                 // optional
+	"end_time": "nnn",                   // required
+	"output": "<output spec>",           // required
+	"port": [ "port1" , "port2", ...],   // required
+	"vlan": "vlan",                      // optional
+	"cookie": "value",                   // optional
+	"name": "mirrorname",                // optional
+}
+.ft P
+.fi
+.IP
+Because multiple mirrors may be created as a result of one call,
+we return a JSON array of results, one for each mirror:
+.IP
+.nf
+.ft CW
+[
+	{
+		"name": "mirrorname",   // tegu or user-defined mirror name
+		"url": "url",           // URL to use for DELETE or GET
+		"error": "err"          // error message (if any)
+	},
+	....
+]
+.ft P
+.fi
+.TP 8
+.B del-mirror name [cookie]
+To delete a mirror, a DELETE request is sent to the URL
+.IP
+/tegu/mirrors/\fImirrorname\fP/[?cookie=\fIcookie\fP]
+.IP
+If the named mirror exists, and the cookie (if any) matches,
+the mirror is deleted and a 204 (No Content) is returned.
+Other possible return codes are 404 (Not Found) and 401 (Unauthorized).
+.TP 8
+.B list-mirrors
+To list all mirrors that Tegu knows about, a GET of /tegu/mirrors/ is performed.
+If authorized, a JSON array is returned, listing mirror names and URLs.
+.IP
+.nf
+.ft CW
+[
+	{
+		"name": "mir-5599a59a_0",                              // tegu or user-defined mirror name
+		"url": "http://localhost:29444/tegu/mirrors/mir-5599a59a_0/"  // URL to use for DELETE or GET
+	},
+	....
+]
+.ft P
+.fi
+.TP 8
+.B show-mirror name [cookie]
+To show details of a particular mirror, a GET request is sent to the URL
+.IP
+/tegu/mirrors/\fImirrorname\fP/[?cookie=\fIcookie\fP]
+.IP
+If the named mirror exists, and the cookie (if any) matches, a JSON response is returned
+describing the mirror.
+Other possible return codes are 404 (Not Found) and 401 (Unauthorized).
+.IP
+.nf
+.ft CW
+{
+	"name": "mir-5599a59a_0",
+	"start_time": 1436132762,
+	"end_time": 1436134567,
+	"port": [
+		"fa:16:3e:5f:df:60"
+	],
+	"output": "135.25.85.99",
+	"physical_host": "mtmac3",
+	"pushed": true,
+	"paused": false,
+	"pending": false,
+	"active": true,
+	"expired": false,
+	"url": "http://localhost:29444/tegu/mirrors/mir-5599a59a_0/"
+}
+.ft P
+.fi
+
+.SS Miscellaneous Commands
+.TP 8
+.B ping
+This command is used to check connectivity to the Tegu system itself.
+It will always return success, so if a succesful connection is made, and a
+response received, the client can assume Tegu is running.
+
+.TP 8
+.B [auth=token] refresh [ vmname | tenant/vmname ]
+When a user migrates a VM they are expected to cancel and reissue reservation requests before
+and after the migration of any VM that is a apart of an existing reservation (whether future
+or active).
+The operations staff may issue a privileged command which refreshes any existing reservations
+for a VM that has already been migrated.
+Following the migration of a VM, the refresh command will reset reservations that were associated
+with the VM, and will preserve reservation related information (name and cookie) such that
+the reservation owner can still manage the reservation.
+The following syntax illustrates how the tegu_req command line interface can be used to
+refresh the reservations associated with the VM named \fIdemovm8\fP in the \fIdemo\fP tenant:
+
+tegu_req refresh demo/demovm8
+
+.TP 8
+.B verbose level [subsystem]
+This is the API version of the \fItegu_req\fP verbose command.
+Note that no authentication token is required.
+For details on valid values for \fIsubsystem\fP, see the tegu_req(1) manual page.
+
+.TP 8
+.B [auth=token] listconns [name]
+Returns a JSON description of the switches and ports for the named host.
+
+.SH FILES
+.TP 15
+/var/lib/tegu
+Normal directory for Tegu checkpoints.
+.TP 15
+/var/log/tegu
+Normal directory for Tegu logfiles.
+.TP
+/etc/tegu/tegu.cfg
+The Tegu configuration file.
+.TP
+/etc/tegu/phys_net_static.json
+The physical network description.
+
+.SH SEE ALSO
+ssh(1), tegu_req(1), rjprt(1), tegu.cfg(5), service(8)

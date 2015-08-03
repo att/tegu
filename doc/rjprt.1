@@ -1,0 +1,79 @@
+.\"
+.\"		rjprt Manual Page
+.\"
+.\"     Date:		14 Jun 2015
+.\"		Author:		E. Scott Daniels
+.\"                 Robert Eby
+.\"
+.\"     Mods:		14 Jun 2015 - Created
+.\"
+.TH RJPRT 1 "Tegu Manual"
+.CM 4
+.SH NAME
+rjprt \- request and pretty-print JSON output from an HTTP server
+.SH SYNOPSIS
+\fBrjprt\fP [\fB-a token\fP] [\fB-D data-string\fP] [\fB-d\fP] [\fB-h\fP] [\fB-j\fP] [\fB-J\fP] [\fB-l dot-string\fP] [\fB-m method\fP] [\fB-r root-string\fP] [\fB-T\fP] [\fB-v\fP] \fB-t target-url\fP
+	
+.SH DESCRIPTION
+\fIrjprt(1)\fR is a companion program used by tegu_req(1) to make HTTP requests to Tegu,
+and to format the JSON output that is returned.
+If \fItegu_req\fP is moved to another machine from the one that Tegu is
+installed on, this executable should also be moved and should be placed in
+the user's $PATH.
+.SH COMMAND LINE OPTIONS
+\fIrjprt\fR interprets the following options:
+.\" ==========
+.TP 8
+.B \-a token
+Causes an authorization token to be passed to Tegu using the \fBX-Auth-Tegu\fP header.
+.\" ==========
+.TP 8
+.B \-D data-string
+Specify the data to be used in the content body of a POST or DELETE request.
+If this option is not specified, then the data is read from standard input.
+.\" ==========
+.TP 8
+.B \-d
+Causes JSON output from Tegu to be formatted in a dotted hierarchical style.
+The default is to display the output in a indented, nested style (but see also -j below).
+.\" ==========
+.TP 8
+.B \-h
+Causes HTTP response headers to be printed.
+.\" ==========
+.TP 8
+.B \-j
+Causes JSON output from Tegu to be sent directly to the output (but see also -d above).
+.\" ==========
+.TP 8
+.B \-J
+Causes the Content-type for data sent to Tegu to be set to \fIapplication/json\fP.
+The default is \fItext\fP.
+.\" ==========
+.TP 8
+.B \-l dot-string
+Looks for and prints the specific \fIdot-string\fP in the dotted hierarchical output.
+If not found, an error is printed.
+Use of this option triggers the \fI-d\fP option.
+.TP 8
+.B \-m method
+Specifies the method (GET/POST/DELETE) to be used for the request to Tegu.
+The default is GET.
+.TP 8
+.B \-r name
+Allow specification of a "root" name for the JSON output.
+The default root name is the empty string.
+.TP 8
+.B \-T
+Causes \fIrjprt\fP to verify the server's identity when making secure TLS (HTTPS) requests to Tegu.
+The default behavior is to not check the servers identity.
+.TP 8
+.B \-v
+Causes \fIrjprt\fP to echo the target URL that will be used on standard error.
+.TP 8
+.B \-t target-url
+The target-url to request.
+This option is required.
+
+.SH SEE ALSO
+tegu_req(1), tegu.cfg(5), tegu(8)
