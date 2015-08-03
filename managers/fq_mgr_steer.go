@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -20,7 +38,7 @@ import (
 	"fmt"
 	"strings"
 
-	"codecloud.web.att.com/gopkgs/ipc"
+	"github.com/att/gopkgs/ipc"
 )
 
 
@@ -50,10 +68,10 @@ func send_meta_fm( hlist []string, table int, cookie int, pattern string ) {
 
 
 /*
-	Send flow-mod(s) to the agent for steering. 
-	The fq_req contains data that are neither match or action oriented (priority, expiry, etc) are or 
+	Send flow-mod(s) to the agent for steering.
+	The fq_req contains data that are neither match or action oriented (priority, expiry, etc) are or
 	macht or action only (late binding mac value), and a set of match and action paramters that are
-	applied depending on where they are found. 
+	applied depending on where they are found.
 	Data expected in the fq_req:
 		Nxt_mac - the mac address that is to be set on the action as dest
 		Expiry  - the timeout for the fmod(s)
@@ -64,14 +82,14 @@ func send_meta_fm( hlist []string, table int, cookie int, pattern string ) {
 		Table	- Table number to put the flow mod into
 		Rsub    - A list (space separated) of table numbers to resub to in the order listed.
 		Lbmac	- Assumed to be the mac address associated with the switch port when
-					switch port is -128. This is passed on the -i option to the 
+					switch port is -128. This is passed on the -i option to the
 					agent allowing the underlying interface to do late binding
 					of the port based on the mac address of the mbox.
 		Pri		- Fmod priority
 
 	TODO: this needs to be expanded to be generic and handle all possible match/action parms
 			not just the ones that are specific to steering.  It will probably need an on-all
-			flag in the main request struct rather than deducing it from parms. 
+			flag in the main request struct rather than deducing it from parms.
 */
 func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string ) {
 	var hosts []string			// hosts that the fmod will target
@@ -84,7 +102,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	table := ""
 	if data.Table > 0 {
 		table = fmt.Sprintf( "-T %d ", data.Table )
-	} 
+	}
 	/*
 	//===== right now no restriction/checking on some kind of source/dest
 	else {														// for table 0 we insist on having at least a src IP or port or a dest ip
@@ -103,7 +121,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 		if *data.Match.Meta != "" {
 			match_opts += " -m " + *data.Match.Meta		// allow caller to override if they know better
 		}
-	} 
+	}
 
 	//on_all := data.Swid == nil 							// if no switch id, then we write to all
 	if data.Swid == nil {									// no switch id, then write to all hosts
@@ -198,7 +216,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 
 	output := "-N"			// TODO: allow output action to be passed in
 
-	//action_opts = fmt.Sprintf( "--action %s -R ,0 -N", action_opts )		// set up actions; may be order sensitive so -R and -N LAST 
+	//action_opts = fmt.Sprintf( "--action %s -R ,0 -N", action_opts )		// set up actions; may be order sensitive so -R and -N LAST
 	action_opts = fmt.Sprintf( "--action %s %s", action_opts, output )		// set up actions
 
 	//base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `

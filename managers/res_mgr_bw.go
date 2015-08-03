@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -21,26 +39,26 @@ import (
 	"strings"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/gizmos"
 )
 
 /*
-	For a single bandwidth pledge, this function sets things up and sends needed requests to the fq-manger to 
-	create any necessary flow-mods.   This has changed drastically now that we expect one agent 
+	For a single bandwidth pledge, this function sets things up and sends needed requests to the fq-manger to
+	create any necessary flow-mods.   This has changed drastically now that we expect one agent
 	onvocation to set up all bandwidth flow-mods for an endpoint switch.
 
-	With the new method of managing queues per reservation on ingress/egress hosts, we now send 
+	With the new method of managing queues per reservation on ingress/egress hosts, we now send
 	the following information to fq_mgr:
 		h1, h2 -- hosts
 		expiry
 		switch/port/queue
 	
 	Path list will have path(s) in both directions (to support different bandwidth rates).
-	The above info is sent for each 'link' in the forward direction path, and then we reverse 
-	the path and send requests to fq_mgr for each 'link' in the backwards direction.  Errors are 
-	returned to res_mgr via channel, but asycnh; we do not wait for responses to each message 
-	generated here. 
+	The above info is sent for each 'link' in the forward direction path, and then we reverse
+	the path and send requests to fq_mgr for each 'link' in the backwards direction.  Errors are
+	returned to res_mgr via channel, but asycnh; we do not wait for responses to each message
+	generated here.
 
 	To_limit is a cap to the expiration time sent when creating a flow-mod.  OVS (and others we assume)
 	use an unsigned int32 as a hard timeout value, and thus have an upper limit of just over 18 hours. If
@@ -116,7 +134,7 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 			freq.Exttyp = plist[i].Get_extflag()		// indicates whether the external IP is the source or dest along this path
 
 											//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
-			tptype_list := "none"							// default to no specific protocol 
+			tptype_list := "none"							// default to no specific protocol
 			if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
 				tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
 			}
@@ -138,7 +156,7 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 				}
 
 				rm_sheep.Baa( 1, "res_mgr/push_rea: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
-					i, *rname, *cfreq.Exttyp, tptype_toks[tidx], *h1, *h2, *cfreq.Match.Ip1, *cfreq.Match.Ip2, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport, 
+					i, *rname, *cfreq.Exttyp, tptype_toks[tidx], *h1, *h2, *cfreq.Match.Ip1, *cfreq.Match.Ip2, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
 					cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, *cfreq.Extip, expiry, cfreq.Expiry )
 
 				msg = ipc.Mk_chmsg()
@@ -149,17 +167,17 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 			}
 		}
 
-		p.Set_pushed()				// safe to mark the pledge as having been pushed.  
+		p.Set_pushed()				// safe to mark the pledge as having been pushed.
 	}
 }
 
 
 /*
-	This builds a fq-mgr request and passes it to the fq-mgr to 'refine' and send along 
-	to the agent-manager for ultimate execution.  It might be possible to pass it 
-	directly to the agent manager, but because res-mgr thinks in IP addresses, and 
+	This builds a fq-mgr request and passes it to the fq-mgr to 'refine' and send along
+	to the agent-manager for ultimate execution.  It might be possible to pass it
+	directly to the agent manager, but because res-mgr thinks in IP addresses, and
 	fq-manager (that might be the only source of IP->Mac translation which flow-mods
-	need) is still left in the middle. 
+	need) is still left in the middle.
 
 	CAUTION: this function is called for both new reservations, _and_ to refresh
 		reservations with expiry value further in the future than the switch can
@@ -216,7 +234,7 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 
 
 											//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
-			tptype_list := "none"							// default to no specific protocol 
+			tptype_list := "none"							// default to no specific protocol
 			if *src_tpport != "0" || *dest_tpport != "0" {	// if either port is specified, then we need to generate for both udp and tcp
 				tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
 			}
@@ -236,7 +254,7 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 					ip2_str = *cfreq.Match.Ip2
 				}
 				rm_sheep.Baa( 1, "res_mgr/push_bwow: flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d exp/fm_exp=%d/%d",
-					*rname, tptype_toks[tidx], *src, *dest, *cfreq.Match.Ip1, ip2_str, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport, 
+					*rname, tptype_toks[tidx], *src, *dest, *cfreq.Match.Ip1, ip2_str, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
 					cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, expiry, cfreq.Expiry )
 
 				msg = ipc.Mk_chmsg()
@@ -245,7 +263,7 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 			}
 		}
 
-		p.Set_pushed()				// safe to mark the pledge as having been pushed.  
+		p.Set_pushed()				// safe to mark the pledge as having been pushed.
 	} else {
 		rm_sheep.Baa( 1, "oneway not pushed: could not map one/both hosts to an IP address" )
 	}
