@@ -1,9 +1,27 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	queue
-	Abstract:	Represents a queue, mapping it to a source host and 
+	Abstract:	Represents a queue, mapping it to a source host and
 				a specific bandwidth maximum.
 
 	Date:		06 February 2014
@@ -14,18 +32,7 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
-	//"strings"
-	//"time"
-
-	//"forge.research.att.com/gopkgs/clike"
 )
 
 type Queue struct {
@@ -33,7 +40,7 @@ type Queue struct {
 	bandwidth	int64			// bandwidth associated with the queue
 	pri			int				// priority given to ovs when setting queues	
 	qnum		int				// the queue number (we cannot depend on ordering)
-	exref		*string			// switch/port (other info?) that queue setting function will need 
+	exref		*string			// switch/port (other info?) that queue setting function will need
 }
 
 /*
@@ -98,7 +105,7 @@ func (q *Queue) Nuke() {
 }
 
 /*
-	Sets the bandwidh for the queue to the value (bps) passed in. 
+	Sets the bandwidh for the queue to the value (bps) passed in.
 */
 func (q *Queue) Set_bandwidth(  b int64 ) {
 	if q != nil {
@@ -107,7 +114,7 @@ func (q *Queue) Set_bandwidth(  b int64 ) {
 }
 
 /*
-	Adjust the priority of the queue to  the value passed in.  
+	Adjust the priority of the queue to  the value passed in.
 	Priority values should be between 1 and 1024 with the larger
 	values being lower in priority.
 */
@@ -118,11 +125,11 @@ func (q *Queue) Set_priority( p int ) {
 }
 
 /*
-	Returns the queue number for this queue. The queue number is the 
+	Returns the queue number for this queue. The queue number is the
 	value that is placed on flow-mods which are sent to the switch
 	as an enqueue action and that are associated with a min/max
-	and/or QoS group on the switch.  A value of -1 is returned 
-	on error. 
+	and/or QoS group on the switch.  A value of -1 is returned
+	on error.
 */
 func (q *Queue) Get_num( ) ( int ) {
 	if q != nil {
@@ -160,8 +167,8 @@ func ( q *Queue ) To_str( ) ( string ) {
 }
 
 /*
-	Returns a json string that represents this queue. The information includes num, priority, 
-	bandwidh, id and external reference string. 
+	Returns a json string that represents this queue. The information includes num, priority,
+	bandwidh, id and external reference string.
 */
 func (q *Queue) To_json( ) ( string ) {
 	if q == nil {

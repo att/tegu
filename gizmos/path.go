@@ -1,12 +1,30 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	path
 	Abstract:	Manages a path as a list of switches (needed to set a flow mod)
-				and a list of links (needed to set obligations). There is no 
-				attempt to maintain the path as a graph, though we'll save the 
-				data in the order added, so if the caller adds things in path 
+				and a list of links (needed to set obligations). There is no
+				attempt to maintain the path as a graph, though we'll save the
+				data in the order added, so if the caller adds things in path
 				order it represents the direction of flow.
 
 				Some ascii art that might help
@@ -17,10 +35,10 @@
 			 endpt0's port/queue-+   +--- forward queue         + ---backward queue
 		      <---data flow                dataflow--->              <---dataflow	
 
-				*sw1 is where h1 connects, sw3 is where h2 connects. 
-				*the forward queue location is on the switch/port that sends data on the link in 
+				*sw1 is where h1 connects, sw3 is where h2 connects.
+				*the forward queue location is on the switch/port that sends data on the link in
 					the "path forward" direction (towards h2)
-				*The backward queue location is the opposite; swtich/port sending data on the 
+				*The backward queue location is the opposite; swtich/port sending data on the
 					link in the backwards direction (towards h1)
 			
 				The forward/backwards naming convention make sense, but are not obvious
@@ -37,18 +55,8 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
-	//"strings"
-	//"time"
-
-	//"forge.research.att.com/gopkgs/clike"
 )
 
 type Path struct {
@@ -105,18 +113,18 @@ func (p *Path) Nuke() {
 /*
 	Causes the reverse indicator to be set.  This is necessary if
 	the path has been constructed in reverse and affects the way
-	queue information along the path is generated. 
+	queue information along the path is generated.
 */
 func (p *Path) Set_reverse( state bool ) {
 	p.is_reverse = state
 }
 
 /*
-	Adds the link passed in to the path. Links should be added in 
+	Adds the link passed in to the path. Links should be added in
 	order from the origin switch to the termination switch.  If
 	the links are added in reverse, the reverse indicator should
 	be set for the path (see Set_reverse() method).  Adding links
-	out of order will cause interesting and likely undesired, results. 
+	out of order will cause interesting and likely undesired, results.
 */
 func (p *Path) Add_link( l *Link ) {
 	var (
@@ -142,9 +150,9 @@ func (p *Path) Add_link( l *Link ) {
 /*
 	Adds the switch passed in to the path.
 	Switches should be added in order from the source to termination
-	switch. If the order is from termination to source, then the 
+	switch. If the order is from termination to source, then the
 	reverse indicator must be set.   Adding switches out of order
-	will cause for interesting, and likely undesired, results. 
+	will cause for interesting, and likely undesired, results.
 */
 func (p *Path) Add_switch( s *Switch ) {
 	var (
@@ -166,8 +174,8 @@ func (p *Path) Add_switch( s *Switch ) {
 }
 
 /*
-	Adds an endpoint that represents the connection between the switch and the 
-	given host. This allows a queue outbound from the switch to the host to 
+	Adds an endpoint that represents the connection between the switch and the
+	given host. This allows a queue outbound from the switch to the host to
 	be set.
 */
 func ( p *Path) Add_endpoint( l *Link ) {
@@ -191,7 +199,7 @@ func ( p *Path) Add_endpoint( l *Link ) {
 
 /*
 	Increases the utilisation of the path by adding delta to all links. This assumes that the
-	link has already been tested and indicated it could accept the change. 
+	link has already been tested and indicated it could accept the change.
 */
 func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
 	r = true
@@ -208,18 +216,18 @@ func (p *Path) Inc_utilisation( commence, conclude, delta int64 ) ( r bool ){
 
 /*
 	Add the necessary queues to the path that increase the utilisation of the links in the path.
-	If is_reverse is set to true, the queue is added from last to first in the list. 
+	If is_reverse is set to true, the queue is added from last to first in the list.
 
-	The amt_in and amt_out values are the bandwidth outbound from the host1 and inbound to the host1 relative 
+	The amt_in and amt_out values are the bandwidth outbound from the host1 and inbound to the host1 relative
 	to the direction of the path.  These values are used to properly set the queues for data traveling
-	from host1 to host2 (out) and in the reverse direction (in).  To that end four queue types are 
+	from host1 to host2 (out) and in the reverse direction (in).  To that end four queue types are
 	created on the links:
 		1) priority-in the priority queue (1) for data returning to host1
 		2) priority-out the priority queue (1) for date outbound toward host 2
 		3) qid - the queue (n) set on the first link in the path for data flowing outbound
 		4) Rqid - the queue (n) set on the last link in the path for the data flowing from host2 toward host1
 
-	The process of adding a queue to a link increases the obligation (allotment) for that link. 
+	The process of adding a queue to a link increases the obligation (allotment) for that link.
 */
 func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in int64, amt_out int64 ) (err error) {
 	err = nil
@@ -289,7 +297,7 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 
 	if p.endpts[0] != nil {			// endpoints are added in h1, h2 order regardless of path order, so no need for special handeling here
 		eqid := "E0" + *qid;
-		err = p.endpts[0].Set_forward_queue( &eqid, commence, conclude, amt_in )		// amount back to h1 
+		err = p.endpts[0].Set_forward_queue( &eqid, commence, conclude, amt_in )		// amount back to h1
 		if err != nil { return }
 	}
 
@@ -303,8 +311,8 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, amt_in in
 }
 
 /*
-	Return the forward link information (switch/port/queue-num) associated with the first (ingress) switch 
-	in the path.  This is the port and queue number used on the first switch in the path to send data _out_ 
+	Return the forward link information (switch/port/queue-num) associated with the first (ingress) switch
+	in the path.  This is the port and queue number used on the first switch in the path to send data _out_
 	from h1.  The data is based on queue ID and the timestamp given (queue numbers can vary over time).
 	See also Get_endpoint_spq()
 */
@@ -355,7 +363,7 @@ func (p *Path) Get_elink_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 
 /*
 	Return a list of intermediate switch/port/queue-num tuples in a forward (h1->h2) direction.
-	(The data is based on priority-out queues.) 
+	(The data is based on priority-out queues.)
 */
 func (p *Path) Get_forward_im_spq( tstamp int64 )  ( []*Spq ){
 	var (
@@ -413,8 +421,8 @@ func (p *Path) Get_backward_im_spq( tstamp int64 )  ( []*Spq ){
 
 /*
 	Return a list of switch/port/queue-num tuples for all of the intermediate links in a path. Both
-	the forward and backward tuples are returned in the list making the list a complete set of 
-	switch/port/queue-nums that must be translated into flowmods along the path in order to 
+	the forward and backward tuples are returned in the list making the list a complete set of
+	switch/port/queue-nums that must be translated into flowmods along the path in order to
 	properly queue traffic for a reservation.
 */
 func (p *Path) Get_intermed_spq( tstamp int64 )  ( []*Spq ){
@@ -454,19 +462,19 @@ func (p *Path) Get_intermed_spq( tstamp int64 )  ( []*Spq ){
 
 /*
 	Returns the pair of switch/port/queue-num objects that are associated with the endpoint
-	links.  An endpoint link is the connection between the ingress/egress switch and the 
+	links.  An endpoint link is the connection between the ingress/egress switch and the
 	attached host.  This is _not_ the same as the ingress link and egress link which are
 	the information related to the first true link on the path.
 
-	This function will return nil pointers when both hosts are on the same switch as 
-	that case is managed as a virtual link and not as endpoints (probably should be 
+	This function will return nil pointers when both hosts are on the same switch as
+	that case is managed as a virtual link and not as endpoints (probably should be
 	changed, but for now that's the way it is).
 
 	Qid is the queue base name that we'll attach E0 and E1 to as a prefix.
 
 	Endpoints are added in h1,h2 order and not in path order, so this function must
 	return them respecitive to the path which may mean inverting them as the caller
-	of this function should expect that e0 is the endpoint at the start of the path. 
+	of this function should expect that e0 is the endpoint at the start of the path.
 */
 func (p *Path) Get_endpoint_spq( qid *string, tstamp int64 ) ( e0 *Spq, e1 *Spq ) {
 	var (
@@ -484,12 +492,12 @@ func (p *Path) Get_endpoint_spq( qid *string, tstamp int64 ) ( e0 *Spq, e1 *Spq 
 	}
 
 	if p.endpts[idx0] != nil {
-		eqid := pfx0 + *qid 
+		eqid := pfx0 + *qid
 		e0 = Mk_spq( p.endpts[idx0].Get_forward_info( &eqid, tstamp ) )
 	}
 
 	if p.endpts[idx1] != nil {
-		eqid := pfx1 + *qid 
+		eqid := pfx1 + *qid
 		e1 = Mk_spq( p.endpts[idx1].Get_forward_info( &eqid, tstamp ) )		// end points track things only in forward direction
 	}
 
@@ -497,7 +505,7 @@ func (p *Path) Get_endpoint_spq( qid *string, tstamp int64 ) ( e0 *Spq, e1 *Spq 
 }
 
 /*
-	Creates a new path that is the inverse (reverse) of the path. The original 
+	Creates a new path that is the inverse (reverse) of the path. The original
 	path is not damaged.
 */
 func (p *Path) Invert( ) ( ip *Path ) {
@@ -512,7 +520,7 @@ func (p *Path) Invert( ) ( ip *Path ) {
 	}
 
 	ip.is_reverse = !p.is_reverse
-	return 
+	return
 }
 
 // ------------------------ string/json/human output functions ------------------------------------

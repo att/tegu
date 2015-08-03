@@ -1,16 +1,35 @@
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 package managers
 
 import (
 	"fmt"
 	"os"
 	
-	"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/gopkgs/config"
-	"forge.research.att.com/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/config"
+	"github.com/att/gopkgs/bleater"
 )
 
-// global constants and variables -- no such thing as protected or compile unit static it seems, so by 
+// global constants and variables -- no such thing as protected or compile unit static it seems, so by
 // putting the globals in a separate module it should be more obvious that these are shared across all
 // package members (as though all tegu source was in the same file).
 
@@ -50,7 +69,7 @@ const (
 				// offsets into the array of data passed to fq_mgr on requests
 	FQ_IP1		int = 0			// ip address of host 1					(ie proactive reservation request)
 	FQ_IP2		int = 1			// ip address of host 2
-	FQ_EXPIRY	int = 2			// reservation expiry time 
+	FQ_EXPIRY	int = 2			// reservation expiry time
 	FQ_SPQ		int = 3			// queue to map traffic to
 	FQ_ID		int	= 4			// id used if reporting error asynch
 
@@ -65,11 +84,11 @@ var (
 
 	cfg_data	map[string]map[string]*string			// things read from the configuration file
 
-	/* 
-		channels that various goroutines listen to. 
+	/*
+		channels that various goroutines listen to.
 	*/
-	nw_ch		chan	*ipc.Chmsg		// network 
-	rmgr_ch		chan	*ipc.Chmsg		// reservation manager 
+	nw_ch		chan	*ipc.Chmsg		// network
+	rmgr_ch		chan	*ipc.Chmsg		// reservation manager
 	osif_ch		chan	*ipc.Chmsg		// openstack interface
 	fq_ch		chan	*ipc.Chmsg		// flow and queue manager
 
@@ -89,11 +108,11 @@ var (
 )
 
 /*
-	Sets up the global variables needed by the whole package. This should be invoked by the 
+	Sets up the global variables needed by the whole package. This should be invoked by the
 	main tegu function (main/tegu.go).
 
-	CAUTION:  this is not implemented as an init() function as we must pass information from the 
-			main to here.  
+	CAUTION:  this is not implemented as an init() function as we must pass information from the
+			main to here.
 */
 func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg ) (err error)  {
 
@@ -113,7 +132,7 @@ func Initialise( cfg_fname *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, 
 	tklr.Add_spot( 2, rmgr_ch, REQ_NOOP, nil, 1 )	// a quick burst tickle to prevent a long block if the first goroutine to schedule a tickle schedules a long wait
 
 	if cfg_fname != nil {
-		cfg_data, err = config.Parse2strs( nil, *cfg_fname )		// capture config data as strings -- referenced as cfg_data["sect"]["key"] 
+		cfg_data, err = config.Parse2strs( nil, *cfg_fname )		// capture config data as strings -- referenced as cfg_data["sect"]["key"]
 		if err != nil {
 			err = fmt.Errorf( "unable to parse config file %s: %s", *cfg_fname, err )
 			return

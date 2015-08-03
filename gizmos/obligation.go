@@ -1,4 +1,22 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -7,25 +25,25 @@
 				An obligation has an overal commence and conclude time (UNIX
 				timestamps) and a maximum capacity. The obligation is subdivided
 				into time windows between the commence and conclude times with
-				each time winodw tracking an obligated capacity. By default, the 
+				each time winodw tracking an obligated capacity. By default, the
 				obligation spans from the epoch until well into the future (2025ish);
 				there is probably no reason for a user application to change this.
 
-				The obligation now supports the concept of queues associated with 
+				The obligation now supports the concept of queues associated with
 				each timeslice.  This allows the user to further subdivide a slice
 				of time based on the 'consumer' of that segment of the slice. Queues
 				are actually managed by the time_slice object, but must be recognised
-				here so that they can be 'passed through' etc. The use of queues are 
-				optional; a user programm may need only to treat the obligation as a 
+				here so that they can be 'passed through' etc. The use of queues are
+				optional; a user programm may need only to treat the obligation as a
 				whole value for each timeslice and thus can use the original inc/dec
 				functions to manage.  When using queues, the inc/dec functions should
-				not be used. 
+				not be used.
 
 				The obligation 'exposes' queues to a caller using a queue ID (name)
-				and reserves a special name, "priority," to generically refer to 
-				a reserved queue used for priority traffic.  While it shouldn't be 
+				and reserves a special name, "priority," to generically refer to
+				a reserved queue used for priority traffic.  While it shouldn't be
 				necessary to know, the priority queue will always map to queue 1 and
-				any other named queue will map to 2 through qmax.  
+				any other named queue will map to 2 through qmax.
 
 	Date:		22 November 2013
 	Author:		E. Scott Daniels
@@ -37,18 +55,8 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
-	//"strings"
 	"time"
-
-	//"forge.research.att.com/gopkgs/clike"
 )
 
 const (
@@ -63,7 +71,7 @@ type Obligation struct {
 // -----------------------------------------------------------------------------------------------------------
 
 /*
-	constructor 
+	constructor
 */
 func Mk_obligation( max_capacity int64 ) (ob *Obligation) {
 	ob = &Obligation { }
@@ -96,7 +104,7 @@ func (ob *Obligation) Get_max_capacity() ( int64 ) {
 
 /*
 	Runs the list of timeslices looking for a queue id that is not used across all of the slices. Returns
-	the id, or -1 if no id is available. Queue numbers 0 and 1 are reserved and thus are never returned. 
+	the id, or -1 if no id is available. Queue numbers 0 and 1 are reserved and thus are never returned.
 */
 func (ob *Obligation) suss_open_qnum( commence int64, conclude int64 ) ( int ) {
 	var (
@@ -124,10 +132,10 @@ func (ob *Obligation) suss_open_qnum( commence int64, conclude int64 ) ( int ) {
 }
 
 /*
-	Private function that actually does the work, and can accept queue information so that we can use 
-	it for eaither inc-usage or add queue public functions. Passing in a queue number of 0 will cause the 
-	amount to be added to an existing queue's amount, and discarded if the queue for qid doesn't exist 
-	(a function of the underlying time-slice object). If a queue number < 0 is passed in, no effort to 
+	Private function that actually does the work, and can accept queue information so that we can use
+	it for eaither inc-usage or add queue public functions. Passing in a queue number of 0 will cause the
+	amount to be added to an existing queue's amount, and discarded if the queue for qid doesn't exist
+	(a function of the underlying time-slice object). If a queue number < 0 is passed in, no effort to
 	set/manage queues is made.
 */
 func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64, qnum int, qid *string, qswdata *string ) {
@@ -138,14 +146,14 @@ func (ob *Obligation) inc_utilisation( commence int64, conclude int64, amt int64
 	for ts := ob.tslist; ts != nil; ts = ts.Next {
 		if !ts.Is_before( commence ) {					// only consider slices that overlap or are after the given window
 
-			if ts.Includes( commence ) {					// starts in this block 
+			if ts.Includes( commence ) {					// starts in this block
 				ts1, ts = ts.Split( commence )				// split and leave ts set to the first slice of the given window
 				if ts == nil {								// if commence and start of ts matched, there is no split, so pick up the original slice again
 					ts = ts1
 				}
 			}
 
-			if  ts.Includes( conclude ) {					// our end is inside this block, split it off, and inc just the frist portion 
+			if  ts.Includes( conclude ) {					// our end is inside this block, split it off, and inc just the frist portion
 				ts1, _ = ts.Split( conclude+1 )				// split so that conclude time is in the slice, not first of next; we can safely ignore the latter slice
 				if ts1 != nil {								// if this slice already ends on conclude, ts1 will be nil, otherwise we advance to the new block
 					ts = ts1
@@ -195,7 +203,7 @@ func (ob *Obligation) Dec_utilisation( commence int64, conclude int64, dec_cap i
 }
 
 /*
-	Runs the list of time slices and returns true if the capacity increase (amt) can 
+	Runs the list of time slices and returns true if the capacity increase (amt) can
 	be satisifed across the given time window.
 */
 func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) ( result bool ) {
@@ -226,10 +234,10 @@ func (ob *Obligation) Has_capacity( commence int64, conclude int64, amt int64 ) 
 }
 
 /*
-	Adds a queue to the obligation starting with the commence and ending with the conclude timestamps. 
-	This function does NOT check to see if the obligaion can support the amount being added assuming that 
-	the user has done this during path discovery or some other determination that this obligation needs to 
-	be used.  swdata is a string that provides switch and port data to what ever mechanism is actually 
+	Adds a queue to the obligation starting with the commence and ending with the conclude timestamps.
+	This function does NOT check to see if the obligaion can support the amount being added assuming that
+	the user has done this during path discovery or some other determination that this obligation needs to
+	be used.  swdata is a string that provides switch and port data to what ever mechanism is actually
 	adjusting the switch and thus needs to know switch/port and maybe more.  The format of the string isn't
 	important to the obligation.
 */
@@ -276,7 +284,7 @@ func (ob *Obligation) Dec_queue( qid *string, amt int64, commence int64, conclud
 	run the timeslice list and prune away any leading blocks that are in the past
 */
 func (ob *Obligation) Prune( ) {
-	var( 
+	var(
 		ts *Time_slice
 		nxt *Time_slice
 		now int64
@@ -371,7 +379,7 @@ func (ob *Obligation) Queues2str( usr_ts int64 ) ( string ) {
 
 /*
 	Generate a json blob that represents the obligation. The json will list the max capacity
-	for the obligation and then an entry for each timeslice. 
+	for the obligation and then an entry for each timeslice.
 */
 func (ob *Obligation) To_json( ) ( s string ) {
 	var (

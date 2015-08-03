@@ -1,26 +1,44 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	network
-	Abstract:	Manages everything associated with a network. This module contains a 
+	Abstract:	Manages everything associated with a network. This module contains a
 				goroutine which should be invoked from the tegu main and is responsible
 				for managing the network graph and responding to requests for information about
-				the network graph. As a part of the collection of functions here, there is also 
-				a tickler which causes the network graph to be rebuilt on a regular basis. 
+				the network graph. As a part of the collection of functions here, there is also
+				a tickler which causes the network graph to be rebuilt on a regular basis.
 
 				The network manager goroutine listens to a channel for requests such as finding
-				and reserving a path between two hosts, and generating a json representation 
+				and reserving a path between two hosts, and generating a json representation
 				of the network graph for outside consumption.
 
-				TODO: need to look at purging links/vlinks so they don't bloat if the network changes 
+				TODO: need to look at purging links/vlinks so they don't bloat if the network changes
 
 	Date:		24 November 2013
 	Author:		E. Scott Daniels
 
 	Mods:		19 Jan 2014 - Added support for host-any reservations.
-				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link. 
-				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint 
+				11 Feb 2014 - Support for queues on links rather than just blanket obligations per link.
+				21 Mar 2014 - Added noop support to allow main to hold off driving checkpoint
 							loading until after the driver here has been entered and thus we've built
 							the first graph.
 				03 Apr 2014 - Support for endpoints on the path.
@@ -29,22 +47,15 @@
 package managers
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
 	"strings"
-	//"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/tegu"
-	"forge.research.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu"
+	"github.com/att/tegu/gizmos"
 	
 )
 
@@ -102,7 +113,7 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 
 /*
 	Accepts a list (strig) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
-	the list based on spaces and adds each information segment to the queue map. 
+	the list based on spaces and adds each information segment to the queue map.
 
 	(Supports gen_queue_map and probably not useful for anything else)
 */
@@ -116,8 +127,8 @@ func qlist2map( qmap map[string]int, qlist *string ) {
 }
 
 /*
-	Traverses all known links and generates a switch queue map based on the queues set for 
-	the time indicated by the timestamp passed in (ts). 
+	Traverses all known links and generates a switch queue map based on the queues set for
+	the time indicated by the timestamp passed in (ts).
 
 	TODO:  this needs to return the map, not an array (fqmgr needs to change to accept the map)
 */
@@ -151,9 +162,9 @@ func (n *Network) gen_queue_map( ts int64 ) ( qmap []string, err error ) {
 }
 
 /*
-	Returns the ip address associated with the name. The name may indeed be 
-	an IP address which we'll look up in the hosts table to verify first. 
-	If it's not an ip, then we'll search the vm2ip table for it. 
+	Returns the ip address associated with the name. The name may indeed be
+	an IP address which we'll look up in the hosts table to verify first.
+	If it's not an ip, then we'll search the vm2ip table for it.
 */
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
@@ -188,7 +199,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 /*
 	Given two switch names see if we can find an existing link in the src->dest direction
 	if lnk is passed in, that is passed through to Mk_link() to cause lnk's obligation to be
-	'bound' to the link that is created here. 
+	'bound' to the link that is created here.
 
 	If the link between src-sw and dst-sw is not there, one is created and added to the map.
 
@@ -222,9 +233,9 @@ func (n *Network) find_link( ssw string, dsw string, capacity int64, lnk ...*giz
 	Returns the existing link, or makes a new one if this is the first.
 	New vlinks are stashed into the vlink hash.
 
-	We also create a virtual link on the endpoint between the switch and 
-	the host. In this situation there is only one port (p2 expected to be 
-	negative) and the id is thus just sw.port. 
+	We also create a virtual link on the endpoint between the switch and
+	the host. In this situation there is only one port (p2 expected to be
+	negative) and the id is thus just sw.port.
 */
 func (n Network) find_vlink( sw string, p1 int, p2 int ) ( l *gizmos.Link ) {
 	var(
@@ -281,13 +292,13 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 	}
 
 	for i := range links {							// parse all links returned from the controller
-		ssw = n.switches[links[i].Src_switch]; 
+		ssw = n.switches[links[i].Src_switch];
 		if ssw == nil {
 			ssw = gizmos.Mk_switch( &links[i].Src_switch )
 			n.switches[links[i].Src_switch] = ssw
 		}
 
-		dsw = n.switches[links[i].Dst_switch]; 
+		dsw = n.switches[links[i].Dst_switch];
 		if dsw == nil {
 			dsw = gizmos.Mk_switch( &links[i].Dst_switch )
 			n.switches[links[i].Dst_switch] = dsw
@@ -313,12 +324,12 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 	for i := range hlist {							// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
 			if len( hlist[i].Ipv4 ) > 0 {
-				ip4 = hlist[i].Ipv4[0]; 
+				ip4 = hlist[i].Ipv4[0];
 			} else {
 				ip4 = ""
 			}
 			if len( hlist[i].Ipv6 ) > 0 {
-				ip6 = hlist[i].Ipv6[0]; 
+				ip6 = hlist[i].Ipv6[0];
 			} else {
 				ip6 = ""
 			}
@@ -354,19 +365,19 @@ func build( old_net *Network, flhost *string, max_capacity int64 ) (n *Network) 
 // -------------------- path finding ------------------------------------------------------------------------------------------------------
 
 /*
-	Find a set of connected switches that can be used as a path beteeen 
-	hosts 1 and 2 (given by name; mac or ip).  Further, all links between from and the final switch must be able to 
+	Find a set of connected switches that can be used as a path beteeen
+	hosts 1 and 2 (given by name; mac or ip).  Further, all links between from and the final switch must be able to
 	support the additional capacity indicated by inc_cap during the time window between
 	commence and conclude (unix timestamps).
 
-	If the network is 'split' a host may appear to be attached to multiple switches; one with a real connection and 
+	If the network is 'split' a host may appear to be attached to multiple switches; one with a real connection and
 	the others are edge switches were we see an 'entry' point for the host from the portion of the network that we
-	cannot visualise.  We must attempt to find a path between h1 using all of it's attached switches, and thus the 
+	cannot visualise.  We must attempt to find a path between h1 using all of it's attached switches, and thus the
 	return is an array of paths rather than a single path.
 
 
 	h1nm and h2nm are likely going to be ip addresses as the main function translates any names that would have
-	come in from the requestor.  
+	come in from the requestor.
 
 	DEPRECATED: if the second host is "0.0.0.0", then we will return a path list containing every link we know about :)
 */
@@ -407,7 +418,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
 	pcount = 0
 
-	for {									// we'll break after we've looked at all of the connection points for h1 
+	for {									// we'll break after we've looked at all of the connection points for h1
 		if plidx >= len( path_list ) {
 			net_sheep.Baa( 0,  "internal error -- unable to find a path between hosts, loops in the graph?" )
 			return
@@ -457,7 +468,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 			tsw = ssw.Path_to( h2nm, commence, conclude, inc_cap )		// discover the shortest path to terminating switch that has enough bandwidth
 			if tsw != nil {
 				path = gizmos.Mk_path( h1, h2 )
-				path.Set_reverse( true )								// indicate that the path is saved in reverse order 
+				path.Set_reverse( true )								// indicate that the path is saved in reverse order
 				net_sheep.Baa( 2,  "path[%d]: found target on %s (links follow)", plidx, tsw.To_str( ) )
 				
 				lnk = n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1 )		// add endpoint -- a virtual link out from switch to h2
@@ -473,7 +484,7 @@ func (n *Network) find_path( h1nm *string, h2nm *string, commence int64, conclud
 
 					net_sheep.Baa( 2, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
 
-					if tsw.Prev == nil {													// last switch in the path, add endpoint 
+					if tsw.Prev == nil {													// last switch in the path, add endpoint
 						lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1 )		// endpoint is a virt link from switch to h1
 						lnk.Set_forward( tsw )												// endpoints have only a forward link
 						path.Add_endpoint( lnk )
@@ -572,7 +583,7 @@ func (n *Network) to_json( ) ( jstr string ) {
 // --------- public -------------------------------------------------------------------------------------------
 
 /*
-	to be executed as a go routine. 
+	to be executed as a go routine.
 	nch is the channel we are expected to listen on for api requests etc.
 	sdn_host is the host name and port number where the sdn controller is running.
 	(for now we assume the sdn-host is a floodlight host and invoke FL_ to build our graph)
@@ -628,7 +639,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		net_sheep.Baa( 0,  "default network refresh (30s) used because config value missing or invalid" )
 		refresh = 30
 	}
-	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network 
+	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network
 	
 	for {
 		select {					// assume we might have multiple channels in future
@@ -643,7 +654,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						p := req.Req_data.( *gizmos.Pledge )
 						h1, h2, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 						net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-						pcount, path_list = act_net.find_path( h1, h2, commence, expiry, bandw_in + bandw_out ); 
+						pcount, path_list = act_net.find_path( h1, h2, commence, expiry, bandw_in + bandw_out );
 
 						if pcount > 0 {
 							req.Response_data = path_list[:pcount]
@@ -666,7 +677,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 						if err == nil {
 							net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-							pcount, path_list = act_net.find_path( ip1, ip2, commence, expiry, bandw_in + bandw_out ); 
+							pcount, path_list = act_net.find_path( ip1, ip2, commence, expiry, bandw_in + bandw_out );
 
 							if pcount > 0 {
 								net_sheep.Baa( 1,  "network: acceptable path found:" )
@@ -705,7 +716,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							path_list[i].Inc_utilisation( commence, expiry, -(bandw_in + bandw_out) )
 						}
 
-					case REQ_VM2IP:								// a new vm name/vm ID to ip address map 
+					case REQ_VM2IP:								// a new vm name/vm ID to ip address map
 						if req.Req_data != nil {
 							act_net.vm2ip = req.Req_data.( map[string]*string )
 							act_net.ip2vm = act_net.build_ip2vm( )
@@ -718,7 +729,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						ts := req.Req_data.( int64 )			// time stamp for generation
 						req.Response_data, req.State = act_net.gen_queue_map( ts )
 						
-					case REQ_GETIP:								// given a VM name or ID return the IP if we know it. 
+					case REQ_GETIP:								// given a VM name or ID return the IP if we know it.
 						s := req.Req_data.( string )
 						req.Response_data, req.State = act_net.name2ip( &s )		// returns ip or nil
 
@@ -730,7 +741,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						net_sheep.Baa( 2, "rebuilding network graph" )
 						new_net := build( act_net, sdn_host, max_link_cap )
 						if new_net != nil {
-							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back 
+							vm2ip_map := act_net.vm2ip					// these don't come with the new graph; save old and add back
 							ip2vm_map := act_net.ip2vm
 							act_net = new_net
 							act_net.vm2ip = vm2ip_map
@@ -748,11 +759,11 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_HOSTLIST:							// json list of hosts with name, ip, switch id and port
 						req.Response_data = act_net.host_list( )
 
-					case REQ_LISTCONNS:							// for a given host spit out the switch(es) and port(s) 
+					case REQ_LISTCONNS:							// for a given host spit out the switch(es) and port(s)
 						hname := req.Req_data.( *string )
 						host := act_net.hosts[*hname]
 						if host != nil {
-							req.Response_data = host.Ports2json( ); 
+							req.Response_data = host.Ports2json( );
 						} else {
 							req.Response_data = nil			// assume failure
 							req.State = fmt.Errorf( "did not find host: %s", *hname )
@@ -771,7 +782,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								net_sheep.Baa( 2, "name found in vm2ip table translated to: %s, looking up  host", *hname )
 								host = act_net.hosts[*hname]
 								if host != nil {
-									req.Response_data = host.Ports2json( ); 
+									req.Response_data = host.Ports2json( );
 									req.State = nil
 								} else {
 									net_sheep.Baa( 2, "unable to find host entry for: %s", *hname )
@@ -784,7 +795,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 				}
 
 				net_sheep.Baa( 3, "processing request complete %d", req.Msg_type )
-				if req.Response_ch != nil {				// if response needed; send the request (updated) back 
+				if req.Response_ch != nil {				// if response needed; send the request (updated) back
 					req.Response_ch <- req
 				}
 

@@ -1,4 +1,22 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -21,7 +39,7 @@
 	Mods:		20 Jan 2014 : added support to allow a single VM in a reservation (VMname,any)
 							+nnn time now supported on reservation request.
 				10 Mar 2014 : converted to per-path queue setting (ingress/egress/middle queues)
-				13 Mar 2014 : Corrected 'bug' with setting pledges where both hosts connect to the 
+				13 Mar 2014 : Corrected 'bug' with setting pledges where both hosts connect to the
 							same switch. (bug was that it wasn't yet implemented.)
 				03 Apr 2014 : Added endpoint support for reservations and flowmods
 
@@ -31,24 +49,15 @@
 package main
 
 import (
-	//"bufio"
-	//"encoding/json"
 	"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
-	//"strings"
 	"sync"
-	//"time"
 
-	//"forge.research.att.com/gopkgs/clike"
-	//"forge.research.att.com/gopkgs/token"
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/tegu/managers"
-	"forge.research.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/managers"
+	"github.com/att/tegu/gizmos"
 )
 
 var (
@@ -73,8 +82,8 @@ func main() {
 		chkpt_file	*string
 
 		// various comm channels for threads
-		nw_ch	chan *ipc.Chmsg		// network graph manager 
-		rmgr_ch	chan *ipc.Chmsg		// reservation manager 
+		nw_ch	chan *ipc.Chmsg		// network graph manager
+		rmgr_ch	chan *ipc.Chmsg		// reservation manager
 		osif_ch chan *ipc.Chmsg		// openstack interface
 		fq_ch chan *ipc.Chmsg			// flow queue manager
 
@@ -119,7 +128,7 @@ func main() {
 
 	err := managers.Initialise( cfg_file, nw_ch, rmgr_ch, osif_ch, fq_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
-		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err ); 
+		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err );
 		os.Exit( 1 )
 	}
 
@@ -142,7 +151,7 @@ func main() {
 		}
 	}
 
-	go managers.Fq_mgr( fq_ch, fl_host ); 
+	go managers.Fq_mgr( fq_ch, fl_host );
 	go managers.Osif_mgr( osif_ch )										// openstack interface
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// finally, turn on the HTTP interface after _everything_ else is running.
 

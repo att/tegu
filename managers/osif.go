@@ -1,31 +1,49 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	osif -- openstack interface manager
 	Abstract:	Manages the interface to all defined openstack environments.
-				The main function here should be executed as a goroutine and will 
+				The main function here should be executed as a goroutine and will
 				set up various ticklers to drive things like the rebuilding of
 				the vm2ip map. Other components may send requests to the osif_mgr
-				as needed. 
+				as needed.
 
 				Maps built:
 					openstack, VMs (ID and name) to IP address
 
 				The trick with openstack is that there may be more than one project
 				(tenant) that we need to find VMs in.  We will depend on the config
-				file data (global) which should contain a list of each openstack 
+				file data (global) which should contain a list of each openstack
 				section defined in the config, and for each section we expect it
 				to contain:
 
 					url 	the url for the authorisation e.g. "http://135.197.225.209:5000/"
     				usr 	the user name that can be authorised with passwd
-    				passwd	the password 
+    				passwd	the password
     				project	the project/tenant name
 
 				For each section an openstack object is created and for each openstack
 				related translation that is needed all objects will be used to query
-				openstack.   At present there is no means to deal with information 
+				openstack.   At present there is no means to deal with information
 				that might be duplicated between openstack projects. (This might become
 				an issue if user defined networking selects the same address range(s).
 
@@ -37,19 +55,14 @@
 package managers
 
 import (
-	//"bufio"
-	//"errors"
 	"fmt"
-	//"io"
 	"os"
 	"strings"
-	//"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/gopkgs/ostack"
-	"forge.research.att.com/gopkgs/token"
-	//"forge.research.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/ostack"
+	"github.com/att/gopkgs/token"
 )
 
 //var (
@@ -113,7 +126,7 @@ func get_hosts( os_refs []*ostack.Ostack ) ( s *string, err error ) {
 	ts = ""
 	sep = ""
 	for k, v := range( cmap ) {
-		if v > 0 { 
+		if v > 0 {
 			ts += sep + k
 			sep = " "
 		}
@@ -127,8 +140,8 @@ func get_hosts( os_refs []*ostack.Ostack ) ( s *string, err error ) {
 
 
 /*
-	executed as a goroutine this loops waiting for messages from the tickler and takes 
-	action based on what is needed. 
+	executed as a goroutine this loops waiting for messages from the tickler and takes
+	action based on what is needed.
 */
 func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
@@ -145,7 +158,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 	if p := cfg_data["default"]["ostack_list"]; p != nil {
 		os_list = *p
-	} 
+	}
 	if os_list == " " || os_list == "" || os_list == "off" {
 		osif_sheep.Baa( 0, "WRN: osif disabled: no openstack list (ostack_list) defined in configuration file or setting is 'off'" )
 	} else {
@@ -163,7 +176,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 	}
 
-	tklr.Add_spot( 3, my_chan, REQ_VM2IP, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us every 180s 
+	tklr.Add_spot( 3, my_chan, REQ_VM2IP, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us every 180s
 	tklr.Add_spot( 180, my_chan, REQ_VM2IP, nil, ipc.FOREVER );  	
 
 	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
@@ -199,7 +212,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				msg.Response_data = nil
 				if msg.Response_ch != nil {
 					msg.State = fmt.Errorf( "osif: unknown request (%d)", msg.Msg_type )
-				} 
+				}
 		}
 
 		osif_sheep.Baa( 3, "processing request complete: %d", msg.Msg_type )

@@ -1,6 +1,6 @@
 
-Tegu is a middle layer that provides the outside world with an interface to the 
-skoogi enhanced, floodlight (or other) SDN controllers.  Tegu also, as a side effect
+Tegu is a reservation manager which provides the outside world with an interface to the 
+skoogi enhanced, floodlight (or other) SDN controller.  Tegu also, as a side effect
 provides a request interface that yields a complete network graph (as described
 by floodlight), and the ability to map an IP address, VM name or VM ID to a 
 switch port combination. 
@@ -73,28 +73,30 @@ The tegu source depends on a set of Go packages that were developed along with T
 but are general enough to warrent their not being included here.  They are all a part
 of the gopkgs/* package library.  To use them, clone the git project as described below. 
 They will be referenced as needed during the build process (unlike C, there is no need
-to build a library to link against).
+to build a library to link against). Now that tegu is in github, you should be able
+to 'go get github/att/gopkgs'  to pull them down.
 
 		
 Go Environment:
 The GOPATH variable must be set to the top level directory in your source 
 tree. Within that directory there should be src, bin, and pkg directories. 
-Under source there should be a codecloud.web.att.com directory which will 
-hold all of your Go related repos that are checked out of code-cloud. 
+Under source there should be a github.com directory which will hold all of your 
+Go related repos that are checked out of github.
 
 For example:
 	export GOPATH=$HOME/godev
 	cd $GOPATH
-	mkdir codecloud.web.att.com
-	cd codecloud.web.att.com
+	mkdir github.com
+	cd github.com
 
 	# fork a copy of the tegu and gopkgs first!!!
+
 	# replace XXXXX with your user id, then clone your forks 
-	git clone https://XXXXXX@codecloud.web.att.com/scm/~XXXXXX/tegu.git
-	git clone https://XXXXXX@codecloud.web.att.com/scm/~XXXXXX/gopkgs.git
+	git clone https://XXXXXX@github.com/scm/~XXXXXX/tegu.git
+	git clone https://XXXXXX@github.com/scm/~XXXXXX/gopkgs.git
 
 	cd tegu
-	git checkout lite			# ready to build in lite branch
+	git checkout master			# ready to build in lite branch
 
 Build tegu by:
 	1) cd main

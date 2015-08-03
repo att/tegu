@@ -1,16 +1,34 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	http_api
-	Abstract:	This provides an api interface based on http (shudders) RESTish. 
-				The main method here is expected to be driven as a go routine from 
+	Abstract:	This provides an api interface based on http (shudders) RESTish.
+				The main method here is expected to be driven as a go routine from
 				the main tegu function.
 
 				The main work functions (parse_get, parse_post, parse_delete) all generate
 				json formatted data to the output device (we assume back to the requesting
-				browser/user-agent).  The output should be an array (reqstate) with one "object" describing 
-				the result of each request, and a final object (endstate) describing the overall state. 
+				browser/user-agent).  The output should be an array (reqstate) with one "object" describing
+				the result of each request, and a final object (endstate) describing the overall state.
 
 	Date:		20 November 2013 (broken out of initial test on 2 Dec)
 	Author:		E. Scott Daniels
@@ -20,22 +38,18 @@
 package managers
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
 	"io/ioutil"
-	//"html"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/token"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/token"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/gizmos"
 )
 
 /* ------------------------------------------------------------------------------------------------------ */
@@ -46,11 +60,11 @@ import (
 func mk_resname( ) ( string ) {
 	r := res_nmseed
 	res_nmseed++
-	return fmt.Sprintf( "res%x_%05d", pid, r ); 
+	return fmt.Sprintf( "res%x_%05d", pid, r );
 }
 
 
-// ------------------------------------------------------------------------------------------------------ 
+// ------------------------------------------------------------------------------------------------------
 /*
 	pull the data from the request (the -d stuff from churl -d)
 */
@@ -177,7 +191,7 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 			case "listconns":								// generate json describing where the named host is attached (switch/port)
 				if ntokens < 2 {
 					nerrors++
-					reason = fmt.Sprintf( "incorrect number of parameters supplied (%d) 1 expected: usage: attached2 hostname", ntokens-1 ); 
+					reason = fmt.Sprintf( "incorrect number of parameters supplied (%d) 1 expected: usage: attached2 hostname", ntokens-1 );
 				} else {
 					req = ipc.Mk_chmsg( )
 					req.Send_req( nw_ch, my_ch, REQ_LISTCONNS, &tokens[1], nil )
@@ -196,7 +210,7 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 			case "reserve":
 				if ntokens < 4 || ntokens > 5  {
 					nerrors++
-					reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1> [<host2>]; received: %s", ntokens-1, recs[i] ); 
+					reason = fmt.Sprintf( "incorrect number of parameters supplied (%d): usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> [<start>-]<end-time> <host1> [<host2>]; received: %s", ntokens-1, recs[i] );
 				} else {
 
 					if strings.Index( tokens[1], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
@@ -261,7 +275,7 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 				sep := ""						// local scope not to trash the global var
 				for i := range m {
 					jreason += fmt.Sprintf( "%s%q", sep, m[i] )
-					sep = "," 
+					sep = ","
 				}
 				jreason += " ] }"
 				reason = "active queues"
@@ -330,7 +344,7 @@ func parse_post( out http.ResponseWriter, recs []string ) (state string, msg str
 
 	if nerrors > 0 {
 		state = "ERROR"		// must set on the off chance that last request was ok
-	} 
+	}
 
 	if req_count <= 0 {
 		msg = fmt.Sprintf( "no requests found in input" )
@@ -391,7 +405,7 @@ func parse_delete( out http.ResponseWriter, recs []string ) (state string, msg s
 			case "reservation":									// expect:  reservation name(id) [cookie]
 				if ntokens < 2 || ntokens > 3  {
 					nerrors++
-					comment = fmt.Sprintf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received '%s'", recs[i] ); 
+					comment = fmt.Sprintf( "bad delete reservation command: wanted 'reservation res-ID [cookie]' received '%s'", recs[i] );
 				} else {
 					del_data = make( []*string, 2, 2 )			// deletee data is the reservation name and the cookie if supplied
 					del_data[0] = &tokens[1]
@@ -409,7 +423,7 @@ func parse_delete( out http.ResponseWriter, recs []string ) (state string, msg s
 					//if req.State == nil {									// no error, response data contains the pledge
 					//	res = req.Response_data.( *gizmos.Pledge )
 						req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view
-						req = <- my_ch										// wait for delete response 
+						req = <- my_ch										// wait for delete response
 
 						if req.State == nil {								// no error deleting in res mgr
 							req.Send_req( nw_ch, my_ch, REQ_DEL, res, nil )		// delete from the network point of view
@@ -453,7 +467,7 @@ func parse_delete( out http.ResponseWriter, recs []string ) (state string, msg s
 
 	if nerrors > 0 {
 		state = "ERROR"		// must set on the off chance that last request was ok
-	} 
+	}
 
 	if req_count <= 0 {
 		msg = fmt.Sprintf( "no requests found in input" )
@@ -474,16 +488,16 @@ func parse_get( out http.ResponseWriter, recs []string ) (state string, msg stri
 
 /*
 	Deal with input from the other side; this is invoked directly by the http listener.
-	Because we are driven as a callback, and cannot controll the parameters passed in, we 
+	Because we are driven as a callback, and cannot controll the parameters passed in, we
 	must (sadly) rely on globals for some information; sigh. (There might be a way to deal
-	with this using a closure, but I'm not taking the time to go down that path until 
+	with this using a closure, but I'm not taking the time to go down that path until
 	other more important things are implemented.)
 
 	This function splits input, on either newlines or semicolons, into records. The array
 	of records is then passed to the appropriate parse function based on the http method
-	(PUT, GET, etc) that was used by the user-agent. 
+	(PUT, GET, etc) that was used by the user-agent.
 
-	Output to the client process is a bunch of {...} "objects", one per record, 
+	Output to the client process is a bunch of {...} "objects", one per record,
 	plus a final overall status; all are collected in square brackets and thus
 	should be parsable as json.
 */
@@ -542,7 +556,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	}
 	http_sheep.Baa( 1, "http interface running" )
 
-	http.HandleFunc( "/tegu/api", deal_with )				// define callback 
+	http.HandleFunc( "/tegu/api", deal_with )				// define callback
 	err := http.ListenAndServe( ":" + *api_port, nil )		// drive the bus
 	
 	http_sheep.Baa( 0, "http listener is done" )

@@ -1,4 +1,22 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -7,30 +25,20 @@
 				the functions that implement path-finding. Dijkstra's algorithm is implemented
 				(see Path_to) to determine a path between two hosts which we assume are connected
 				to one or two switches.  The path finding algorithm allows for disjoint networks
-				which occurs when one or more switches are not managed by the controller(s) used 
+				which occurs when one or more switches are not managed by the controller(s) used
 				to create the network graph.
 	Date:		24 November 2013
 	Author:		E. Scott Daniels
 
-	Mods:		10 Mar 2014 - We allow a target to be either a switch or host when looking for a path. 
+	Mods:		10 Mar 2014 - We allow a target to be either a switch or host when looking for a path.
 */
 
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
-	//"strings"
-	//"time"
 
-	//"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/tegu"
+	"github.com/att/tegu"
 )
 
 // --------------------------------------------------------------------------------------
@@ -56,7 +64,7 @@ type Switch struct {
 	Constructor.  Generates a switch object with the given id.
 */
 func Mk_switch( id *string ) ( s *Switch ) {
-	s = &Switch { 
+	s = &Switch {
 		id: id,
 		lidx: 0,
 	}
@@ -80,8 +88,8 @@ func (s *Switch) Nuke() {
 	s.hport = nil
 }
 
-/* 
-	add a link to the switch 
+/*
+	add a link to the switch
 */
 func (s *Switch) Add_link( link *Link ) {
 	var (
@@ -97,7 +105,7 @@ func (s *Switch) Add_link( link *Link ) {
 		}
 		
 		s.links = new_links
-	} 
+	}
 
 	s.links[s.lidx] = link
 	s.lidx++
@@ -141,15 +149,15 @@ func (s *Switch) Get_link( i int ) ( l *Link ) {
 // -------------- path finding -------------------------------------------------------------
 
 /*
-	probe all of the neighbours of the switch to see if they are attached to 
+	probe all of the neighbours of the switch to see if they are attached to
 	the target host. If a neighbour has the target, we set the reverse path
-	in the neighbour and return it indicating success.  If a neighbour does 
+	in the neighbour and return it indicating success.  If a neighbour does
 	not have the target, we update the neighbour's cost and reverse path _ONLY_
-	if the cost through the current switch is lower than the cost recorded 
+	if the cost through the current switch is lower than the cost recorded
 	at the neighbour. If no neighbour links to the target, we return null.
 
 	We will not probe a neighbour if the link to it cannot accept the additional
-	capacity. 
+	capacity.
 
 	The target may be the name of the host we're looking for, or the ID of the
 	endpoint switch to support finding a path to a "gateway".
@@ -183,7 +191,7 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 				}
 
 			}
-		} 
+		}
 	}
 
 	return
@@ -191,10 +199,10 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 
 /*
 	Implements Dijkstra's algorithm for finding the shortest path in the network
-	starting from the switch given and stoping when it finds a switch that has 
-	the target host attached.  At the moment, link costs are all the same, so 
+	starting from the switch given and stoping when it finds a switch that has
+	the target host attached.  At the moment, link costs are all the same, so
 	there is no ordering of queued nodes such that the lowest cost is always
-	searched next.  A path may exist, but not be available if the usage on a 
+	searched next.  A path may exist, but not be available if the usage on a
 	link cannot support the additional capacity that is requested via inc_cap.
 		
 */
@@ -218,8 +226,8 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64 ) (f
 	for ; push != pop; {		// if we run out of things in the fifo we're done and found no path
 		sw = fifo[pop]
 		pop++
-		if pop > len( fifo ) { 
-			pop = 0; 
+		if pop > len( fifo ) {
+			pop = 0;
 		}
 
 		found = sw.probe_neighbours( target, commence, conclude, inc_cap )
@@ -233,8 +241,8 @@ func (s *Switch) Path_to( target *string, commence, conclude, inc_cap int64 ) (f
 					if sw.links[i].forward.Flags & tegu.SWFL_VISITED == 0 {
 						fifo[push] = sw.links[i].forward
 						push++
-						if push > len( fifo ) { 
-							push = 0; 
+						if push > len( fifo ) {
+							push = 0;
 						}
 					}
 				}

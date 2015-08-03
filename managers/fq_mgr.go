@@ -1,10 +1,28 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
-	Mnemonic:	fq_mgr 
-	Abstract:	flow/queue manager. This module contains the goroutine that 
-				listens on the fq_ch for messages that cause flow mods to be 
+	Mnemonic:	fq_mgr
+	Abstract:	flow/queue manager. This module contains the goroutine that
+				listens on the fq_ch for messages that cause flow mods to be
 				sent (skoogi reservations) and OVS queue commands to be generated.
 
 	Config:		These variables are referenced if in the config file (defaults in parens):
@@ -22,20 +40,16 @@
 package managers
 
 import (
-	//"bufio"
-	//"errors"
 	"fmt"
-	//"io"
 	"math/rand"
 	"os"
 	"os/exec"
-	//"strings"
 	"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/gizmos"
 )
 
 // --- Private --------------------------------------------------------------------------
@@ -45,14 +59,14 @@ import (
 	We depend on an external script to actually set the queues so this is pretty simple.
 
 	hlist is the space separated list of hosts that the script should adjust queues on
-	muc is the max utilisation commitment for any link in the network. 
+	muc is the max utilisation commitment for any link in the network.
 */
 
 /*
 	Writes the list of queue adjustment information (we assume from net-mgr) to a randomly named
 	file in /tmp. Then we invoke the command passed in via cmd_base giving it the file name
-	as the only parameter.  The command is expected to delete the file when finished with 
-	it.  See netmgr for a description of the items in the list. 
+	as the only parameter.  The command is expected to delete the file when finished with
+	it.  See netmgr for a description of the items in the list.
 */
 func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	var (
@@ -99,8 +113,8 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	new -- works with the new skoogi that drives agents
 	Builds a single buffer with the queue adjustent information (assume from netmgr) int a single
 	buffer and then send that buffer off to skoogi.  Skoogi now manages queues and if not directly
-	with the switches, then passes this data along to the agents.  We build an array with each 
-	element containing a queue adjustment string and then pass that into the floodlight/skoogi 
+	with the switches, then passes this data along to the agents.  We build an array with each
+	element containing a queue adjustment string and then pass that into the floodlight/skoogi
 	interface for proper json bundling and transmission to skoogi.
 */
 func new_adjust_queues( uri *string, qlist []string ) {
@@ -121,8 +135,8 @@ func new_adjust_queues( uri *string, qlist []string ) {
 }
 
 /*
-	send a request to openstack interface for a host list. We will _not_ wait on it 
-	and will handle the response in the main loop. 
+	send a request to openstack interface for a host list. We will _not_ wait on it
+	and will handle the response in the main loop.
 */
 func req_hosts(  rch chan *ipc.Chmsg ) {
 	fq_sheep.Baa( 1, "requesting host list from osif" )
@@ -136,8 +150,8 @@ func req_hosts(  rch chan *ipc.Chmsg ) {
 
 
 /*
-	the main go routine to act on messages sent to our channel. We expect messages from the 
-	reservation manager, and from a tickler that causes us to evaluate the need to resize 
+	the main go routine to act on messages sent to our channel. We expect messages from the
+	reservation manager, and from a tickler that causes us to evaluate the need to resize
 	ovs queues.
 
 */
@@ -191,7 +205,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	
 		if p := cfg_data["fqmgr"]["switch_hosts"]; p != nil {
 			switch_hosts = p;
-		} 
+		}
 	
 		if p := cfg_data["fqmgr"]["verbose"]; p != nil {
 			fq_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
@@ -212,11 +226,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 	if *sdn_host != "" {
 		uri_prefix = fmt.Sprintf( "http://%s", *sdn_host )
-	} 
+	}
 
 	fq_sheep.Baa( 1, "flowmod-queue manager is running, sdn host: %s", *sdn_host )
 	for {
-		msg = <- my_chan					// wait for next message 
+		msg = <- my_chan					// wait for next message
 		msg.State = nil					// default to all OK
 		
 		fq_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
@@ -229,16 +243,16 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 
 					if msg.State == nil {				// no error, we are silent
-						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
+						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",
 									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 						msg.Response_ch = nil
 					} else {
 						// do we need to suss out the id and mark it failed, or set a timer on it,  so as not to flood reqmgr with errors?
-						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
+						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",
 									uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 					}
 				} else {
-					fq_sheep.Baa( 2,  "proactive reservation not sent, no sdn-host defined: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",  
+					fq_sheep.Baa( 2,  "proactive reservation not sent, no sdn-host defined: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d",
 						uri_prefix, data[FQ_IP1].(string), data[FQ_IP2].(string), data[FQ_EXPIRY].(int64), spq.Queuenum, spq.Switch, spq.Port )
 					msg.Response_ch = nil
 				}
@@ -254,7 +268,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 			case REQ_SETQUEUES:								// request from reservation manager which indicates something changed and queues need to be reset
 				qlist := msg.Req_data.( []interface{} )[0].( []string )
-				adjust_queues( qlist, ssq_cmd, host_list ) 
+				adjust_queues( qlist, ssq_cmd, host_list )
 				//new_adjust_queues( &uri_prefix, qlist )
 
 			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from openstack as a response, be careful!
@@ -278,7 +292,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				msg.Response_data = nil
 				if msg.Response_ch != nil {
 					msg.State = fmt.Errorf( "unknown request (%d)", msg.Msg_type )
-				} 
+				}
 		}
 
 		fq_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )

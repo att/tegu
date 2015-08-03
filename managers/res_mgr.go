@@ -1,9 +1,27 @@
-// vi: sw=4 ts=4:
+//vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	res_mgr
-	Abstract:	Manages the inventory of reservations. 
+	Abstract:	Manages the inventory of reservations.
 				We expect it to be executed as a goroutine and requests sent via a channel.
 	Date:		02 December 2013
 	Author:		E. Scott Daniels
@@ -14,9 +32,9 @@
 
 
 	TODO:		need a way to detect when skoogie/controller has been reset meaning that all
-				pushed reservations need to be pushed again. 
+				pushed reservations need to be pushed again.
 
-				need to check to ensure that a VM's IP address has not changed; repush 
+				need to check to ensure that a VM's IP address has not changed; repush
 				reservation if it has and cancel the previous one (when skoogi allows drops)
 
 	Mods:		03 Apr 2014 (sd) : Added endpoint flowmod support.
@@ -26,18 +44,16 @@ package managers
 
 import (
 	"bufio"
-	//"errors"
 	"fmt"
 	"io"
 	"os"
-	//"strings"
 	"time"
 
-	"forge.research.att.com/gopkgs/bleater"
-	"forge.research.att.com/gopkgs/clike"
-	"forge.research.att.com/gopkgs/chkpt"
-	"forge.research.att.com/gopkgs/ipc"
-	"forge.research.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/chkpt"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/gizmos"
 )
 
 //var (  NO GLOBALS HERE; use globals.go )
@@ -95,11 +111,11 @@ func name2ip( name *string ) ( ip *string ) {
 }
 
 /*
-	Runs the inventory looking for pledges that have not yet been pushed to skoogi and will 
+	Runs the inventory looking for pledges that have not yet been pushed to skoogi and will
 	become active soon.  When it finds one, it sends it to skoogi and sets the pushed flag
-	in the pledge. 
+	in the pledge.
 
-	This is the original push mechanism, kept to be backwards compatable with old skoogi if
+	This is the original push mechanism, kept to be backwards compatible with old skoogi if
 	it is needed.
 */
 func (i *Inventory) orig_push_reservations( ) {
@@ -149,9 +165,9 @@ func (i *Inventory) orig_push_reservations( ) {
 						rm_sheep.Baa( 0, "WRN: res_mgr/push_reg: unable to send reservation to skoogi: %s/%s %s/%s %d", *ip1, *h1, *ip2, *h2, expiry )
 					} else {
 						rm_sheep.Baa( 1, "res_mgr/push_reg: sent reservation to skoogi: %s %s/%s %s/%s %d", rname, *ip1, *h1, *ip2, *h2, expiry )
-						p.Set_pushed()				// safe to mark the pledge as having been pushed. 
+						p.Set_pushed()				// safe to mark the pledge as having been pushed.
 					}
-				} 
+				}
 			} else {
 				pend_count++
 			}
@@ -181,7 +197,7 @@ func (i *Inventory) failed_push( msg *ipc.Chmsg ) {
 }
 
 /*
-	Checks to see if any reservations expired in the recent past (seconds). Returns true if there were. 
+	Checks to see if any reservations expired in the recent past (seconds). Returns true if there were.
 */
 func (i *Inventory) any_concluded( past int64 ) ( bool ) {
 
@@ -196,7 +212,7 @@ func (i *Inventory) any_concluded( past int64 ) ( bool ) {
 
 /*
 	Checks to see if any reservations became active between (now - past) and the current time, or will become
-	active between now and now + future seconds. (Past and future are number of seconds on either side of 
+	active between now and now + future seconds. (Past and future are number of seconds on either side of
 	the current time to check and are NOT timestamps.)
 */
 func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
@@ -211,16 +227,16 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 }
 
 /*
-	Runs the list of reservations in the cache and pushes out any that are about to become active (in the 
-	next 15 seconds).  We push the reservation request to fq_manager which does the necessary formatting 
-	and communication with skoogi.  With the new method of managing queues per reservation on ingress/egress 
+	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
+	next 15 seconds).  We push the reservation request to fq_manager which does the necessary formatting
+	and communication with skoogi.  With the new method of managing queues per reservation on ingress/egress
 	hosts, we now send to fq_mgr:
 		h1, h2 -- hosts
 		expiry
 		switch/port/queue
 	
 	for each 'link' in the forward direction, and then we reverse the path and send requests to fq_mgr
-	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but 
+	for each 'link' in the backwards direction.  Errors are returned to res_mgr via channel, but
 	asycnh; we do not wait for responses to each message generated here.
 
 	Returns the number of reservations that were pushed.
@@ -329,8 +345,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 						}
 					}
 
-					p.Set_pushed()				// safe to mark the pledge as having been pushed. 
-				} 
+					p.Set_pushed()				// safe to mark the pledge as having been pushed.
+				}
 			} else {
 				pend_count++
 			}
@@ -347,7 +363,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg ) ( npushed int ) {
 }
 
 /*
-	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.  
+	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.
 */
 func (i *Inventory) write_chkpt( ) {
 
@@ -362,7 +378,7 @@ func (i *Inventory) write_chkpt( ) {
 		if s != "expired" {
 			fmt.Fprintf( i.chkpt, "%s\n", s ); 		// we'll check the overall error state on close
 		}
-	} 
+	}
 
 	ckpt_name, err := i.chkpt.Close( )
 	if err != nil {
@@ -373,9 +389,9 @@ func (i *Inventory) write_chkpt( ) {
 }
 
 /*
-	Opens the filename passed in and reads the reservation data from it. The assumption is that records in 
-	the file were saved via the write_chkpt() function and are json pledges.  We will drop any that 
-	expired while 'sitting' in the file. 
+	Opens the filename passed in and reads the reservation data from it. The assumption is that records in
+	the file were saved via the write_chkpt() function and are json pledges.  We will drop any that
+	expired while 'sitting' in the file.
 */
 func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	var (
@@ -435,7 +451,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 */
 func Mk_inventory( ) (inv *Inventory) {
 
-	inv = &Inventory { } 
+	inv = &Inventory { }
 
 	inv.cache = make( map[string]*gizmos.Pledge, 2048 )		// initial size is not a limit
 
@@ -461,7 +477,7 @@ func (inv *Inventory) Add_res( p *gizmos.Pledge ) (state error) {
 
 /*
 	Return the reservation that matches the name passed in provided that the cookie supplied
-	matches the cookie on the reservation as well.  The cookie may be either the cookie that 
+	matches the cookie on the reservation as well.  The cookie may be either the cookie that
 	the user supplied when the reservation was created, or may be the 'super cookie' admin
 	'root' as you will, which allows access to all reservations.
 */
@@ -486,7 +502,7 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 }
 
 /*
-	Looks for the named reservation and deletes it if found. The cookie must be either the 
+	Looks for the named reservation and deletes it if found. The cookie must be either the
 	supper cookie, or the cookie that the user supplied when the reservation was created.
 */
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
@@ -543,7 +559,7 @@ rm_sheep.Baa( 1, "delete all called attempt to delete: %s", *pname )
 //---- res-mgr main goroutine -------------------------------------------------------------------------------
 
 /*
-	Executes as a goroutine to drive the resevration manager portion of tegu. 
+	Executes as a goroutine to drive the resevration manager portion of tegu.
 */
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
@@ -639,7 +655,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				rm_sheep.Baa( 1, "received queue map from network manager" )
 				msg.Response_ch = nil					// immediately disable to prevent loop
 				fq_data := make( []interface{}, 1 )
-				fq_data[FQ_QLIST] = msg.Response_data 
+				fq_data[FQ_QLIST] = msg.Response_data
 				tmsg := ipc.Mk_chmsg( )
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 				
