@@ -1,7 +1,25 @@
 #!/usr/bin/env python
-# encoding: utf-8
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
 '''
-toponet -- generate physical network topology from LLDP enabled 
+toponet -- generate physical network topology from LLDP enabled
            Cisco/Arista switches
 
 
@@ -50,7 +68,7 @@ class Link:
         self.capacity = DEF_HOSTCAPACITY
         self.bidi = True
         self.mlag = mlag
-        
+
     def __str__(self):
         output = '{\n'
         output += '\t"src-switch": "' + self.src + '",\n'
@@ -65,40 +83,40 @@ class Link:
             output += ',\n\t"mlag": "' + self.mlag + '"'
         output += '\n}'
         return output
-    
-        
+
+
 class NetDataSource:
     def hasElement(self, name):
         return False
-    
+
     def getElementList(self):
         return []
 
     def getElementLinks(self, name):
         return []
-    
+
 
 def normalizePortNum(port):
     ''' Converts portnumbers from either Arista or Cisco formats to an integer
         number. Arista uses single integer portnumbers, while Cisco uses
         the cardnum/ifnum format, e.g., 2/1
     '''
-    portmatch = re.search('(\d+)/(\d+)', port)  
+    portmatch = re.search('(\d+)/(\d+)', port)
     if portmatch:
         return portmatch.group(1)+portmatch.group(2)
     else:
         return port
-    
+
 def normalizeHostname(hostname):
     ''' Normalize hostnames. Currently, tegu requires only hostnames
-        because that is what Openstack host-list returns. Strip the 
+        because that is what Openstack host-list returns. Strip the
         domainname if FQDN is read in.
-    ''' 
+    '''
     return hostname.split(".")[0]
 
 def shortName(name):
     return name.split('@')[0].split('.')[0]
-    
+
 
 def parseLldpCtl(file, hosts, thisHost=None, ifacelist=set()):
     ''' Parse output from the lldpctl command executed on a single host
@@ -116,13 +134,13 @@ def parseLldpCtl(file, hosts, thisHost=None, ifacelist=set()):
     current_link = None
     current_host = ""
     current_iface = ""
-        
+
     while True:
-        line = file.readline() 
-        
+        line = file.readline()
+
         if not line:
             break
-        
+
         new_iface_match = iface_pat.search(line)
         if new_iface_match:
             iface = new_iface_match.groupdict()['iface']
@@ -135,7 +153,7 @@ def parseLldpCtl(file, hosts, thisHost=None, ifacelist=set()):
                 current_iface = iface
                 current_link = Link(current_host + '@' + current_iface, "-128")
             else: # New link found, but we don't need it
-                current_link = None             
+                current_link = None
         elif current_link and re.search('-----------', line):
             if current_link.src == "" or current_link.dst == "" or \
                 current_link.srcPort == None or current_link.dstPort == None:
@@ -157,36 +175,36 @@ class LldpctlFileLoader(NetDataSource):
        command output from all the hosts in the system. Each line of the
        lldpctl output is assumed to be preceeded by the hostname.
        E.g., myhost.int.cci.att.com: Interface Eth2'''
-       
+
     def __init__(self, lldpFilename):
         self.hosts = {}
         self.ifaces = set()
         self.lldpFilename = lldpFilename
-        
+
     def getPortNum(self, port):
-        portmatch = re.search('(\d+)/(\d+)', port)  
+        portmatch = re.search('(\d+)/(\d+)', port)
         if portmatch:
             return portmatch.group(1)+portmatch.group(2)
         else:
             return port
-        
+
     def load(self):
         lldp_file = open(self.lldpFilename)
         parseLldpCtl(lldp_file, self.hosts, ifacelist=self.ifaces)
-                    
+
     def addIface(self, ifname):
         self.ifaces.add(ifname)
-            
+
     def hasElement(self, name):
         return (name in self.hosts)
-    
+
     def getElementList(self):
         return self.hosts.keys()
-    
+
     def getElementLinks(self, name):
         return self.hosts[name].values()
-            
-    
+
+
 class SwitchFileLoader(NetDataSource):
     '''Loads interface data from a file that contains a dump of CLI command
        output from Arista and Cisco switches. Following assumptions made:
@@ -197,61 +215,61 @@ class SwitchFileLoader(NetDataSource):
           ii)  show port-channel sum
           iii) show lldp neigh
        d) The commands can be executed in any order'''
-         
+
     speedmap = {"1G": "1000000000", "10G":"10000000000",
                 "20G":"20000000000", "40G":"40000000000"}
-        
+
     def __init__(self, switchFilename):
         self.switches = {}
         self.switchFilename = switchFilename
-        
+
 
     def parseCisco(self, name, switch):
-        
+
         links = re.findall('\n([^\s]+).*Eth(\d+(?:/\d+)?)\s+\d+\s+\S+' + \
                            '\s+Ethernet(\d+(?:/\d+)?)', switch['lldp'])
 
         #print(name + "(Cisco)")
         for linkmatch in links:
             new_link = Link(src=name, srcPort=normalizePortNum(linkmatch[1]),
-                            dst=normalizeHostname(linkmatch[0]), 
+                            dst=normalizeHostname(linkmatch[0]),
                             dstPort=normalizePortNum(linkmatch[2]))
             #print("\t"+normalizeHostname(linkmatch[0]))
-            # Read link full duplex and speed    
-            speedmatch = re.search("Eth"+linkmatch[1]+"\s+.+connected\s+[^\s]+" + 
+            # Read link full duplex and speed
+            speedmatch = re.search("Eth"+linkmatch[1]+"\s+.+connected\s+[^\s]+" +
                                    "\s+([^\s]+)\s+([^\s]+)\s+", switch["ifaces"])
-            
+
             if speedmatch and (speedmatch.group(2) in self.speedmap.keys()):
                 new_link.bidi = (speedmatch.group(1) == "full")
                 new_link.capacity = self.speedmap[speedmatch.group(2)]
             else:
                 logging.warning("Couldn't find link " + str(new_link))
-                
+
             if  new_link.capacity == None:
                 new_link.capacity = DEF_SWITCHCAPACITY
-            
+
             # Read link mlag
             mlagmatch = re.search("\n\d+\s+([^(]+)\(.+LACP|NONE.+Eth" + \
                                   linkmatch[1], switch['portchannel'])
             if mlagmatch:
                 new_link.mlag = name + "_" + mlagmatch.group(1)
-            switch_links = switch.setdefault('links', {}) 
+            switch_links = switch.setdefault('links', {})
             switch_links[new_link.srcPort] = new_link
-          
-        
+
+
     def parseArista(self, name, switch):
-        
-        links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+).*Ethernet(\d+(?:/\d+)?)', 
+
+        links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+).*Ethernet(\d+(?:/\d+)?)',
                            switch['lldp'])
 
         #print(name + " (Arista)")
         for linkmatch in links:
             new_link = Link(src=name, srcPort=normalizePortNum(linkmatch[0]),
-                            dst=normalizeHostname(linkmatch[1]), 
+                            dst=normalizeHostname(linkmatch[1]),
                             dstPort=normalizePortNum(linkmatch[2]))
             #print("\t"+normalizeHostname(linkmatch[1]))
-                
-            # Read link full duplex and speed    
+
+            # Read link full duplex and speed
             speedmatch = re.search("Et"+linkmatch[0]+"\s+.+connected\s+.*" +
                                   "(half|full)\s+([^\s]+)\s+", switch["ifaces"])
 
@@ -264,18 +282,18 @@ class SwitchFileLoader(NetDataSource):
 
             if  new_link.capacity == None:
                 new_link.capacity = DEF_SWITCHCAPACITY
-            
+
             # Read link mlag
-            mlagmatch = re.search("\n\s+([^(\n]+)\(.+LACP.+Et" + linkmatch[0], 
+            mlagmatch = re.search("\n\s+([^(\n]+)\(.+LACP.+Et" + linkmatch[0],
                                   switch['portchannel'])
             if mlagmatch:
                 new_link.mlag = name + "_" + mlagmatch.group(1)
-            switch_links = switch.setdefault('links', {}) 
+            switch_links = switch.setdefault('links', {})
             switch_links[new_link.srcPort] = new_link
-            
+
 
     def loadChunk(self, the_file, end_tag):
-        chunk = ""                
+        chunk = ""
         done = False
         while not done:
             file_pos = the_file.tell()
@@ -287,7 +305,7 @@ class SwitchFileLoader(NetDataSource):
             else:
                 chunk = chunk + line
         return chunk
-    
+
     def loadSection(self, start_tag, key, the_file, line):
         match = re.search("(^[^#]+)#\s*"+start_tag, line)
         if (match):
@@ -296,10 +314,10 @@ class SwitchFileLoader(NetDataSource):
             switch[key] = self.loadChunk(the_file, '^'+src_switch+'#')
             return normalizeHostname(src_switch)
         return None
-        
+
     def load(self):
         switch_file = open(self.switchFilename)
-        
+
         # Parse the files
         while True:
             line = switch_file.readline()
@@ -309,39 +327,39 @@ class SwitchFileLoader(NetDataSource):
 
             if self.loadSection('show interface status', 'ifaces', switch_file, line):
                 continue
-            
+
             if self.loadSection('show port-channel sum', 'portchannel', switch_file, line):
-                continue           
-            
-            src_switch = self.loadSection('show lldp neigh', 'lldp', switch_file, line)            
+                continue
+
+            src_switch = self.loadSection('show lldp neigh', 'lldp', switch_file, line)
             if src_switch:
                 #print src_switch
                 if re.search('Capability codes:', self.switches[src_switch]['lldp']):
                     self.switches[src_switch]['type'] = 'Cisco'
                 else:
                     self.switches[src_switch]['type'] = 'Arista'
-        
-        # Finished parsing file, now populate links    
+
+        # Finished parsing file, now populate links
         for name, switch in self.switches.iteritems():
             if switch['type'] == 'Cisco':
                 self.parseCisco(name, switch)
             else:
                 self.parseArista(name, switch)
 
-            
+
     def hasElement(self, name):
         return (name in self.switches)
-    
+
     def getElementList(self):
         return self.switches.keys()
-    
+
     def getElementLinks(self, name):
         return self.switches[name]['links'].values()
 
-    
+
 class OpenStackHostLoader(NetDataSource):
     VERSION = 2
-    
+
     def __init__(self, osUrl, osUname, osPwd, osTenant,
                  hUname, hPwd, hKeyFile=""):
         self.osUrl = osUrl
@@ -353,51 +371,51 @@ class OpenStackHostLoader(NetDataSource):
         self.hKeyFile = hKeyFile
         self.iFaces = set()
         self.hosts = {}
-        
+
     def addIface(self, ifname):
         self.ifaces.add(ifname)
 
     def load(self):
-        nova = Client(self.VERSION, self.osUname, 
+        nova = Client(self.VERSION, self.osUname,
                       self.osPwd, self.osTenant, self.osUrl)
         self.hosts = nova.hosts.list()
         pass
-        
+
     def hasElement(self, name):
         return (name in self.hosts)
-    
+
     def getElementList(self):
         return self.hosts
-    
+
     def getElementLinks(self, name):
         if not self.hasElement(name):
             return []
-        
+
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(name, username=self.hUname, 
+        ssh.connect(name, username=self.hUname,
                     password=self.hPwd, key_filename=self.hKeyFile)
         stdin, stdout, stderr = ssh.exec_command("sudo lldpctl")
         stdin.write(self.hPwd)  # Send password for sudo
         stdin.flush()
         parseLldpCtl(stdout, self.hosts, name, self.iFaces)
         ssh.close()
-        
+
         return self.hosts[name].values()
 
 
 class SNMPSwitchLoader(NetDataSource):
     SNMP_PING = ("SNMPv2-MIB", "sysDescr", 0)
     LLDP_NEIGH = ('lldpMIB', "")
-            
+
     def __init__(self, snmpCommunity, snmpPort):
         self.snmpCommunity = snmpCommunity
         self.snmpPort = snmpPort
         self.switches = {}
         self.snmpCmd = cmdgen.CommandGenerator()
-        
+
     def snmpVar(self, key):
-        return cmdgen.MibVariable(key[0], key[1], key[2]) # 
+        return cmdgen.MibVariable(key[0], key[1], key[2]) #
 
     def snmpGet(self, host, var):
         err, errStatus, errIndex, result = self.snmpCmd.getCmd(
@@ -408,14 +426,14 @@ class SNMPSwitchLoader(NetDataSource):
 
     def load(self):
         pass
-        
+
     def hasElement(self, name):
         err, result = self.snmpVar(self.SNMP_PING)
         return not err
-    
+
     def getElementList(self):
         return []
-    
+
     def getElementLinks(self, name):
         links = []
 
@@ -423,7 +441,7 @@ class SNMPSwitchLoader(NetDataSource):
         neighbors = self.snmpGet()
         for linkmatch in links:
             new_link = Link(src=name, srcPort=normalizePortNum(linkmatch[0]),
-                            dst=normalizeHostname(linkmatch[1]), 
+                            dst=normalizeHostname(linkmatch[1]),
                             dstPort=normalizePortNum(linkmatch[2]))
 
         # Get link speeds
@@ -438,10 +456,10 @@ class TopoGen:
         self.hosts = []
         self.switches = []
         self.loaded = False
-        
+
     def setHostLoader(self, netDataSource):
         self.hostDataSources.add(netDataSource)
-    
+
     def setNetLoader(self, netDataSource):
         self.netDataSources.add(netDataSource)
 
@@ -451,7 +469,7 @@ class TopoGen:
         for ns in self.netDataSources:
             ns.load()
         self.loaded = True
-            
+
     def topogen(self):
         self.hosts = []
         self.switches = []
@@ -461,21 +479,21 @@ class TopoGen:
 
         if not self.loaded:
             self.loadSources()
-                    
+
         for hs in self.hostDataSources:
             for host in hs.getElementList():
                 queue.append((host, hs))
                 self.hosts.append(host)
-            
+
         while len(queue):
             (elem, ds) = queue.popleft()
-            
+
             if elem in visited:
                 continue
-            
+
             if elem not in self.hosts:
                 self.switches.append(elem)
-            
+
             elem_links = ds.getElementLinks(elem)
             for link in elem_links:
                 if link.dst not in visited:
@@ -483,7 +501,7 @@ class TopoGen:
                     for source in self.netDataSources:
                         if source.hasElement(link.dst):
                             queue.append((link.dst,source))
-                            
+
             visited.add(elem)
 
     def outJson(self, outfile):
@@ -511,7 +529,7 @@ class TopoGen:
         for switch in self.switches:
             f.write('\t' + shortName(switch) + ' [shape = box]\n')
         for link in reversed(self.links):
-            f.write('\t"' + shortName(link.dst) + '" -- "' + 
+            f.write('\t"' + shortName(link.dst) + '" -- "' +
                     shortName(link.src) +'";\n')
         f.write("}\n")
         f.close()
@@ -536,16 +554,16 @@ def cli_main(argv=None):
         argv = sys.argv[1:]
 
     parser = configargparse.ArgumentParser(epilog=desc, description=lic)
-        
+
     # Allow reading config from a configuration file
     parser.add_argument("--config", is_config_file=True, help="Config file path")
-    
+
     # Options for host lldpctl output parser
     parser.add_argument("-l", "--lldpctl", dest="lldpctl_file", action="append",
                         help="lldpctl output", metavar="FILE")
 
     # Options for switch CLI output parser
-    parser.add_argument("-s", "--switchcli", dest="switch_file", action="append", 
+    parser.add_argument("-s", "--switchcli", dest="switch_file", action="append",
                         help="switch CLI output", metavar="FILE")
 
     # Host options defaults
@@ -553,27 +571,27 @@ def cli_main(argv=None):
                         help="host link capacity [default: %default]")
     parser.add_argument("-i", "--hostiface", dest="hostifaces", action='append',
                         help="host interfaces to include (e.g., eth2,eth3)")
-    
+
     # Options for openstack loader
     parser.add_argument("--openstack", dest="ostack", action="store_true")
-    parser.add_argument("--os_auth", dest="osUrl", 
+    parser.add_argument("--os_auth", dest="osUrl",
                         help="keystone authentication URL", metavar="URL")
-    parser.add_argument("--os_tenant_name", dest="osTenant", 
+    parser.add_argument("--os_tenant_name", dest="osTenant",
                         help="openstack tenant name")
-    parser.add_argument("--os_username", dest="osUname", 
+    parser.add_argument("--os_username", dest="osUname",
                         help="openstack username")
-    parser.add_argument("--os_password", dest="osPwd", 
+    parser.add_argument("--os_password", dest="osPwd",
                         help="openstack password")
-    parser.add_argument("--host_username", dest="hUname", 
+    parser.add_argument("--host_username", dest="hUname",
                         help="compute/L3 host username")
-    parser.add_argument("--host_password", dest="hPwd", 
+    parser.add_argument("--host_password", dest="hPwd",
                         help="compute/L3 host password")
-    parser.add_argument("--host_keyfile", dest="hKeyFile", 
+    parser.add_argument("--host_keyfile", dest="hKeyFile",
                         help="compute/L3 host ssh key file")
 
     # Options for switch SNMP loader
-    parser.add_argument("--snmp", dest="snmp", action="store_true")    
-    parser.add_argument("--community", dest="snmp_community", 
+    parser.add_argument("--snmp", dest="snmp", action="store_true")
+    parser.add_argument("--community", dest="snmp_community",
                         help="switch SNMP community", metavar="community_name")
 
     # General options
@@ -581,12 +599,12 @@ def cli_main(argv=None):
                         help="set json output file [default: - (stdout)]")
     parser.add_argument("-g", "--graphviz", dest="outGvFile", metavar="FILE",
                         help="set graphviz output file")
-    parser.add_argument("-v", "--verbose", dest="verbose", action="count", 
+    parser.add_argument("-v", "--verbose", dest="verbose", action="count",
                         help="set verbosity level [default: %default]")
 
     parser.set_defaults(outJsonFile="-")
     parser.set_defaults(hostcap=DEF_HOSTCAPACITY)
-    
+
     parser.set_defaults(ostack=False)
     parser.set_defaults(snmp=False)
     parser.set_defaults(osUrl=os.getenv('OS_AUTH_URL'))
@@ -601,15 +619,15 @@ def cli_main(argv=None):
     topogen = TopoGen()
 
     DEF_HOSTCAPACITY = opts.hostcap
-            
+
     if opts.lldpctl_file:
         for filename in opts.lldpctl_file:
             lldp_loader = LldpctlFileLoader(filename)
             for iface in opts.hostifaces:
                 lldp_loader.addIface(iface)
             topogen.setHostLoader(lldp_loader)
-    
-    if opts.ostack: 
+
+    if opts.ostack:
         openstack_loader = \
             OpenStackHostLoader(osUrl=opts.osUrl, osTenant=opts.osTenant,
                                 osUname=opts.osUname, osPwd=opts.osPwd,
@@ -623,18 +641,18 @@ def cli_main(argv=None):
         for filename in opts.switch_file:
             switch_loader = SwitchFileLoader(filename)
             topogen.setNetLoader(switch_loader)
-            
+
     if opts.snmp_community:
         snmp_loader = SNMPSwitchLoader(opts.snmp_community)
         topogen.setNetLoader(snmp_loader)
-           
-    # Generate the topology 
+
+    # Generate the topology
     topogen.topogen()
-    
+
     # Now output json and optionally, graphviz
     if opts.outJsonFile:
         topogen.outJson(opts.outJsonFile)
-        
+
     if opts.outGvFile:
         topogen.outGraphViz(opts.outGvFile)
 

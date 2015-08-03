@@ -1,17 +1,36 @@
 #! /bin/sh
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
 # Mnemonic:	tegu.rc.ksh
 # Abstract: This script is installed (copied) to /etc/init.d/tegu and then the command
-#			'insserv /etc/init.d/tegu' is run to add it to the list of things that are 
-#			automatically started when system enters run level 2 through 5. The script 
+#			'insserv /etc/init.d/tegu' is run to add it to the list of things that are
+#			automatically started when system enters run level 2 through 5. The script
 #			starts BOTH tegu and the agent (5 instances). This script assumes that both
-#			tegu and agent binaries are in the PATH. 
+#			tegu and agent binaries are in the PATH.
 #
 # Usage:	service tegu {start|stop|standby}
 #
 #			CAUTION: this script assumes that the user ID created for tegu is 'tegu'.
 #				If a different uer id was used the value must be changed just below
-#				this header box. Regardless of the user ID created for tegu, the 
-#				directory in /etc is assumed to be tegu (all tegu scripts make that 
+#				this header box. Regardless of the user ID created for tegu, the
+#				directory in /etc is assumed to be tegu (all tegu scripts make that
 #				assumption!)
 #
 # Date:		20 May 2014
@@ -25,7 +44,7 @@
 #			30 Jan 2015 - Added start of ha daemon.
 #			02 Feb 2015 - Changed start to start only the ha daemon which will start tegu
 #					if needed on this host. Added forceup option to allow tegu to be forced
-#					to start without the ha daemon. 
+#					to start without the ha daemon.
 #			20 Feb 2015 - Added -u option to killall to supress warnings from killall
 #			10 Mar 2015 - Corrected missing tegu_user on the ha start in standby.
 #			09 Apr 2015 - Corrected typo in forcedown logic.
@@ -117,7 +136,7 @@ case "$1" in
 		chown $tegu_user:$tegu_group /etc/tegu/standby	
 		su -c "PATH=$PATH start_tegu" tegu >/dev/null 2>&1		# this will fail, but we want to ensure environment (cron etc.) is setup
 	fi
-	su -c "PATH=$PATH start_tegu_ha" $tegu_user					# start high avail daemon 
+	su -c "PATH=$PATH start_tegu_ha" $tegu_user					# start high avail daemon
 	;;
 
   reload)

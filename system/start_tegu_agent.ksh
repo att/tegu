@@ -1,4 +1,23 @@
 #!/usr/bin/env ksh
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
 #
 #	Mnemonic:	start_agent
 #	Abstract:	Simple diddy to start the tegu_agent pointing at the proper spots for log and such.
@@ -46,7 +65,7 @@ fi
 
 # all of these must be in the path or the agent cannot drive them, so verify now before starting agent(s)
 error=0
-for p in map_mac2phost  setup_ovs_intermed  create_ovs_queues  ovs_sp2uuid send_ovs_fmod  tegu_req purge_ovs_queues  
+for p in map_mac2phost  setup_ovs_intermed  create_ovs_queues  ovs_sp2uuid send_ovs_fmod  tegu_req purge_ovs_queues
 do
 	if ! which $p >/dev/null 2>&1
 	then

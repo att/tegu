@@ -1,15 +1,32 @@
 #!/usr/bin/env ksh
-# vi: ts=4 sw=4:
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	start_tegu_qlite.ksh
 #	Abstract:	Start tegu and reload from the last checkpoint. We will try to discover where the tegu binary lives
 #				and assume that from it's bin directory there is a ../lib directory which might contain the associated
-#				config file if one is not given on the command line with the -c option.  
+#				config file if one is not given on the command line with the -c option.
 #
 #				By default, we assume that the log directory is /var/log/tegu and the lib directory is /var/lib/tegu
 #				and that /etc/tegu exists and has the crontab, .cfg file and a static network map (though that is in the
 #				config file not here). These each/all can be overriden with environment variables: TEGU_LIBD, TEGU_LOGD and
-#				TEGU_ETCD.   
+#				TEGU_ETCD.
 #
 # 	Date:		1 January 2014
 #	Author:		E. Scott Daniels
@@ -61,14 +78,14 @@ function ensure_alone
 		return 0
 	fi
 
-	while read h 
+	while read h
 	do
 		if ping_tegu $h
 		then
 			echo "there is a tegu running on $h   [WARN]" >&2
 			return 1					# we've got company, return bad
 		fi
-	done <$etcd/standby_list 
+	done <$etcd/standby_list
 }
 
 
@@ -103,7 +120,7 @@ ignore_cert=""						# -i will set this to -k for curl
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-a)	async=0;;
 		-C)	config=$2; shift;;
 		-f)	tegu_user=$LOGNAME;;
@@ -118,7 +135,7 @@ do
 		*)	echo "unrecognised option: $1"
 			echo ""
 			echo "usage: $0 [-a] [-C config-file] [-f] [-i] [-l logfile] [-n] [-p api-port] [-S] [-s skoogi-host[:port]] [-v]"
-			cat <<-endKat 
+			cat <<-endKat
 				-a disables asynch mode (tegu does not detach from the tty)
 				-f allows tegu to be run using the current user
 				-i ignore selfsigned cert when checking for running tegu processes
@@ -278,7 +295,7 @@ then
 		nohup ${1:-tegu} -v $skoogi_host $tegu_port $config $ckpt  >$log_file 2>&1 &
 		#sleep 2			# let initial shakeout messages come to tty before issuing propt
 	else
-		${1:-tegu} -v $tegu_port $config $ckpt  
+		${1:-tegu} -v $tegu_port $config $ckpt
 	fi
 else
 	echo "no-exec mode: nohup ${1:-tegu} -v $tegu_port $config $ckpt >$log_file 2>&1" >&2
