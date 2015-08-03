@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 	Mnemonic:	osif_proj.go
@@ -33,9 +51,9 @@ import (
 	"sync"
 	"time"
 
-	//"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/gopkgs/ostack"
+	//"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/ostack"
 )
 
 
@@ -65,11 +83,11 @@ type osif_project struct {
 // -------------------------------------------------------------------------------------------------
 
 /*
-	Accepts an IP address, a network and number of bits that specify the network portion of an 
-	address. Using the number of bits the IP address is converted to it's network address and 
+	Accepts an IP address, a network and number of bits that specify the network portion of an
+	address. Using the number of bits the IP address is converted to it's network address and
 	compared to the target network. If they match, the IP address is a member of the subnet
 	and true is returned.  Works for both ip4 and ip6 addresses. Errors returned by ParseCIDR
-	are ignored as they are most likely ip6 number of bits that are too large for an ip4 
+	are ignored as they are most likely ip6 number of bits that are too large for an ip4
 	address.  This can happen when both IP address types are in use on the same cluster.
 */
 func in_subnet( ip string, target_net string, nbits string ) ( bool ) {
@@ -78,7 +96,7 @@ func in_subnet( ip string, target_net string, nbits string ) ( bool ) {
 		return false
 	}
 
-	return  target_net == ip_net.IP.String() 
+	return  target_net == ip_net.IP.String()
 }
 
 
@@ -108,7 +126,7 @@ func Mk_osif_project( name string ) ( p *osif_project, err error ) {
 
 
 /*
-	Run the os creds in the creds list and add any projects to the 
+	Run the os creds in the creds list and add any projects to the
 	project list that aren't already there. pname2id is a map that
 	translates project names to a uuid.
 */
@@ -170,7 +188,7 @@ func (p *osif_project) refresh_maps( creds *ostack.Ostack ) ( rerr error ) {
 			creds.Expire()					// force re-auth next go round
 		} else {
 
-			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d vmip2vm=%d", 
+			osif_sheep.Baa( 2, "%s map sizes: vmid2ip=%d ip2vmid=%d vm2ip=%d vmid2host=%d vmip2vm=%d",
 					*p.name, len( vmid2ip ), len( ip2vmid ), len( vm2ip ), len( vmid2host ), len( vmip2vm ) )
 			if len( vmip2vm ) > 0 && len( vmid2ip ) > 0 &&  len( ip2vmid ) > 0 &&  len( vm2ip ) > 0 &&  len( vmid2host ) > 0  {		// don't refresh unless all are good
 				p.vmid2ip = vmid2ip						// id and vm name map to just ONE ip address
@@ -422,7 +440,7 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 		fip4 *string,
 		mac *string,
 		gw *string,
-		cidr *string, 
+		cidr *string,
 		phost *string,
 		gwmap map[string]*string,
 		new_data bool,
@@ -455,9 +473,9 @@ func (p *osif_project) Get_info( search *string, creds *ostack.Ostack, inc_proje
 	return
 }
 
-/*	Accepts a subnet uuid and openstack creds, then attempts to find the matching 
-	information in the table.  If the data is fresh, and we find the uuid in the 
-	data, we'll return that info, otherwise we'll attempt a reload and return what we 
+/*	Accepts a subnet uuid and openstack creds, then attempts to find the matching
+	information in the table.  If the data is fresh, and we find the uuid in the
+	data, we'll return that info, otherwise we'll attempt a reload and return what we
 	find or error.
 */
 func (p *osif_project) get_sninfo( uuid *string, creds *ostack.Ostack ) (
@@ -587,17 +605,17 @@ func (p *osif_project) Get_all_info( creds *ostack.Ostack, inc_project bool ) ( 
 			}
 			ilist[found] = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, nil, fip4, gwmap )
 			found++
-		}  
+		}
 	}
 
-	pname, _ := creds.Get_project() 
+	pname, _ := creds.Get_project()
 	osif_sheep.Baa( 1, "get all osvm info found %d VMs in %s", found, *pname )
 
 	return
 }
 
-/* Public interface to get the default gateway (router) for a project. Causes data to 
-	be loaded if stale.  Search is the project name or ID and can be of the form 
+/* Public interface to get the default gateway (router) for a project. Causes data to
+	be loaded if stale.  Search is the project name or ID and can be of the form
 	project/<stuff> where stuff will be ignored. New data (return) is true if the data
 	had to be loaded.
 */
@@ -650,17 +668,17 @@ func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
 
 /*
 	Given a project id (or project name) return the project info data and creds.
-	project info is indexed by the id, and creds are indexed by the name (TODO change 
-	creds to be indexed by id). We return the pid on the off chance that the name 
+	project info is indexed by the id, and creds are indexed by the name (TODO change
+	creds to be indexed by id). We return the pid on the off chance that the name
 	was passed in and the caller needs the real id.
 */
-func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) ( 
+func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) (
 	p *osif_project, rpid *string, creds *ostack.Ostack, err error ) {
 	orig := pid								// hold for error message if needed
 
 	if pid == nil {
 		osif_sheep.Baa( 1, "pid2data project id passed in was nil" )
-		err = fmt.Errorf( "missing project id" ) 
+		err = fmt.Errorf( "missing project id" )
 		return
 	}
 
@@ -677,7 +695,7 @@ func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[stri
 				osif_sheep.Baa( 2, "id2pname[%s] == %s", k, *v )
 			}
 		}
-		err = fmt.Errorf( "%s could not be mapped to a project name", *orig ) 
+		err = fmt.Errorf( "%s could not be mapped to a project name", *orig )
 		return
 	}
 
@@ -689,7 +707,7 @@ func pid2data( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[stri
 				osif_sheep.Baa( 2, "os_proj[%s] exists", k )
 			}
 		}
-		err = fmt.Errorf( "%s could not be mapped to a osif_project", *orig ) 
+		err = fmt.Errorf( "%s could not be mapped to a osif_project", *orig )
 		return
 	}
 
@@ -742,7 +760,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 
 	p, pid, creds, err := pid2data( &tokens[0], os_refs, os_projs, id2pname, pname2id )
 	if err != nil {
-		osif_sheep.Baa( 1, "get host info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )  
+		osif_sheep.Baa( 1, "get host info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )
 		msg.State = err
 		msg.Response_ch <- msg
 		return
@@ -768,8 +786,8 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 	Invoked as a goroutine (asynch) to dig the needed subnet information from the current project block
 	and return it on the message channel indicated by the message. If the project block info is stale
 	then it is reloaded from openstack.  The data contained in the message is expected to be a string
-	which is the project and subnet (in that order) separated by a space. On success, the message 
-	reponse contains a pointer to the subnet_info structure containing the data. 
+	which is the project and subnet (in that order) separated by a space. On success, the message
+	reponse contains a pointer to the subnet_info structure containing the data.
 */
 func get_sninfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
 	var err error
@@ -789,7 +807,7 @@ func get_sninfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map
 
 	p, _, creds, err := pid2data( &tokens[0], os_refs, os_projs, id2pname, pname2id )
 	if err != nil {
-		osif_sheep.Baa( 1, "get sn info: unable to map to a project: %s: %s",  msg.Req_data.( string ), err )  
+		osif_sheep.Baa( 1, "get sn info: unable to map to a project: %s: %s",  msg.Req_data.( string ), err )
 		msg.State = err
 		msg.Response_ch <- msg
 		return
@@ -800,7 +818,7 @@ func get_sninfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map
 	si.name, si.project, si.cidr, si.ip, si.phost, err = p.get_sninfo( &tokens[1], creds ) 	// dig out the subnet info
 	if err == nil  &&  si.name != nil {
 		si.token = creds.Get_token()			// get our admin token which needs to be passed to the agent
-		msg.State = nil 
+		msg.State = nil
 		msg.Response_data = si
 		//osif_sheep.Baa( 1, ">>>> got subnet info:  %s %s %s %s %s", *si.name, *si.project, *si.cidr, *si.ip, *si.phost )
 	} else {
@@ -835,7 +853,7 @@ func osif_gw2phost( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs 
 
 	p, _, creds, err := pid2data( &tokens[0], os_refs, os_projs, id2pname, pname2id )
 	if err != nil {
-		osif_sheep.Baa( 1, "get sn info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )  
+		osif_sheep.Baa( 1, "get sn info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )
 		msg.State = err
 		msg.Response_ch <- msg
 		return
@@ -843,7 +861,7 @@ func osif_gw2phost( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs 
 
 	phost, err := p.gw2phost( &tokens[1], creds )			// dig from exising info, or request update from openstack if stale
 	if err == nil  &&  phost != nil {
-		msg.State = nil 
+		msg.State = nil
 		msg.Response_data = *phost
 	} else {
 		if err != nil {
@@ -858,8 +876,8 @@ func osif_gw2phost( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs 
 }
 
 
-/* Get the default gateway for a project. Returns the string directly to the channel 
-	that send the osif the message. Expects to be executed as  a go routine. 
+/* Get the default gateway for a project. Returns the string directly to the channel
+	that send the osif the message. Expects to be executed as  a go routine.
 go get_os_defgw( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
 */
 func get_os_defgw( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
@@ -924,11 +942,11 @@ func get_os_defgw( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs m
 }
 
 /*
-	Get a complete list of VMs for a project as network request blocks so they can be added. The project name is 
+	Get a complete list of VMs for a project as network request blocks so they can be added. The project name is
 	expected to be in the request data (*string) and can be either the name or the project id.
 
 
-	pid is a pointer to either the project name or the project ID. 
+	pid is a pointer to either the project name or the project ID.
 	Returns an array of net_vm struts that can be passed to network manager to insert into the graph.
 */
 func get_projvm_info( pid *string, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) ( ilist []*Net_vm, err error ) {
@@ -962,13 +980,13 @@ func get_projvm_info( pid *string, os_refs map[string]*ostack.Ostack, os_projs m
 		return
 	}
 
-	ilist, err =  p.Get_all_info( creds, true )		// finally have enough info to dig 
+	ilist, err =  p.Get_all_info( creds, true )		// finally have enough info to dig
 	return
 }
 
 /*
 	Gathers the VM information for all VMs in one or more projects. If "_all_proj" is given as the project name then
-	all projects  known to Tegu are fetched. 
+	all projects  known to Tegu are fetched.
 
 	Expected to execute as a go routine and writes the resulting array to the channel specified in the message.
 */

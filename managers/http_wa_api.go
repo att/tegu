@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -25,16 +43,16 @@ import (
 	"fmt"
 	"net/http"
 
-	"codecloud.web.att.com/gopkgs/token"
-	"codecloud.web.att.com/gopkgs/ipc"
+	"github.com/att/gopkgs/token"
+	"github.com/att/gopkgs/ipc"
 )
 
 
 // --- wa request/response structs ------------------------------------------------------------------
 
 /*
-	Request structs. Fields are public so that we can use the json (un)marhsal calls to 
-	bundle and unbundle the data. Tags are needed to support the WACC (java?) camel case 
+	Request structs. Fields are public so that we can use the json (un)marhsal calls to
+	bundle and unbundle the data. Tags are needed to support the WACC (java?) camel case
 	that doesn't have a leading capitalised letter.
 	
 	The structs contain information that is expected to be received from WACC in json form
@@ -151,7 +169,7 @@ func (r *wa_conns_req) To_map( ) ( map[string]string ) {
 // --------------------------------------------------------------------------------------------------
 
 /*
-	Generic data digger for wa functions.  Pulls the data and then unbundles the json into the 
+	Generic data digger for wa functions.  Pulls the data and then unbundles the json into the
 	structure passed in.  Returns a state sutible for using as the response header if there is an
 	error (html.StatusOK if all was good) and a reason string.
 */
@@ -163,11 +181,11 @@ func wa_dig_data( in *http.Request, request interface{} ) ( state int, reason st
 	if( data == nil ) {						// missing data -- punt early
 		reason = "missing data"
 		http_sheep.Baa( 1, "http_wa_api: called without data: %s", in.Method )
-		return 
+		return
 	}
 	
 	http_sheep.Baa( 2, "http_wa_api: raw-json: %s", data )
-	err := json.Unmarshal( data, &request )           // unpack the json 
+	err := json.Unmarshal( data, &request )           // unpack the json
 	if err != nil {
 		reason = "bad json request"
 		http_sheep.Baa( 1, "http_wa_api: json format error: %s", err )
@@ -213,8 +231,8 @@ func http_subnet_info( project *string, subnet *string ) ( si *Subnet_info, err 
 }
 
 /*
-	Given a project id and subnet id, return the host that the associated gateway (router) is on, or 
-	return err. 
+	Given a project id and subnet id, return the host that the associated gateway (router) is on, or
+	return err.
 */
 func http_subnet2gwhost( project *string, subnet *string ) ( host *string, err error ) {
 	si, err := http_subnet_info( project, subnet )
@@ -267,11 +285,11 @@ func http_gw2phost( project *string, router *string ) ( host *string, err error 
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-/*	Handle tegu/rest/ports  api call.  
+/*	Handle tegu/rest/ports  api call.
 	The http interface is the point where the inbound request is unpacked into a struct
-	that can be passed to the agent manager, and then for taking the response back from 
+	that can be passed to the agent manager, and then for taking the response back from
 	the agent and converting it to the output format reqired by the requestor.  There might
-	be different output formats generated based on the bloody REST URI etc, so this is the 
+	be different output formats generated based on the bloody REST URI etc, so this is the
 	right place to do it (not in the agent, or agent manager).
 */
 func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
@@ -300,14 +318,14 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 				http_sheep.Baa( 1, "wa_port: couldn't dig subnet info: %s", err )
 				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_port/post: %s", err ) )
 				return
-			} 
+			}
 
 			cidr := si.cidr
 			request.host = si.phost
 			request.Token = *si.token	// must send our token in for admin privs
 
 			msg := ipc.Mk_chmsg( )
-			msg.Send_req( am_ch, my_ch, REQ_WA_PORT, request, nil )			// send request to agent and block 
+			msg.Send_req( am_ch, my_ch, REQ_WA_PORT, request, nil )			// send request to agent and block
 			msg = <- my_ch
 			
 			if msg != nil {
@@ -340,7 +358,7 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 				state = http.StatusInternalServerError
 				data = "wa_port/post: missing or no response from agent"
 			}
-			//data = `{ "tenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "router": "de854701-7b80-4f31-a2e4-f4ad1a988627", "ip": "135.207.50.100" }` 
+			//data = `{ "tenant": "3ec3f998-c720-49e6-a729-941af4396f7a", "router": "de854701-7b80-4f31-a2e4-f4ad1a988627", "ip": "135.207.50.100" }`
 
 		default:
 			http_sheep.Baa( 1, "http_wa_ports: called for unrecognised method: %s", in.Method )
@@ -348,16 +366,16 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 			state = http.StatusMethodNotAllowed
 	}
 
-	if state > 299 { 
+	if state > 299 {
 		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
 		data = fmt.Sprintf( `{ "reason": %q }`, data )
 	} else {
-		out.Header().Set( "Content-Type", "application/json" ) 
+		out.Header().Set( "Content-Type", "application/json" )
 	}
 	out.WriteHeader( state )		
 	if state > 299 && data == "" {
 		data = "bad json request"
-	} 
+	}
 
 	http_sheep.Baa( 1, "wa_port finished: %d: %s", state, data )
 	fmt.Fprintf( out, "%s", data )
@@ -397,7 +415,7 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 
 			my_ch := make( chan *ipc.Chmsg )								// channel to wait for response from agent
 			msg := ipc.Mk_chmsg( )
-			msg.Send_req( am_ch, my_ch, REQ_WA_TUNNEL, request, nil )			// send request to agent and block 
+			msg.Send_req( am_ch, my_ch, REQ_WA_TUNNEL, request, nil )			// send request to agent and block
 			msg = <- my_ch
 			
 			if msg != nil  {
@@ -427,16 +445,16 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 	}
 
 	//out.Header().Set( "Content-Type", "application/json" ) 		// must set type and force write with state before writing data
-	if state > 299 { 
+	if state > 299 {
 		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
 		data = fmt.Sprintf( `{ "reason": %q }`, data )
 	} else {
-		out.Header().Set( "Content-Type", "application/json" ) 
+		out.Header().Set( "Content-Type", "application/json" )
 	}
 	out.WriteHeader( state )		
 	if state > 299 && data == "" {
 		data = "bad json request"
-	} 
+	}
 
 	http_sheep.Baa( 1, "wa_tunnel finished: %d: %s", state, data )
 	fmt.Fprintf( out, "%s\n", data )
@@ -445,7 +463,7 @@ func http_wa_tunnel( out http.ResponseWriter, in *http.Request ) {
 }
 
 /*
-	Handle tegu/rest/route  api call.  
+	Handle tegu/rest/route  api call.
 */
 func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 	var (
@@ -476,7 +494,7 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 			http_sheep.Baa( 1, "wa_route received POST: host=%s", *request.host )
 			my_ch := make( chan *ipc.Chmsg )								// channel to wait for response from agent
 			msg := ipc.Mk_chmsg( )
-			msg.Send_req( am_ch, my_ch, REQ_WA_ROUTE, request, nil )		// send request to agent and block 
+			msg.Send_req( am_ch, my_ch, REQ_WA_ROUTE, request, nil )		// send request to agent and block
 			msg = <- my_ch
 
 			if msg != nil {
@@ -498,17 +516,17 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 			state = http.StatusMethodNotAllowed
 	}
 
-	if state > 299 { 
+	if state > 299 {
 		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
 		data = fmt.Sprintf( `{ "reason": %q }`, data )
 	} else {
-		out.Header().Set( "Content-Type", "application/json" ) 
+		out.Header().Set( "Content-Type", "application/json" )
 	}
 	//out.Header().Set( "Content-Type", "application/json" )
 	out.WriteHeader( state )		// must lead with the overall state, followed by reason or data
 	if state > 299 && data == "" {
 		data = "bad json request"
-	} 
+	}
 
 	http_sheep.Baa( 1, "wa_route finished: %d: %s", state, data )
 	fmt.Fprintf( out, "%s\n", data )
@@ -517,7 +535,7 @@ func http_wa_route( out http.ResponseWriter, in *http.Request ) {
 }
 
 
-/*	Handle tegu/rest/connections  api calls.  
+/*	Handle tegu/rest/connections  api calls.
 */
 func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 	var (
@@ -546,13 +564,13 @@ func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 				http_sheep.Baa( 1, "wa_conns: couldn't dig host info: ten=%s subnet=%s %s", request.Tenant, request.Subnet, err )
 				send_http_err( out, http.StatusInternalServerError, fmt.Sprintf( "wa_conns/del %s", err ) )
 				return
-			} 
+			}
 
 			request.host = si.phost
 			request.Token = *si.token				// must send our token in for admin privs
 
 			msg := ipc.Mk_chmsg( )
-			msg.Send_req( am_ch, my_ch, REQ_WA_DELCONN, request, nil )			// send request to agent and block 
+			msg.Send_req( am_ch, my_ch, REQ_WA_DELCONN, request, nil )			// send request to agent and block
 			msg = <- my_ch
 
 			if msg != nil {
@@ -574,11 +592,11 @@ func http_wa_conn( out http.ResponseWriter, in *http.Request ) {
 			state = http.StatusMethodNotAllowed
 	}
 
-	if state > 299 { 
+	if state > 299 {
 		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
 		data = fmt.Sprintf( `{ "function": "wa_conns", "reason": %q }`, data )
 	} else {
-		out.Header().Set( "Content-Type", "application/json" ) 
+		out.Header().Set( "Content-Type", "application/json" )
 	}
 
 	out.WriteHeader( state )		

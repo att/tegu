@@ -1,3 +1,22 @@
+// vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 /*
 	Mnemonic:	globals.go
 	Abstract:	Global things shared by all managers.  Use caution when modifying or adding to iota lists order
@@ -31,12 +50,12 @@ import (
 	"fmt"
 	"os"
 	
-	"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/gopkgs/config"
-	"codecloud.web.att.com/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/config"
+	"github.com/att/gopkgs/bleater"
 
-	"codecloud.web.att.com/tegu/gizmos"
+	"github.com/att/tegu/gizmos"
 )
 
 const (
@@ -197,7 +216,7 @@ var (
 	admin_roles *string					// roles which are allowed to submit privledged requests (pause, resume etc.)
 	sysproc_roles *string				// list of roles that are valid for requests allowed for either system procs or admins (e.g. listhost)
 	mirror_roles *string				// list of openstack roles that are valid for mirroring commands
-	priv_auth *string					// type of authorisation needed for privledged commands 
+	priv_auth *string					// type of authorisation needed for privledged commands
 	accept_requests bool = false		// until main says we can, we don't accept requests
 	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value	
 	isSSL bool							// mirroring flag to know if ssl is on
@@ -206,7 +225,7 @@ var (
 //-- osif data passing structs ---------------------------------------------------------------------------------------------
 /*
 	Subnet information. Returned from osif get subnet info request. The token is the openstack token we have
-	for the matching project. This needs to go to the agent so that addWANPort can work. 
+	for the matching project. This needs to go to the agent so that addWANPort can work.
 */
 type Subnet_info struct {
 	name	*string

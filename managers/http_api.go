@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -62,7 +80,7 @@
 				17 Feb 2015 : Added mirroring
 				24 Feb 2015 : prevent interface issue in steer parsing and adjust to work with lazy update.
 				30 Mar 2015 : Added support to force a project's VMs into the current graph.
-				01 Apr 2015 : Corrected cause of nil ptr exception in steering reqest parsing.
+				01 Apr 2015 : Corrected cause of nil ptr exception in steering request parsing.
 				08 Apr 2015 : Corrected slice bounds error if input record was empty (e.g. '', no newline)
 				10 Apr 2015 : Seems some HTTP clients refuse or are unable to send a body on a DELETE.
 					Extended the POST function to include a "cancelres" request. Sheesh.  It would be
@@ -94,14 +112,14 @@ import (
 	"syscall"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/token"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/gopkgs/ostack"
-	"codecloud.web.att.com/gopkgs/security"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/token"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/ostack"
+	"github.com/att/gopkgs/security"
 
-	"codecloud.web.att.com/tegu/gizmos"
+	"github.com/att/tegu/gizmos"
 )
 
 
@@ -121,7 +139,7 @@ func mk_resname( ) ( string ) {
 	The translated names are returned if _both_ are valid; error is set otherwise.
 	In addition, if a port number is added to a host name it is stripped and returned.
 
-	For IPv6 addresses, in order to be backwards compatable with the IPv4 notation of
+	For IPv6 addresses, in order to be backwards compatible with the IPv4 notation of
 	address:port, we'll require the syntax [address]:port if a port is to be supplied
 	with an IPv6 address.
 
@@ -238,7 +256,7 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 /*
 	This function will validate the requestor is authorised to make the request based on the setting
 	of priv_auth. When localhost, the request must have originated from the localhost or have a
-	valid token. When token the user _must_ have sent a valid token (regardless of where the 
+	valid token. When token the user _must_ have sent a valid token (regardless of where the
 	request originated). A valid token is a token which contains a role name that is listed
 	in the for the roles string passed in. The valid_roles string is a comma separated list
 	(e.g. admin,tegu_admin).  If 'none' is inicated in the config file, then we always return
@@ -268,7 +286,7 @@ func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed
 				http_sheep.Baa( 1, "internal mishap: validate auth called with nil role list" )
 				return false
 			}
-			return token_has_osroles( data, *valid_roles ) 
+			return token_has_osroles( data, *valid_roles )
 			//return is_admin_token( data )
 	}
 
@@ -341,7 +359,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	wants two reason strings and a count of errors in order to report an overall status and a status of
 	each request that was received from the outside world.
 
-	This function will also check for a duplicate pledge aloready in the inventory and reject it 
+	This function will also check for a duplicate pledge aloready in the inventory and reject it
 	if a dup is found.
 */
 func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, jreason string, nerrors int ) {
@@ -841,7 +859,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						break
 					}
 
-					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth	(we'll sliently ignore inbound)
+					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth	(we'll silently ignore inbound)
 						subtokens := strings.Split( *tmap["bandw"], "," )
 						bandw_out = int64( clike.Atof( subtokens[1] ) )
 					} else {
@@ -1054,7 +1072,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							nerrors++
 							state = "ERROR"
 						}
-					} 
+					}
 
 				case "verbose":									// verbose n [child-bleater]
 					if validate_auth( &auth_data, is_token, admin_roles ) {
@@ -1116,7 +1134,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				default:
-					reason = fmt.Sprintf( "unrecognised put and/or post action: reqest %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
+					reason = fmt.Sprintf( "unrecognised put and/or post action: request %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
 					http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
 			}
 		} else {
@@ -1282,8 +1300,8 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 		msg = fmt.Sprintf( "%d errors processing requests in %d requests", nerrors, req_count )
 	}
 
-	return 
-} 
+	return
+}
 
 func parse_get( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
 	http_sheep.Baa( 1, "get received and ignored -- GET is not supported" )
@@ -1331,7 +1349,7 @@ func api_deal_with( out http.ResponseWriter, in *http.Request ) {
 	auth := ""
 	if in.Header != nil && in.Header["X-Auth-Tegu"] != nil {
 		auth = in.Header["X-Auth-Tegu"][0]
-	} 
+	}
 	*/
 
 	switch in.Method {
@@ -1448,8 +1466,8 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		}
 		if p := cfg_data["mirror"]["mirror_roles"]; p != nil {
 			mirror_roles = p
-		} 
-	} 
+		}
+	}
 
 	sp_str = *sysproc_roles + "," + *admin_roles					// add admin roles to sysproc and mirror role lists
 	sysproc_roles = &sp_str

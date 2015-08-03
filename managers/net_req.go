@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 	Mnemonic:	net_req.go
@@ -13,7 +31,7 @@
 package managers
 
 import (
-	"codecloud.web.att.com/gopkgs/ipc"
+	"github.com/att/gopkgs/ipc"
 )
 
 type Net_vm  struct {
@@ -24,7 +42,7 @@ type Net_vm  struct {
 	phost	*string			// phys host where vm is running
 	mac		*string			// MAC
 	gw		*string			// the gateway associated with the VM (if known)
-	fip		*string			// floating ip 
+	fip		*string			// floating ip
 	cidr	*string			// the associated cidr (wa needs it)
 	gwmap	map[string]*string // the gateway information associated with the VM (obsolete)
 }
@@ -47,11 +65,11 @@ func Mk_netreq_vm( name, id, ip4, ip6, phost, mac, gw, cidr, fip *string, gwmap 
 		name: name,
 		id: id,
 		ip4: ip4,
-		ip6: ip6, 
+		ip6: ip6,
 		phost: phost,
 		mac: mac,
 		gw: gw,
-		cidr: cidr, 
+		cidr: cidr,
 		fip: fip,
 		gwmap: gwmap,			// we assume the map is ours to keep
 	}
@@ -75,7 +93,7 @@ func (vm *Net_vm) Get_values( ) ( name *string, id *string, ip4 *string, ip6 *st
 */
 func (vm *Net_vm) Get_cidr() ( cidr *string ) {
 	if vm == nil {
-		return 
+		return
 	}
 
 	return vm.cidr

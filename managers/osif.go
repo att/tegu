@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 
 /*
@@ -65,7 +83,7 @@
 						- request for ip2mac table by fqmgr is used only to accept a channel
 						  and the map is pushed back when we think we have changes.
 				04 Dec 2014 - Changed list host call to the list enabled host call in an attempt
-						to use a list of active (up) hosts rather than every host known to 
+						to use a list of active (up) hosts rather than every host known to
 						openstack.
 				05 Dec 2014 - Added work round for AIC admin issue after they flipped to LDAP.
 				16 Jan 2014 - Support port masks in flow-mods.
@@ -91,12 +109,12 @@ import (
 	"strings"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/gopkgs/ostack"
-	"codecloud.web.att.com/gopkgs/token"
-	//"codecloud.web.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/ostack"
+	"github.com/att/gopkgs/token"
+	//"github.com/att/tegu/gizmos"
 )
 
 //var (
@@ -108,7 +126,7 @@ import (
 
 /*
 	Accept a token and a list of creds and try to determine the project that the token was
-	generated for.  We'll first attempt to use the reference creds, but as with some 
+	generated for.  We'll first attempt to use the reference creds, but as with some
 	installations of openstack this seems not to work (AIC after LDAP was installed), so
 	if using reference creds fails, we'll (cough) run the list of other creds, yes making
 	an API call for each, until we find one that works or we exhaust the list.  Bottom line
@@ -268,12 +286,12 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 
 /*
 	Given a token, return true if the token is valid for one of the roles listed in role.
-	Role is a list of space separated role names. 
+	Role is a list of space separated role names.
 
 	2015 Jul 13
-		Bloody openstack is just broken.  we must run every project we know about in order to 
-		suss this information out becuase openstack doesn't return a proejct as a part of token information 
-		and given just a token it's not possible to tell whether it's associated with a project unless 
+		Bloody openstack is just broken.  we must run every project we know about in order to
+		suss this information out becuase openstack doesn't return a proejct as a part of token information
+		and given just a token it's not possible to tell whether it's associated with a project unless
 		making a call that directly tries with the project name. Further, this opens a HUGE hole in security
 		as a user's roles are now valid across all projects, but I guess that's the openstack way.
 */
@@ -433,7 +451,7 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string,
 
 	if creds == nil {
 		osif_sheep.Baa( 1, "cannot generate default tegu creds: nil returned from library call" )
-		return 
+		return
 	}
 
 	for {
@@ -565,7 +583,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			}
 		}
 
-		p = cfg_data["osif"]["region"] 
+		p = cfg_data["osif"]["region"]
 		if p != nil {
 			def_region = p
 		}
@@ -749,7 +767,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				}
 
 
-			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info for a single host from oepnstack and return in a network update struct
+			case REQ_GET_HOSTINFO:						// dig out all of the bits of host info for a single host from openstack and return in a network update struct
 				if msg.Response_ch != nil {
 					go get_os_hostinfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
 					msg = nil							// prevent early response
@@ -801,7 +819,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
 					if len( dtoks ) > 1 {
 						msg.Response_data, msg.State = has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
-					} else { 
+					} else {
 						msg.State = fmt.Errorf( "has_any_role: bad input data" )
 						msg.Response_data = false
 					}

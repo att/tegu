@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -29,11 +47,11 @@ import (
 	"os"
 	"strings"
 
-	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/connman"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/gopkgs/jsontools"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/connman"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/jsontools"
 )
 
 // ----- structs used to bundle into json commands
@@ -206,7 +224,7 @@ func (ad *agent_data) send2all( smgr *connman.Cmgr,  msg string ) {
 	assume another buffer or more will be coming to complete the blob
 	and we'll do it next time round.
 
-	We should be synchronous through this function since it is called 
+	We should be synchronous through this function since it is called
 	directly by our main goroutine, thus it is safe to update the request
 	tracker map directly (no locking).
 */
@@ -494,7 +512,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						}
 				}
 
-				if req != nil  &&  req.Response_ch != nil {				// if response needed; send the request (updated) back 
+				if req != nil  &&  req.Response_ch != nil {				// if response needed; send the request (updated) back
 					am_sheep.Baa( 3, "processing request finished %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
 					req.Response_ch <- req
 				}
