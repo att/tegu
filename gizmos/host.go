@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -7,16 +25,16 @@
 	Date:		25 November 2013
 	Author:		E. Scott Daniels
 
-	Note:		If the network is split (not all switches are being controlled by 
-				floodlight, then a host might show multiple connections: one on the 
+	Note:		If the network is split (not all switches are being controlled by
+				floodlight, then a host might show multiple connections: one on the
 				switch that it is truly connectted to, and one for each switch that
-				has an 'entry point' (likely a link to an uncontrolled switch) for 
-				the host.  At the moment, it does not appear that it is possible to 
+				has an 'entry point' (likely a link to an uncontrolled switch) for
+				the host.  At the moment, it does not appear that it is possible to
 				map the IP address to the switch/port as the list of IPs and the list
 				of attachment points seem not to be ordered.
 
 	Mod:		29 Jun 2014 - Changes to support user link limits.
-				26 Mar 2015 - Added Get_address() function to return one address with 
+				26 Mar 2015 - Added Get_address() function to return one address with
 					favourtism if host has both addresses defined.
 */
 
@@ -49,7 +67,7 @@ type Host struct {
 */
 func Mk_host( mac string, ip4 string, ip6 string ) (h *Host) {
 
-	h = &Host { 
+	h = &Host {
 		mac:	mac,
 		ip4:	ip4,
 		ip6:	ip6,
@@ -106,14 +124,14 @@ func (h *Host) Add_switch( sw *Switch, port int ) {
 		h.ports = new_ports
 	}
 
-	h.conns[h.cidx] = sw; 
+	h.conns[h.cidx] = sw;
 	h.ports[h.cidx] = port
 	h.cidx++
 }
 
 /*
 	Return the ith switch and associated port from the connections list
-	Allows an owner of the object to iterate over the switches without 
+	Allows an owner of the object to iterate over the switches without
 	having to have direct access to the lists.
 */
 func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
@@ -130,7 +148,7 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 
 /*
 	Returns the port the host is 'attached to' for the given switch.
-	In a disjoint network attached might not be true, but it's the 
+	In a disjoint network attached might not be true, but it's the
 	port that the switch should write traffic on destined for the host.
 */
 func (h *Host) Get_port( s *Switch ) ( int ) {
@@ -151,8 +169,8 @@ func (h *Host) Get_port( s *Switch ) ( int ) {
 }
 
 /*
-	Drives the callback function for each switch/port combination that we have in our list. 
-	Data is the user data that is passed in that the callback function may need to process. 
+	Drives the callback function for each switch/port combination that we have in our list.
+	Data is the user data that is passed in that the callback function may need to process.
 func (h *Host) Iterate_switch_port( data interface{}, cb func( *Switch, int, interface{} ) )  {
 	for i := 0; i < h.cidx; i++ {
 		cb( h.switch, h.port, data )
@@ -304,7 +322,7 @@ func (h *Host) To_json( ) ( s string ) {
 }
 
 /*
-	generate json output that describes each swtitch/port combination that this host has. 
+	generate json output that describes each swtitch/port combination that this host has.
 */
 func (h *Host) Ports2json( ) ( s string ) {
 	var (
@@ -319,7 +337,7 @@ func (h *Host) Ports2json( ) ( s string ) {
 		if h.conns[i] != nil {
 			sname := h.conns[i].Get_id()
 			s += fmt.Sprintf( `%s { "switch": %q, "port": %d }`, sep, *sname, h.ports[i] )
-			sep = ","; 
+			sep = ",";
 		}
 	}
 

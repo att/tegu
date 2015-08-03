@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -38,7 +56,7 @@ type Mlag struct {
 
 /*
 	Create an mlag struct and return a pointer to it. Nil pointer
-	indicates error. 
+	indicates error.
 */
 func Mk_mlag( name *string, lob *Obligation ) ( m *Mlag ) {
 	m = nil
@@ -47,10 +65,10 @@ func Mk_mlag( name *string, lob *Obligation ) ( m *Mlag ) {
 	}
 
 	m = &Mlag {
-		name: name, 
+		name: name,
 	}
 	
-	m.llist = make( []*Obligation, 10 ) 
+	m.llist = make( []*Obligation, 10 )
 	if lob != nil {
 		m.llist[0] = lob
 		m.lidx = 1
@@ -60,7 +78,7 @@ func Mk_mlag( name *string, lob *Obligation ) ( m *Mlag ) {
 }
 
 /*
-	Add a link to the mlag set. 
+	Add a link to the mlag set.
 */
 func (m *Mlag) Add_link( lob *Obligation ) {
 	

@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -100,8 +118,8 @@ func (p *pledge_window) clone( ) ( npw *pledge_window ) {
 }
 
 /*
-	Return the state as a string and the amount of time in the 
-	past (seconds) that the pledge expired, or the amount of 
+	Return the state as a string and the amount of time in the
+	past (seconds) that the pledge expired, or the amount of
 	time in the future that the pledge will be active. Caption
 	is a string such as "ago"  that can be used following the value
 	if needed.
@@ -132,7 +150,7 @@ func (p *pledge_window) state_str( ) ( state string, caption string, diff int64 
 }
 
 /*
-	Extend the expiry time by n seconds. N may be negative and will not set the 
+	Extend the expiry time by n seconds. N may be negative and will not set the
 	expiry time earlier than now.
 */
 func (p *pledge_window) extend_by( n int64 ) {
@@ -152,7 +170,7 @@ func (p *pledge_window) extend_by( n int64 ) {
 
 /*
 	Set the expiry time to the timestamp passed in.
-	It is valid to set the expiry time to a time before the current time. 
+	It is valid to set the expiry time to a time before the current time.
 */
 func (p *pledge_window) set_expiry_to( new_time int64 ) {
 	p.expiry = new_time;
@@ -241,8 +259,8 @@ func (p *pledge_window) commenced_recently( window int64 ) ( bool ) {
 }
 
 /*
-	Returns true if pledge expired long enough ago, based on the window timestamp 
-	passed in,  that it can safely be discarded.  The window is the number of 
+	Returns true if pledge expired long enough ago, based on the window timestamp
+	passed in,  that it can safely be discarded.  The window is the number of
 	seconds that the pledge must have been expired to be considered extinct.
 */
 func (p *pledge_window) is_extinct( window int64 ) ( bool ) {

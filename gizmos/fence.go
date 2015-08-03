@@ -1,10 +1,28 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	fence
 	Abstract:	Manages a current capacity and max/min values to keep something
-				within limits. 
+				within limits.
 	Date:		25 June 2014
 	Author:		E. Scott Daniels
 
@@ -32,7 +50,7 @@ type Fence struct {
 */
 func Mk_fence( name *string, max int64, min int64, init_val int64 ) ( f *Fence ) {
 
-	f = &Fence { 
+	f = &Fence {
 		Name:		name,
 		max_cap: 	max,
 		min_cap:	min,
@@ -56,8 +74,8 @@ func (f *Fence ) Has_capacity( c int64 ) ( bool ) {
 }
 
 /*
-	Blindly adds the capacity c to the current value and clips if the 
-	new value exceeds a limit. 
+	Blindly adds the capacity c to the current value and clips if the
+	new value exceeds a limit.
 */
 func (f *Fence ) Inc_used( c int64 ) {
 	f.value += c
@@ -72,13 +90,13 @@ func (f *Fence ) Inc_used( c int64 ) {
 }
 
 /*
-	Checks to see if capacity can be added to the current value without 
+	Checks to see if capacity can be added to the current value without
 	violating a capacity limit. If it can be, then the value is added, else
 	it is not and false is returned.
 */
 func (f *Fence ) Inc_if_room( c int64 ) ( bool ) {
 	if f.Has_capacity( c ) {
-		f.value += c 
+		f.value += c
 		return true
 	}
 
@@ -86,14 +104,14 @@ func (f *Fence ) Inc_if_room( c int64 ) ( bool ) {
 }
 
 /*
-	Returns the current value. 
+	Returns the current value.
 */
 func (f *Fence ) Get_value() ( int64 ) {
 	return f.value
 }
 
 /*
-	Sets the value to c and clips if it's beyond a limit. 
+	Sets the value to c and clips if it's beyond a limit.
 	The actual value set is returned.
 */
 func (f *Fence ) Set_value( c int64 ) ( int64 ) {
@@ -110,7 +128,7 @@ func (f *Fence ) Set_value( c int64 ) ( int64 ) {
 func (f *Fence) Get_have_need( addtl_cap int64 ) ( have int64, need int64 ) {
 	if addtl_cap < 0 {
 		return f.min_cap, f.value + addtl_cap	
-	} 
+	}
 
 	return f.max_cap, f.value + addtl_cap
 }
@@ -137,9 +155,9 @@ func (f *Fence ) Get_limits( ) ( max int64, min int64 ) {
 }
 
 /*
-	Create a copy of the fence. If a capacity value is passed in the function 
-	will check the current min/max and if less than 100 assume they are a 
-	percentage and compute the actual min/max using the percentage of the 
+	Create a copy of the fence. If a capacity value is passed in the function
+	will check the current min/max and if less than 100 assume they are a
+	percentage and compute the actual min/max using the percentage of the
 	capacity. If capacity is 0, then no check is made.
 */
 func (f *Fence) Clone( capacity int64 ) ( *Fence ) {
@@ -157,8 +175,8 @@ func (f *Fence) Clone( capacity int64 ) ( *Fence ) {
 }
 
 /*
-	Creates a new object and copies the information replacing the name in the new 
-	object with the name passed in. 
+	Creates a new object and copies the information replacing the name in the new
+	object with the name passed in.
 */
 func (f *Fence) Copy( new_name *string ) ( *Fence ) {
 	return Mk_fence( new_name, f.max_cap, f.min_cap, f.value )

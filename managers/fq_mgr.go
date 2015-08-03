@@ -1,10 +1,28 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
-	Mnemonic:	fq_mgr 
-	Abstract:	flow/queue manager. This module contains the goroutine that 
-				listens on the fq_ch for messages that cause flow mods to be 
+	Mnemonic:	fq_mgr
+	Abstract:	flow/queue manager. This module contains the goroutine that
+				listens on the fq_ch for messages that cause flow mods to be
 				sent (skoogi reservations) and OVS queue commands to be generated.
 
 	Config:		These variables are referenced if in the config file (defaults in parens):
@@ -19,14 +37,14 @@
 
 	Mods:		30 Apr 2014 (sd) - Changes to support pushing flow-mods and reservations to an agent. Tegu-lite
 				05 May 2014 (sd) - Now sends the host list to the agent manager in addition to keeping a copy
-					for it's personal use. 
+					for it's personal use.
 				12 May 2014 (sd) - Reverts dscp values to 'original' at the egress switch
 				19 May 2014 (sd) - Changes to allow floating ip to be supplied as a part of the flow mod.
 				07 Jul 2014 - Added support for reservation refresh.
 				20 Aug 2014 - Corrected shifting of mdscp value in the match portion of the flowmod (it wasn't being shifted) (bug 210)
 				25 Aug 2014 - Major rewrite to send_fmod_agent; now uses the fq_req struct to make it more
 					generic and flexible.
-				27 Aug 2014 - Small fixes during testing. 
+				27 Aug 2014 - Small fixes during testing.
 				03 Sep 2014 - Correct bug introduced with fq_req changes (ignored protocol and port)
 				08 Sep 2014 - Fixed bugs with tcp oriented proto steering.
 				09 Sep 2014 - corrected buglette that was preventing udp:0 or tcp:0 from working. (steering)
@@ -58,18 +76,18 @@ import (
 	"strings"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/tegu/gizmos"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/gizmos"
 )
 
 // --- Private --------------------------------------------------------------------------
 
 /*
 	Ostack returns a list of hostnames which might map to the wrong network (management
-	rather than ops), so if a phost suffix is defined in the config file, this function 
-	will augment each host in the list and add the suffix. Returns the new list, or 
+	rather than ops), so if a phost suffix is defined in the config file, this function
+	will augment each host in the list and add the suffix. Returns the new list, or
 	the same list if phost_suffix is nil.
 */
 func add_phost_suffix( old_list *string, suffix *string ) ( *string ) {
@@ -105,16 +123,16 @@ func add_phost_suffix( old_list *string, suffix *string ) ( *string ) {
 	We depend on an external script to actually set the queues so this is pretty simple.
 
 	hlist is the space separated list of hosts that the script should adjust queues on
-	muc is the max utilisation commitment for any link in the network. 
+	muc is the max utilisation commitment for any link in the network.
 */
 
 /*
 	Writes the list of queue adjustment information (we assume from net-mgr) to a randomly named
 	file in /tmp. Then we invoke the command passed in via cmd_base giving it the file name
-	as the only parameter.  The command is expected to delete the file when finished with 
-	it.  See netmgr for a description of the items in the list. 
+	as the only parameter.  The command is expected to delete the file when finished with
+	it.  See netmgr for a description of the items in the list.
 
-	This is old school and probably will be deprecated soon. 
+	This is old school and probably will be deprecated soon.
 */
 func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 	var (
@@ -158,18 +176,18 @@ func adjust_queues( qlist []string, cmd_base *string, hlist *string ) {
 
 
 /*
-	Builds one setqueue json request per host and sends it to the agent. If there are 
-	multiple agents attached, the individual messages will be fanned out across the 
+	Builds one setqueue json request per host and sends it to the agent. If there are
+	multiple agents attached, the individual messages will be fanned out across the
 	available agents, otherwise the agent will just process them sequentially which
 	would be the case if we put all hosts into the same message.
 
 	This now augments the switch name with the suffix; needs to be fixed for q-full
 	so that it handles intermediate names properly.
 
-	In the world with the ssh-broker, there is no -h host on the command line and 
+	In the world with the ssh-broker, there is no -h host on the command line and
 	the script's view of host name might not have the suffix that we are supplied
-	with.  To prevent the script from not recognising an entry, we must now 
-	put an entry for both the host name and hostname+suffix into the list. 
+	with.  To prevent the script from not recognising an entry, we must now
+	put an entry for both the host name and hostname+suffix into the list.
 */
 func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	var (
@@ -186,7 +204,7 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 		for i := range qlist {
 			nql[offset+i] = qlist[i]								// just copy the original
 
-			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
+			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front
 			if len( toks ) == 2 {
 				nh := add_phost_suffix( &toks[0],  phsuffix )		// add the suffix
 				nql[i] = *nh + "/" +  toks[1]
@@ -200,7 +218,7 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 		qlist = nql
 	} else {												// just snarf the list of hosts affected
 		for i := range qlist {
-			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front 
+			toks := strings.SplitN( qlist[i], "/", 2 )				// split host from front
 			if len( toks ) == 2 {
 				target_hosts[toks[0]] = true
 			}
@@ -233,7 +251,7 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 }
 
 /*
-	Send a bandwidth endpoint flow-mod request to the agent manager. 
+	Send a bandwidth endpoint flow-mod request to the agent manager.
 	This is little more than a wrapper that converts the fq_req into
 	an agent request. The ultimate agent action is to put in all
 	needed flow-mods on an endpoint host in one go, so no need for
@@ -241,7 +259,7 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	the acutal flow-mod mechanics any more.
 
 	Yes, this probably _could_ be pushed up into the reservation manager
-	and sent from there to the agent manager, but for now, since the 
+	and sent from there to the agent manager, but for now, since the
 	ip2mac information is local to fq-mgr, we'll keep it here.  (That
 	info is local to fq-mgr b/c in the original Tegu it came straight
 	in from skoogi and it was fq-mgr's job to interface with skoogi.)
@@ -282,9 +300,9 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 }
 
 /*
-	Send a bandwidth endpoint flow-mod request for a oneway set of 
-	flow-mods.  This is little more than a wrapper that converts 
-	the fq_req into an agent request. The ultimate agent action is 
+	Send a bandwidth endpoint flow-mod request for a oneway set of
+	flow-mods.  This is little more than a wrapper that converts
+	the fq_req into an agent request. The ultimate agent action is
 	to put in all needed flow-mods on the endpoint host in one go,
 	so no need for individual requests for each.
 
@@ -334,14 +352,14 @@ func send_bwow_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *str
 
 /*
 	WARNING: this should be deprecated.  Still needed by steering, but that should change. Tegu
-		should send generic 'setup' actions to the agent and not try to craft flow-mods. 
+		should send generic 'setup' actions to the agent and not try to craft flow-mods.
 		Thus, do NOT use this from any new code!
 
 	Send a flow-mod to the agent using a generic struct to represnt the match and action criteria.
 
-	The fq_req contains data that are neither match or action specific (priority, expiry, etc) or 
-	are single purpose (match or action only) e.g. late binding mac value. It also contains  a set 
-	of match and action paramters that are applied depending on where they are found. 
+	The fq_req contains data that are neither match or action specific (priority, expiry, etc) or
+	are single purpose (match or action only) e.g. late binding mac value. It also contains  a set
+	of match and action paramters that are applied depending on where they are found.
 	Data expected in the fq_req:
 		Nxt_mac - the mac address that is to be set on the action as dest (steering)
 		Expiry  - the timeout for the fmod(s)
@@ -352,16 +370,16 @@ func send_bwow_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *str
 		Table	- Table number to put the flow mod into
 		Rsub    - A list (space separated) of table numbers to resub to in the order listed.
 		Lbmac	- Assumed to be the mac address associated with the switch port when
-					switch port is -128. This is passed on the -i option to the 
+					switch port is -128. This is passed on the -i option to the
 					agent allowing the underlying interface to do late binding
 					of the port based on the mac address of the mbox.
 		Pri		- Fmod priority
 
-	phsuffix is the physical host suffix that must be added to each host endpoint name. 
+	phsuffix is the physical host suffix that must be added to each host endpoint name.
 
 	TODO: this needs to be expanded to be generic and handle all possible match/action parms
-		not just the ones that are specific to res and/or steering.  It will probably need 
-		an on-all flag in the main request struct rather than deducing it from parms. 
+		not just the ones that are specific to res and/or steering.  It will probably need
+		an on-all flag in the main request struct rather than deducing it from parms.
 */
 func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, phsuffix *string ) {
 
@@ -373,7 +391,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		data.Pri = 100
 	}
 
-	timeout := int64( 0 )									// never expiring if expiry isn't given 
+	timeout := int64( 0 )									// never expiring if expiry isn't given
 	if data.Expiry > 0 {
 		timeout = data.Expiry - time.Now().Unix()			// figure the timeout and skip if invalid
 	}
@@ -385,7 +403,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 	table := ""
 	if data.Table > 0 {
 		table = fmt.Sprintf( "-T %d ", data.Table )
-	} 
+	}
 
 	match_opts := "--match"					// build match options
 
@@ -393,7 +411,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 		if *data.Match.Meta != "" {
 			match_opts += " -m " + *data.Match.Meta
 		}
-	} 
+	}
 
 	if data.Match.Swport > 0  {						// valid port
 		match_opts += fmt.Sprintf( " -i %d", data.Match.Swport )
@@ -514,7 +532,7 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 	// ---- end building the fmod parms, now build an agent message and send it to agent manager to send -------------
 	//base_json := `{ "ctype": "action_list", "actions": [ { "atype": "flowmod", "fdata": [ `
 
-	//FIX-ME:  This check _should_ be based on Espq.Switch and not swid but need to confirm that nothing is sending 
+	//FIX-ME:  This check _should_ be based on Espq.Switch and not swid but need to confirm that nothing is sending
 	//			with nil swid and something like br-int in Espq.Switch first.
 	// 			When this is changed, res_mgr will be affected in table_9x_fmods().
 	if data.Swid == nil {											// blast the fmod to all known hosts if a single target is not named
@@ -573,8 +591,8 @@ func send_hlist_agent( hlist *string ) {
 
 
 /*
-	Send a request to openstack interface for an ip to mac map. We will _not_ wait on it 
-	and will handle the response in the main loop. 
+	Send a request to openstack interface for an ip to mac map. We will _not_ wait on it
+	and will handle the response in the main loop.
 
 	Deprecated with lazy update -- a push on our behalf is requested at reservation time
 */
@@ -590,11 +608,11 @@ func req_ip2mac(  rch chan *ipc.Chmsg ) {
 
 
 /*
-	the main go routine to act on messages sent to our channel. We expect messages from the 
-	reservation manager, and from a tickler that causes us to evaluate the need to resize 
+	the main go routine to act on messages sent to our channel. We expect messages from the
+	reservation manager, and from a tickler that causes us to evaluate the need to resize
 	ovs queues.
 
-	DSCP values:  Dscp values range from 0-64 decimal, but when described on or by 
+	DSCP values:  Dscp values range from 0-64 decimal, but when described on or by
 		flow-mods are shifted two bits to the left. The send flow mod function will
 		do the needed shifting so all values outside of that one funciton should assume/use
 		decimal values in the range of 0-64.
@@ -640,7 +658,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	}
 	if p := cfg_data["default"]["alttable"]; p != nil {			// this is the base; we use alt_table to alt_table + (n-1) when we need more than 1 table
 		alt_table = clike.Atoi( *p )
-	} 
+	}
 	
 
 	if cfg_data["fqmgr"] != nil {								// pick up things in our specific setion
@@ -670,7 +688,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	
 		if p := cfg_data["fqmgr"]["switch_hosts"]; p != nil {
 			switch_hosts = p;
-		} 
+		}
 	
 		if p := cfg_data["fqmgr"]["verbose"]; p != nil {
 			fq_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
@@ -698,11 +716,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 
 	if sdn_host != nil  &&  *sdn_host != "" {
 		uri_prefix = fmt.Sprintf( "http://%s", *sdn_host )
-	} 
+	}
 
 	fq_sheep.Baa( 1, "flowmod-queue manager is running, sdn host: %s", *sdn_host )
 	for {
-		msg = <- my_chan					// wait for next message 
+		msg = <- my_chan					// wait for next message
 		msg.State = nil						// default to all OK
 		
 		fq_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
@@ -730,12 +748,12 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, *fdata.Match.Ip1, *fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 
 					if msg.State == nil {					// no error, no response to requestor
-						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d dscp=%d",  
+						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d dscp=%d",
 									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 						msg.Response_ch = nil
 					} else {
 						// do we need to suss out the id and mark it failed, or set a timer on it,  so as not to flood reqmgr with errors?
-						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d  [TGUFQM008]",  
+						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d  [TGUFQM008]",
 									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
 					}
 				} else {
@@ -864,7 +882,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				msg.Response_data = nil
 				if msg.Response_ch != nil {
 					msg.State = fmt.Errorf( "unknown request (%d)", msg.Msg_type )
-				} 
+				}
 		}
 
 		fq_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )

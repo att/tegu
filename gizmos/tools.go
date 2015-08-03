@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -38,10 +56,10 @@ import (
 	"strings"
 	"time"
 
-	//"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/clike"
-	//"codecloud.web.att.com/gopkgs/token"
-	//"codecloud.web.att.com/gopkgs/ipc"
+	//"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	//"github.com/att/gopkgs/token"
+	//"github.com/att/gopkgs/ipc"
 )
 
 
@@ -391,7 +409,7 @@ func Safe_string( p interface{} ) ( string ) {
 /*
 	Given a map[string]T where T is of known, simple, type (bool, int, int64, string, *string) return true
 	if the map has any key in the array of keys passed in. This needs to support the openstack interface
-	where we have an array of roles, but to make it consistant with the has_all function above,
+	where we have an array of roles, but to make it consistent with the has_all function above,
 	we'll support the keys as either a list in a string, or an array of string.
 */
 func Map_has_any(  ui interface{}, ki interface{} ) (bool) {

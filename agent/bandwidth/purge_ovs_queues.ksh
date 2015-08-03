@@ -1,10 +1,27 @@
 #!/usr/bin/env ksh
-# vim: sw=4 ts=4:
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	purge_ovs_queues
 #	Abstract:	Run though the output of serveral ovs commands looking for QoS entries that
-#				are not referenced by any ports. For the ones that are not referenced, we'll 
-#				generate a list of associated queues that are also not referenced and delete 
+#				are not referenced by any ports. For the ones that are not referenced, we'll
+#				generate a list of associated queues that are also not referenced and delete
 #				all of the unreferenced things.
 #
 #	Author:		E. Scott Daniels
@@ -14,7 +31,7 @@
 #				13 May 2014 - Now tracks and purges queues that are 'orphaned'; we purge all
 #					queues that are unreferenced, not just those that had qos references when
 #					the script started.  Purge all still needed as that purges even queues
-#					with references. 
+#					with references.
 #				13 May 2014 - Added ssh options to prevent prompts when new host tried
 #				10 Nov 2014 - Added connect timeout to ssh calls
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
@@ -25,7 +42,7 @@
 #
 
 
-function usage 
+function usage
 {
 	cat <<-endKat
 	
@@ -34,7 +51,7 @@ function usage
 
 	Removes all individual queues and queue combinations (QoSes in OVS terms) from the local OVS environment.
 	Using -n and -v will indicate at various levels of verbosity what would be done rather than actually
-	taking the action. 
+	taking the action.
 
 	  -a purge all regardless of reference counts
 	  -h host  susses queue information from the named host and purges things on that host.
@@ -57,12 +74,12 @@ rhost="localhost=$(hostname)"	# target host name for error messages only
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-a)		purge_all=1;;
 		-h)		
 				if [[ $2 != $(hostname) && $2 != "localhost" ]]
 				then
-					ssh_host="ssh $ssh_opts $2"; 
+					ssh_host="ssh $ssh_opts $2";
 					rhost="$2"
 				fi
 				shift
@@ -109,10 +126,10 @@ fi
 		next;
 	}
 
-	/QOS _uuid/ { 
-		qos[$NF] = 1; 
-		cur_qos = $NF; 
-		next; 
+	/QOS _uuid/ {
+		qos[$NF] = 1;
+		cur_qos = $NF;
+		next;
 	}
 
 	/QUEUE _uuid/ {						# track all queues, not just those associated with a qos so we purge all orphaned queues at end
@@ -120,7 +137,7 @@ fi
 		next;
 	}
 
-	/^switch: / && NF > 1 { 			# collect switch data for purge-all 
+	/^switch: / && NF > 1 { 			# collect switch data for purge-all
 		if( limit["all"] || limit[$2] || limit[$4] )
 			pa_cur_switch = $2;
 		else
@@ -140,7 +157,7 @@ fi
 			gsub( "}", "", $(i) );
 			gsub( ",", "", $(i) );
 			split( $(i), a, "=" );
-			qos2queue[cur_qos] = qos2queue[cur_qos] a[2] " "; 
+			qos2queue[cur_qos] = qos2queue[cur_qos] a[2] " ";
 			qrefcount[a[2]]++;
 			nqueues[cur_qos]++;
 		}
@@ -221,19 +238,19 @@ exit
 _uuid               : c383cc20-7f05-45eb-9d75-1ce2b5adfbb8
 bond_downdelay      : 0
 bond_fake_iface     : false
-bond_mode           : 
+bond_mode           :
 bond_updelay        : 0
-external_ids        : 
+external_ids        :
 fake_bridge         : false
 interfaces          : f2d71458-67ce-4279-9e4c-b2f73c405544
-lacp                : 
-mac                 : 
+lacp                :
+mac                 :
 name                : s7-eth2
-other_config        : 
-qos                 : 
-statistics          : 
-status              : 
-tag                 : 
-trunks              : 
-vlan_mode           : 
+other_config        :
+qos                 :
+statistics          :
+status              :
+tag                 :
+trunks              :
+vlan_mode           :
 

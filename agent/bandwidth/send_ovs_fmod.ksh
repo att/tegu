@@ -1,26 +1,43 @@
 #!/usr/bin/env ksh
-# vi: ts=4 sw=4:
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	send_ovs_fmod
-#	Abstract:	Sends a flowmod to the local switch assuming that the ovs-ofctl command is 
-#				available.  
+#	Abstract:	Sends a flowmod to the local switch assuming that the ovs-ofctl command is
+#				available.
 #
 #				Late port binding for Q-Lite:
 #				The switch port (inbound, -i, and output -o) can be either a real port
-#				number or a MAC address for late binding. If it's a MAC address we'll 
+#				number or a MAC address for late binding. If it's a MAC address we'll
 #				send an ovs_sp2uuid command to the target host and look for the address
-#				in the list and use that port. 
+#				in the list and use that port.
 #
 #				WARNING: this script uses a wildly different command line structure!!
 #
-#				DANGER:	With version 2.x OVS switch things round and options that were 
+#				DANGER:	With version 2.x OVS switch things round and options that were
 #					accepted as 'extensions' on the command line (metadata, goto_table, etc)
 #					are now only accepted if the -O OpenFlow12 option is given. Further, this
-#					option errors on older versions (before 1.10).  
+#					option errors on older versions (before 1.10).
 #
 #				Message tags for critical, error and warning messages (production monitoring)
 #				have the constant identifier: QLTFSM followed by 3 digits to make a unique
-#				tag. Do no duplicate, or reuse if one is deprecated. 
+#				tag. Do no duplicate, or reuse if one is deprecated.
 #
 #				This script depends on kshell features that are either unavailable or broken
 #				in bash or other shells. Do NOT attempt to execute this with bash.
@@ -37,18 +54,18 @@
 #								non-empty.
 #				16 May 2014 - Added metadata match/action support.
 #				30 Jun 2014 - Added support for late binding on switch port (both -i and -o)
-#				03 Jul 2014 - Changes to support the new OVS 2.x requirement that -O be used 
+#				03 Jul 2014 - Changes to support the new OVS 2.x requirement that -O be used
 #						when specifying openflow options that are not 1.1.
 #				15 Jul 2014 - Added protocol string support for -P options
 #				27 Aug 2014 - Corrected bug with the drop action.
 #				22 Sep 2014 - Added -b action option to bounce packet out on the receipt port.
 #				24 Sep 2014 - Added ability to set vlan id based on a 'lookup'.
 #						Corrected issue with cleanup of late binding data file from ovs_sp2uuid.
-#				29 Sep 2014 - Added a retry to the vlan mapping logic if it doesn't find the 
+#				29 Sep 2014 - Added a retry to the vlan mapping logic if it doesn't find the
 #						indicated mac in the ovs data.
 #				02 Oct 2014 - Corrected bug in retry logic when attempting to map a mac to vlan id
 #				05 Oct 2014 - Added check such that no br-int flow-mods will be added unless br-rl
-#						and the qosirlX port exist. 
+#						and the qosirlX port exist.
 #				06 Oct 2014 - Corrected missing line (then) accidently deleted from suss_vid.
 #				22 Oct 2014 - Added cleanup before each exit.
 #				10 Nov 2014 - Added connect timeout to ssh calls
@@ -57,7 +74,7 @@
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
 #				04 Feb 2015 - Set initial value of rhost to "" to prevent ssh to localhost
 #				09 Feb 2015 - Cap the hard timout to 18 hours to prevent ovs rejecting the flow-mod
-#				13 Mar 2015 - Changed last attempt to set fmod to drop prototype information as that 
+#				13 Mar 2015 - Changed last attempt to set fmod to drop prototype information as that
 #								seems to get in the way with things like strip vlan.
 #				18 Mar 2015 - if match -v option given, and vlan in ovs_sp2uuid data is < 0, then we assume
 #								trunk and do not set it in flo mod rather than generating an error.
@@ -103,7 +120,7 @@ function help
 		-t seconds      (applies the hard timeout to the generated flow-mod when adding)
                         if set to 0, then no timeout is added to the flowmod.
 
-	Match Options: 
+	Match Options:
 	Each match option is followed by a single token parameter
 		-a Match on ARP traffic             (ignored if -S or -D is given)
 		-4 Match on IPv4 traffic            (implied if -S or -D is used to supply an IPv4 address)
@@ -144,41 +161,41 @@ function help
 											if mac not given, then it does a hard strip; user beware)
 	
 
-	Hard timeout is used only for an add flow mod, and defaults to 60s if not set.  
-	Cookie mask of -1 should be used when deleting and omitted when adding. 
-	Switch name is the OVS name, not the mac address. 
+	Hard timeout is used only for an add flow mod, and defaults to 60s if not set.
+	Cookie mask of -1 should be used when deleting and omitted when adding.
+	Switch name is the OVS name, not the mac address.
 
-	The -M action allows the metadata value or value/mask to be applied to the 
+	The -M action allows the metadata value or value/mask to be applied to the
 	packet 'in line' through a hard field write rather than using the metadata-write
 	OVS option.  This means that it can be set _before_ resubmition and in general
-	should eliminate the need to have specific tables whose sole purpose is to 
+	should eliminate the need to have specific tables whose sole purpose is to
 	set a meta value before resubmition to the current table. The -M option is
 	_very_ different than the -m action option!!
 
 	CAUTION:
     The order of actions supplied on the command line can be very significant
-    especially when using either of the resubmit options.  For instance, to 
-    set a temp value in DSCP, then resubmit across table 0, and then set a 
-    final DSCP value and causing the packet to be written on the generic 
+    especially when using either of the resubmit options.  For instance, to
+    set a temp value in DSCP, then resubmit across table 0, and then set a
+    final DSCP value and causing the packet to be written on the generic
     priority queue (1), the action would be:
     -T 254 -R ,0 -T 128 -q 1 -n
-    
+
     Something like this might be necessary to match other fmods in the same
-    table without matching the current rule.  "Control" is returned to 
+    table without matching the current rule.  "Control" is returned to
     this rule after matching, so a final output action of normal (-n) or output
     (-o) or enqueue (-e) should be supplied. The -n isn't needed above as this
     is the default.
 
-	If the version of OVS installed is backlevel (earlier than 1.10) some of the 
-	options may not be accepted and will likely cause OVS to reject the attempt to 
-	install the flow mod. A backlevel OVS will NOT be tested for automatically; 
+	If the version of OVS installed is backlevel (earlier than 1.10) some of the
+	options may not be accepted and will likely cause OVS to reject the attempt to
+	install the flow mod. A backlevel OVS will NOT be tested for automatically;
 	the -B option should be used to force a test, and the -b option used if it is
-	known that the version is old. 
+	known that the version is old.
 endKat
 
 }
 
-# given an IP address return both the type (ip6 or ip4) and the needed match option 
+# given an IP address return both the type (ip6 or ip4) and the needed match option
 # prefix nw or ipv6 that must be used on the OVS command line.
 # accepts $1 as the address and echos the tokens to stdout
 function addr_type
@@ -229,7 +246,7 @@ function suss_vid
 }
 
 # check for the ingress rate limiting things. Returns good if both the rate limiting
-# brige (br-rl) with a qosirlM port and a br-int port qosirlN all exist. 
+# brige (br-rl) with a qosirlM port and a br-int port qosirlN all exist.
 function check_irl
 {
 	if (( ignore_irl ))		# safety valve for human operation and probably steering
@@ -240,10 +257,10 @@ function check_irl
 	get_ovs_data
 
 	awk -v rhost="${thost#* }" '	# rhost used only for log message if needed
-		/switch:.*br-rl/ { 
+		/switch:.*br-rl/ {
 			sw = "rl";
 			have_rl = 1;
-			next; 
+			next;
 		}
 
 		/switch:.*br-int/ {
@@ -265,7 +282,7 @@ function check_irl
 				exit( 0 );
 			}
 
-			printf( "send_ovs_fmod: CRI: cannot find irl port or bridge in ovs data: br-rl %s, br-rl:qosirl %s, br-int:qosirl %s. target-host: %s   [QLTSFM000] \n", 
+			printf( "send_ovs_fmod: CRI: cannot find irl port or bridge in ovs data: br-rl %s, br-rl:qosirl %s, br-int:qosirl %s. target-host: %s   [QLTSFM000] \n",
 					have_rl ? "good" : "missing", have_veth["rl"] ? "good" : "missing", have_veth["int"] ? "good" : "missing", rhost ) >"/dev/fd/2";
 			exit( 1 );
 		}' $ovs_data | read irl_port junk
@@ -281,7 +298,7 @@ function check_irl
 #
 function str2nwproto
 {
-	case $1 in 
+	case $1 in
 		icmp|ICMP)	echo "1";;
 		tcp|TCP)	echo "6";;
 		tcp4|TCP4)	echo "6 $ip4_type";;
@@ -301,7 +318,7 @@ function str2nwproto
 # accept a port, mac or special id (e.g. :qosirl0) as $1. If $1 is a mac address, then we attempt to find it
 # in ovs_sp2uuid information and echo out the corresponding port. If a special ID is given, then that ID, without
 # the leading : is epected to be listed as a port on a switch.
-#	ovs_sp2uuid output we want has the form: 
+#	ovs_sp2uuid output we want has the form:
 #		switch: 000082e23ecd0e4d cd3ee281-ce07-4d0e-9350-f7faa43b6a91 br-int
 #		port: 01f7f621-03ff-43e5-a183-c66151eae9d7 346 tap916a2d34-eb fa:de:ad:54:08:6b 916a2d34-ebdf-402e-bcb3-904b56011773
 #		port: e3909c91-5d1a-4821-a12b-0130a62d456b 19 qosirl0   -1
@@ -317,9 +334,9 @@ function late_binding
 			/^switch:/ { sw = $4; next; }
 			/^port:/ {
 				if( $5 == mac || $4 == mac )			# match mac or port name (ID)
-				 { 
-					print sw, $3; 
-					exit( 0 ) 
+				 {
+					print sw, $3;
+					exit( 0 )
 				}
 			}
 		'  $ovs_data | read lbswitch port				# CAUTION: lbswitch is global
@@ -344,7 +361,7 @@ arp_type="dl_type=0x8000"
 check_level=0				# -B sets to force a check for backlevel version
 backlevel_ovs=0				# -b sets to indicate backlevel (w/o test)
 of_protolist="OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13"
-of_shortprotolist="OpenFlow10,OpenFlow12,OpenFlow13"			# OpenFlow11 not suported on v1.10 
+of_shortprotolist="OpenFlow10,OpenFlow12,OpenFlow13"			# OpenFlow11 not suported on v1.10
 of_protoopt="-O"
 backlevel_ovs=0
 type=""						# no specific type to match (unless -S or -D given) -4, -6 or -a can be used if -S/D is not needed.
@@ -365,7 +382,7 @@ fi
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		--action)	mode="action"; shift; continue;;			 # must loop in case they didn't enter any mode based options options
 		--match)	mode="match"; shift; continue;;
 		--opt*)		mode="options"; shift; continue;;
@@ -373,11 +390,11 @@ do
 
 	case $mode in
 		options)
-			case $1 in 
+			case $1 in
 				-B)	check_level=1;;
 				-b)	
 					backlevel_ovs=1
-					of_protolist="" 								# turn off OVS 1.10+ support for backlevel openflow 
+					of_protolist="" 								# turn off OVS 1.10+ support for backlevel openflow
 					of_protoopt=""
 					;;
 
@@ -424,7 +441,7 @@ do
 			;;
 
 		match)
-			case $1 in 
+			case $1 in
 				-6) type="$ip6_type,";;					# specific types (auto set if -S or -D given)
 				-4) type="$ip4_type,";;
 				-a) type="$arp_type,";;
@@ -439,7 +456,7 @@ do
 
 				-i)	late_binding $2 |read p s			# if mac or ID given, suss out the port/switch else get just port
 					lbswitch=$s
-					match+="in_port=$p " 
+					match+="in_port=$p "
 					shift
 					;;
 
@@ -447,7 +464,7 @@ do
 				-p)	match+="nw_proto=$( str2nwproto ${2%%:*} ) " 		# get protocol:port for src
 					if [[ ${2##*:} != "0"  && ${2##*:} != "" ]]			# assume udp:  is same as udp:0
 					then
-						match+="tp_src=${2##*:} " 
+						match+="tp_src=${2##*:} "
 					fi
 					shift
 					;;
@@ -455,7 +472,7 @@ do
 				-P) match+="nw_proto=$( str2nwproto ${2%%:*} ) "		# get protocol:port for dest
 					if [[ ${2##*:} != "0"  && ${2##*:} != "" ]]			# assume proto:  is same as proto:0
 					then
-						match+="tp_dst=${2##*:} " 
+						match+="tp_dst=${2##*:} "
 					fi
 					shift
 					;;
@@ -478,7 +495,7 @@ do
 			;;
 
 		action)
-			case $1 in 
+			case $1 in
 											# WARNING:  strings added to action MUST have a trailing space!
 				-b) output="in_port";;						# bounce back on the port that the packet was recevied
 				-d)	action+="mod_dl_dst:$2 "; shift;;		# ethernet mac change of dest
@@ -496,14 +513,14 @@ do
 					shift
 					;;
 
-				-p)	action+="mod_tp_src:$2 "; shift;;	# modify the transport (udp/tcp) src port 
-				-P) action+="mod_tp_dst:$2 "; shift;;	# mod the transport (udp/tcp) port 
-				-q)	action+="set_queue:$2 "; shift;;	# special ovs set queue 
+				-p)	action+="mod_tp_src:$2 "; shift;;	# modify the transport (udp/tcp) src port
+				-P) action+="mod_tp_dst:$2 "; shift;;	# mod the transport (udp/tcp) port
+				-q)	action+="set_queue:$2 "; shift;;	# special ovs set queue
 				-r) action+="resubmit $2 "; shift;;
 				-R) 									# $2 should be table,port or ,port or table
 					if [[ -z $ssh_host ]]
 					then
-						action+="resubmit($2) "; 
+						action+="resubmit($2) ";
 					else
 						action+="resubmit'($2)' "; 		# must quote if sending via ssh
 					fi
@@ -543,7 +560,7 @@ do
 					fi
 					if [[ $2 == *"/"*   &&  -n $vpri ]]		# priority given, and not nixed b/c it's a trunk
 					then
-						action+="mod_vlan_pcp${2##*/} "	# prioritys can be 0-7 
+						action+="mod_vlan_pcp${2##*/} "	# prioritys can be 0-7
 					fi
 
 					shift
@@ -584,7 +601,7 @@ if (( check_level ))
 then
 	timeout 10 $ssh_host $sudo ovs-ofctl --version | awk '/Open vSwitch/ { split( $NF, a, "." ); if( a[1] > 2 || (a[0] == 1 && a[2] > 9) ) print "new"; else print "old" }' | read x
 	if [[ $x == "old" ]]
-	then 
+	then
 		backlevel_ovs=1
 		of_protolist=""
 		of_protoopt=""
@@ -593,14 +610,14 @@ fi
 
 if (( backlevel_ovs )) && (( warn ))
 then
-	echo "WARNING: selected options may not be compatable with the version of OVS that is installed"
+	echo "WARNING: selected options may not be compatible with the version of OVS that is installed"
 fi
 
 
 # remaining parameters should be {add|del} cookie switch; switch can be omitted in the case of
 # late binding as it will be set by the ovs_sp2uuid search.
 
-case $1 in 
+case $1 in
 	add)				# $2 is cookie, and we use $3 only if we didn't get a latebinding port
 		if [[ ${lbswitch:-$3} == "br-int" ]]		# must ensure that ingress rate limiting is on for br-int fmods
 		then
@@ -678,7 +695,7 @@ case $1 in
 
 		ver=$( timeout 15 $ssh_host $sudo ovs-ofctl --version |head -1 )
 		ver="${ver##* }"
-		case $ver in 
+		case $ver in
 			1.[0-7].*)	backlevel_ovs=1; of_protoopt=""; of_protolist="";;
 			1.[8-9].*)	backlevel_ovs=0; of_protoopt=""; of_protolist="";;
 			1.1[0-1].*)	backlevel_ovs=0;;

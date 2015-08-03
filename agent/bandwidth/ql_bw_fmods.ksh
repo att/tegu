@@ -1,20 +1,37 @@
 #!/usr/bin/env ksh
-# vi: ts=4 sw=4:
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	ql_bw_fmods
 #	Abstract:	Generates all needed flow-mods on an OVS for a bandwidth reservation
 #				between src and dest VMs (-s and -d respectively). Src is considered
 #				to be the local VM (the VM that is attached to the OVS, and dest is
-#				the remote VM (-l and -r could be used, but src and dest are used in 
+#				the remote VM (-l and -r could be used, but src and dest are used in
 #				the other agent scripts so this is being consistent).  In the case where
-#				one of the VMs is a router, and an external IP address is supplied and 
-#				must be used as the flow-mod match criteria, an indication is needed 
+#				one of the VMs is a router, and an external IP address is supplied and
+#				must be used as the flow-mod match criteria, an indication is needed
 #				as to whether the the external IP address is "associated" with the
 #				source or destination VM.  This is indicated by the presence of the -S
-#				or -D option on the command line.  
+#				or -D option on the command line.
 #
 #				Bandwidth reservation flow mods are set up this way:
-#					inbound 
+#					inbound
 #						p450 Match:	
 #								meta == 0 &&
 #								reservation VM0 &&
@@ -35,7 +52,7 @@
 #								resub 0 to apply openstack fmods
 #
 #				We no longer need to set VLAN on outbound nor do we need to strip VLAN on inbound, so
-#				vlan options are currently ignored (supported to be compatable with old/unchanged
+#				vlan options are currently ignored (supported to be compatible with old/unchanged
 #				agents).  Same with queues. We aren't queuing at the moment so the queue options are
 #				ignored. In future, there will (should) be a concept of flow-limits (meters maybe)
 #				which will be passed in as queue numbers, so the -q option needs to be kept and should
@@ -51,7 +68,7 @@
 #				14 May 2015 - To eliminate the use of br-rl and thus the last HTB queue. (flow-mods are
 #								now very simple, one in each direction)
 #				28 May 2015 - Added match vlan support (-V)
-#				18 Jun 2015 - Better handling of -q allowing HTB shutoff to be affected completely by 
+#				18 Jun 2015 - Better handling of -q allowing HTB shutoff to be affected completely by
 #								agent scripts (Tegu still thinks it's being set!)
 # ---------------------------------------------------------------------------------------------------------
 
@@ -131,7 +148,7 @@ do
 done
 
 # CAUTION:  this is confusing, so be careful (see notes in flower box at top)
-if [[ -n $exip ]]						# need to set up matching for external 
+if [[ -n $exip ]]						# need to set up matching for external
 then
 	if (( ex_local ))					# the lmac is associated with the external IP address
 	then
@@ -172,7 +189,7 @@ then
 	send_ovs_fmod $forreal $host $timeout -p $(( 450 + pri_base )) --match $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $proto --action $queue $idscp -M 0x01 -R ,0 -N $operation $cookie $bridge
 	rc=$?
 else
-	if (( ! koe ))		# one switch and keep is off, no need to set dscp 
+	if (( ! koe ))		# one switch and keep is off, no need to set dscp
 	then
 		odscp=""
 	fi

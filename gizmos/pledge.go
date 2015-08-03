@@ -1,10 +1,28 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	pledge interface
 	Abstract:	Defines what constitutes a pledge interface.
-				Implemented by pledge_bw, pledge_mirror, pledge_steer and 
+				Implemented by pledge_bw, pledge_mirror, pledge_steer and
 				maybe others.
 
 				Functions defined by the interface should make sense for ALL
@@ -16,7 +34,7 @@
 
 				There are also some generic functions such as json2pledge().
 	Date:		21 May 2015
-	Author:		E. 
+	Author:		E.
 Scott Daniels
 
 	Mods:
@@ -62,19 +80,19 @@ type Pledge interface {
 }
 
 // generic struct to unpack any type of pledge in order to determine the type
-// This must only contain fields that exist in all pledge types, and only 
+// This must only contain fields that exist in all pledge types, and only
 // the fields that are needed to determine the type.
 type J2p struct {
 	Ptype	*int
 }
 
 /*
-	Given a string that contains valid json, unpack it and examine 
-	the ptype. Based on ptype, allocate a specific pledge block and 
-	invoke it's function to unpack the string. 
+	Given a string that contains valid json, unpack it and examine
+	the ptype. Based on ptype, allocate a specific pledge block and
+	invoke it's function to unpack the string.
 */
 func Json2pledge( jstr *string ) ( p *Pledge, err error ) {
-	var pi Pledge 
+	var pi Pledge
 
 	jp := new( J2p )
 	err = json.Unmarshal( []byte( *jstr ), &jp )
@@ -88,7 +106,7 @@ func Json2pledge( jstr *string ) ( p *Pledge, err error ) {
 
 				case PT_OWBANDWIDTH:			// one way bandwidth
 					obp := new( Pledge_bwow )
-					obp.From_json( jstr) 
+					obp.From_json( jstr)
 					pi = Pledge( obp )
 	
 				case PT_MIRRORING:

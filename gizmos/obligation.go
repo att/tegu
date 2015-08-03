@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -395,7 +413,7 @@ func (ob *Obligation) Get_queue( qid *string, tstamp int64 ) ( qnum int ) {
 /*
 	Compares the UNIX timestamp passed in with the range now through the final
 	timestamp supported by obligation and returns true if the timestamp is in
-	range.  
+	range.
 */
 func Valid_obtime( usr_ts int64 ) bool {
 	return usr_ts <= DEF_END_TS  && usr_ts >= time.Now().Unix()

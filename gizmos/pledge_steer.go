@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -332,7 +350,7 @@ func (p *Pledge_steer) To_json( ) ( json string ) {
 	if p.protocol != nil {
 		proto = *p.protocol
 	}
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "id": %q, "ptype": %d, "mbox_list": [ `, 
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "id": %q, "ptype": %d, "mbox_list": [ `,
 			state, diff, *p.host1, *p.tpport1, *p.host2, *p.tpport2, proto, *p.id, PT_STEERING )
 
 	sep := ""
@@ -370,7 +388,7 @@ func (p *Pledge_steer) To_chkpt( ) ( chkpt string ) {
 	if p.protocol != nil {
 		proto = *p.protocol
 	}
-	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "commence": %d, "expiry": %d, "id": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `, 
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "commence": %d, "expiry": %d, "id": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `,
 			*p.host1, *p.tpport1, *p.host2, *p.tpport2, proto, c, e, *p.id,  *p.usrkey, PT_STEERING )
 
 	sep := ""
@@ -567,7 +585,7 @@ func (p *Pledge_steer) Get_hosts( ) ( *string, *string ) {
 		the commence time,
 		the expiry time
 
-		bwin/out are always returned as 0, but are given so that there is a consitent 
+		bwin/out are always returned as 0, but are given so that there is a consitent
 		interface for network values.
 */
 func (p *Pledge_steer) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *string, commence int64, expiry int64, bw_in int64, bw_out int64 ) {

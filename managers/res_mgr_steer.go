@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -24,15 +42,15 @@ import (
 	"strings"
 	"time"
 
-	//"codecloud.web.att.com/gopkgs/bleater"
-	//"codecloud.web.att.com/gopkgs/clike"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/tegu/gizmos"
+	//"github.com/att/gopkgs/bleater"
+	//"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/gizmos"
 )
 
 
 /*
-	Given a protocol string and directionm, set the proper transport port values in 
+	Given a protocol string and directionm, set the proper transport port values in
 	the fq_req structure. Direction is supplied as a forward == true or false value.
 */
 func set_proto_port( fq_data *Fq_req, proto *string, forward bool ) {
@@ -57,15 +75,15 @@ func set_proto_port( fq_data *Fq_req, proto *string, forward bool ) {
 
 
 /*
-	Generate flow-mod requests to the fq-manager for a given src,dest pair and list of 
-	middleboxes.  This assumes that the middlebox list has been reversed if necessary. 
+	Generate flow-mod requests to the fq-manager for a given src,dest pair and list of
+	middleboxes.  This assumes that the middlebox list has been reversed if necessary.
 	Either source (ep1) or dest (ep2) may be nil which indicates a "to any" or "from any"
-	intention. 
+	intention.
 
-	DANGER:  We generate the flowmods in reverse order which _should_ generate the highest 
+	DANGER:  We generate the flowmods in reverse order which _should_ generate the highest
 			priority f-mods first. This is absolutely necessary to prevent packet loops
-			on the switches which can happen if a higher priority rule isn't in place 
-			that would cause the lower priority rule to be skipped over. 
+			on the switches which can happen if a higher priority rule isn't in place
+			that would cause the lower priority rule to be skipped over.
 */
 func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64, rname *string, proto *string, forward bool ) {
 	var (
@@ -126,7 +144,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			if ep1 == nil && ep2 == nil {
 				rm_sheep.Baa( 1, "300 fmod not set -- src and dst were nil" )
 			} else {
-				jstr, _ := fq_data.To_json( ) 
+				jstr, _ := fq_data.To_json( )
 				rm_sheep.Baa( 1, "write 300 fmod: %s", *jstr )
 
 				msg := ipc.Mk_chmsg()
@@ -161,7 +179,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 			fq_data.Match.Ip1 = nil												// for 100 rules we only want to match src based on mac in case both endpoint VMs live on same phys host
 			fq_data.Nxt_mac = mb.Get_mac( )
-			jstr, _ := fq_data.To_json( ) 
+			jstr, _ := fq_data.To_json( )
 			rm_sheep.Baa( 1, "write ingress fmod: %s", *jstr )
 
 			msg := ipc.Mk_chmsg()
@@ -205,7 +223,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 			mb = mblist[i]	 													// now safe to get next middlebox in the list
 			fq_data.Nxt_mac = mb.Get_mac( )
-			jstr, _ := fq_data.To_json( ) 
+			jstr, _ := fq_data.To_json( )
 			rm_sheep.Baa( 1, "write intermed fmod: %s", *jstr )
 
 			msg := ipc.Mk_chmsg()
@@ -216,7 +234,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 
 /*
-	Push the fmod requests to fq-mgr for a steering resrvation. 
+	Push the fmod requests to fq-mgr for a steering resrvation.
 */
 func push_st_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chmsg, hto_limit int64 ) {
 
@@ -248,7 +266,7 @@ func push_st_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chmsg, h
 	ep2 = name2ip( ep2 )
 
 	nmb := p.Get_mbox_count()
-	mblist := make( []*gizmos.Mbox, nmb ) 
+	mblist := make( []*gizmos.Mbox, nmb )
 	for i := range mblist {
 		mblist[i] = p.Get_mbox( i )
 	}

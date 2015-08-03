@@ -1,10 +1,28 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
 	Mnemonic:	network_path
-	Abstract:	Functions that support the network manager with respect to path finding and 
-				similar tasks. 
+	Abstract:	Functions that support the network manager with respect to path finding and
+				similar tasks.
 
 	Date:		09 June 2015 (broken out of main-line network.go)
 	Author:		E. Scott Daniels
@@ -18,11 +36,11 @@ import (
 	"fmt"
 	"strings"
 
-	//"codecloud.web.att.com/gopkgs/bleater"
-	//"codecloud.web.att.com/gopkgs/clike"
-	//"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/tegu"
-	"codecloud.web.att.com/tegu/gizmos"
+	//"github.com/att/gopkgs/bleater"
+	//"github.com/att/gopkgs/clike"
+	//"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu"
+	"github.com/att/tegu/gizmos"
 )
 
 // ------------ local structs -------------------------------------------------
@@ -44,17 +62,17 @@ type host_pair struct {
 	IP address that is known to us.
 
 	If the project/project/user ID starts with a leading bang (!) then we assume it was NOT validated. If
-	both are not validated we reject the attempt. If one is validated we build the path from the other 
+	both are not validated we reject the attempt. If one is validated we build the path from the other
 	endpoint to its gateway using the unvalidated endpoint as the external destination.  If one is not
-	validated, but both IDs are the same, then we build the same path allowing user to use this as a 
-	shortcut and thus not needing to supply the same authorisation token twice on the request. 
+	validated, but both IDs are the same, then we build the same path allowing user to use this as a
+	shortcut and thus not needing to supply the same authorisation token twice on the request.
 
 	We now allow a VM to make a reservation with an external address without a floating point IP
-	since the VM's floating point IP is only needed on a reservation that would be made from 
+	since the VM's floating point IP is only needed on a reservation that would be made from
 	the "other side".   If the VM doesn't have a floating IP, then it WILL be a problem if the reservation
-	is being made between two tennants, but if for some odd reason a truely external IP address is 
+	is being made between two tennants, but if for some odd reason a truely external IP address is
 	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
-	the VM doesn't have a floating IP. 
+	the VM doesn't have a floating IP.
 */
 func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
 	var (
@@ -177,11 +195,11 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 /*
 	This is a helper function for find_paths and is invoked when we are interested in just the shortest
 	path between two switches. It will find the shortest path, and then build a path structure which
-	represents it.  ssw is the starting switch and h2nm is the endpoint "name" (probably a mac that we 
-	are looking for. 
+	represents it.  ssw is the starting switch and h2nm is the endpoint "name" (probably a mac that we
+	are looking for.
 	
-	The usr_max value is the percentage (1-100) that indicates the maximum percentage of a link that the 
-	user may reserve. 
+	The usr_max value is the percentage (1-100) that indicates the maximum percentage of a link that the
+	user may reserve.
 
 	This function assumes that the switches have all been initialised with a reset of the visited flag,
 	setting of inital cost, etc.
@@ -195,14 +213,14 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 		i41, _ := h1.Get_addresses()
 		i42, _ := h2.Get_addresses()
 		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *i41, *i42 )
-		return 
+		return
 	}
 
 	ssw.Cost = 0														// seed the cost in the source switch
 	tsw, cap_trip := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
 		path = gizmos.Mk_path( h1, h2 )
-		path.Set_reverse( true )								// indicate that the path is saved in reverse order 
+		path.Set_reverse( true )								// indicate that the path is saved in reverse order
 		path.Set_bandwidth( inc_cap )
 		net_sheep.Baa( 2,  "find_spath: found target on %s", tsw.To_str( ) )
 				
@@ -220,7 +238,7 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 
 			net_sheep.Baa( 3, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
 
-			if tsw.Prev == nil {													// last switch in the path, add endpoint 
+			if tsw.Prev == nil {													// last switch in the path, add endpoint
 				lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1, nil, nil )		// endpoint is a virt link from switch to h1
 				lnk.Add_lbp( *h1nm )
 				lnk.Set_forward( tsw )												// endpoints have only a forward link
@@ -236,15 +254,15 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 }
 
 /*
-	This is a helper function for find_paths(). It is used to find all possible paths between h1 and h2 starting at ssw. 
-	The resulting path is a "scramble" meaning that the set of links is a unique set of links that are traversed by 
-	one or more paths. The list of links can be traversed without the need to dup check which is beneficial for 
-	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the 
-	middle switches are NOT maintained. 
+	This is a helper function for find_paths(). It is used to find all possible paths between h1 and h2 starting at ssw.
+	The resulting path is a "scramble" meaning that the set of links is a unique set of links that are traversed by
+	one or more paths. The list of links can be traversed without the need to dup check which is beneficial for
+	increasing/decreasing the utilisaition on the link.  From a scramble, only end point queues can be set as the
+	middle switches are NOT maintained.
 
 	usr is the name of the user that the reservation is being processed for (project in openstack). The usr_max value
 	is a percentage (1-100)  that defines the maximum of any link that the user may have reservations against or a hard
-	limit if larger than 100. 
+	limit if larger than 100.
 
 */
 func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
@@ -299,7 +317,7 @@ func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *g
 	lnk.Set_forward( sw1 )
 	path.Add_endpoint( lnk )
 
-	lnk = n.find_swvlink( *(sw1.Get_id()), *(sw2.Get_id()) )					// suss out or create a virtual link between the two 
+	lnk = n.find_swvlink( *(sw1.Get_id()), *(sw2.Get_id()) )					// suss out or create a virtual link between the two
 	lnk.Set_forward( sw2 )
 	lnk.Set_backward( sw1 )
 	path.Add_link( lnk )
@@ -313,27 +331,27 @@ func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *g
 }
 
 /*
-	Find a set of connected switches that can be used as a path beteeen 
-	hosts 1 and 2 (given by name; mac or ip).  Further, all links between from and the final switch must be able to 
+	Find a set of connected switches that can be used as a path beteeen
+	hosts 1 and 2 (given by name; mac or ip).  Further, all links between from and the final switch must be able to
 	support the additional capacity indicated by inc_cap during the time window between
 	commence and conclude (unix timestamps).
 
-	If the network is 'split' a host may appear to be attached to multiple switches; one with a real connection and 
+	If the network is 'split' a host may appear to be attached to multiple switches; one with a real connection and
 	the others are edge switches were we see an 'entry' point for the host from the portion of the network that we
-	cannot visualise.  We must attempt to find a path between h1 using all of it's attached switches, and thus the 
+	cannot visualise.  We must attempt to find a path between h1 using all of it's attached switches, and thus the
 	return is an array of paths rather than a single path.
 
 
 	h1nm and h2nm are likely going to be ip addresses as the main function translates any names that would have
-	come in from the requestor.  
+	come in from the requestor.
 
-	Extip is an external IP address that will need to be associated with the flow-mods and thus needs to be 
+	Extip is an external IP address that will need to be associated with the flow-mods and thus needs to be
 	added to any path we generate.
 
-	If mlag_paths is true, then we will find shortest path but add usage to all related mlag links in the path. 
+	If mlag_paths is true, then we will find shortest path but add usage to all related mlag links in the path.
 
-	If find_all is set, and mlog_paths is false, then we will suss out all possible paths between h1 and h2 and not 
-	just the shortest path. 
+	If find_all is set, and mlog_paths is false, then we will suss out all possible paths between h1 and h2 and not
+	just the shortest path.
 */
 func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence int64, conclude int64, inc_cap int64, extip *string, ext_flag *string, find_all bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
 	var (
@@ -379,7 +397,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
 	pcount = 0
 
-	for {													// we'll break after we've looked at all of the connection points for h1 
+	for {													// we'll break after we've looked at all of the connection points for h1
 		if plidx >= len( path_list ) {
 			net_sheep.Baa( 0,  "CRI: find-path: internal error -- path size > num of links.  [TGUNET006]" )
 			return
@@ -408,7 +426,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 				has_room := true									// always room if relaxed mode, so start this way
 				if ! n.relaxed {
 					has_room, err = lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 	// admission control if not in relaxed mode
-				} 
+				}
 				if has_room {										// room for the reservation
 					lnk.Add_lbp( *h1nm )
 					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
@@ -445,7 +463,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 			
 			if n.relaxed {				
 				dsw, _ := h2.Get_switch_port( swidx )					// need the switch associated with the second host (dest switch)
-				path, err = n.find_relaxed_path( ssw, h1, dsw, h2 )		// no admissions control we fake a link between the two 
+				path, err = n.find_relaxed_path( ssw, h1, dsw, h2 )		// no admissions control we fake a link between the two
 				if err != nil {
 					net_sheep.Baa( 1, "find_paths: find_relaxed failed: %s", err )
 				}
@@ -479,29 +497,29 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 }
 
 /*
-	Find all paths that are associated with the reservation.  This splits the h1->h2 request into 
-	two paths if h1 and h2 are in different projects.  The resulting paths in this case are between h1 and 
-	the gateway, and from the gateway to h2 (to preserve the h1->h2 directional signficance which is 
+	Find all paths that are associated with the reservation.  This splits the h1->h2 request into
+	two paths if h1 and h2 are in different projects.  The resulting paths in this case are between h1 and
+	the gateway, and from the gateway to h2 (to preserve the h1->h2 directional signficance which is
 	needed if inbound and outbound rates differ.  In order to build a good set of flow-mods for the split
-	reservation, both VMs MUST have an associated floating point address which is then generated as a 
-	match point in the flow-mod.  
+	reservation, both VMs MUST have an associated floating point address which is then generated as a
+	match point in the flow-mod.
 
-	If find_all is true we will find all paths between each host, not just the shortest.  This should not 
+	If find_all is true we will find all paths between each host, not just the shortest.  This should not
 	be confused with finding all paths when the network is split as that _always_ happens and by default
-	we find just the shortest path in each split network. 
+	we find just the shortest path in each split network.
 
-	Cap_trip indicates that one or more paths could not be found because of capacity issues. If this is 
-	set there is still a possibility that the path was not found because it doesn't exist, but a 
-	capacity limit was encountered before 'no path' was discovered.  The state of the flag is only 
+	Cap_trip indicates that one or more paths could not be found because of capacity issues. If this is
+	set there is still a possibility that the path was not found because it doesn't exist, but a
+	capacity limit was encountered before 'no path' was discovered.  The state of the flag is only
 	valid if the pathcount returend is 0.
 
-	rpath is true if this function is called to build the reverse path.  It is necessary in order to 
+	rpath is true if this function is called to build the reverse path.  It is necessary in order to
 	properly set the external ip address flag (src/dest).
 */
 func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, conclude int64, inc_cap int64, find_all bool, rpath bool ) ( pcount int, path_list []*gizmos.Path, cap_trip bool ) {
 	var (
 		num int = 0				// must declare num as := assignment doesnt work when ipath[n] is in the list
-		src_flag string = "-S"	// flags that indicate which direction the external address is 
+		src_flag string = "-S"	// flags that indicate which direction the external address is
 		dst_flag string = "-D"
 		lcap_trip bool = false	// overall capacity caused failure indicator
 		ext_flag *string		// src/dest flag associated with the external ip address of the path component
@@ -520,7 +538,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	}
 
 	total_paths := 0
-	ok_count := 0 
+	ok_count := 0
 	ipaths := make( [][]*gizmos.Path, len( pair_list ) )			// temp holder of each path list resulting from pair_list exploration
 
 	if rpath {
@@ -535,7 +553,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 			ok_count++
 
 			for j := range ipaths[i] {
-				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation 
+				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation
 			}
 		} else {
 			if pair_list[i].h1 != nil && pair_list[i].h2 != nil {											 // pair might be nil if no gateway; don't stack dump
@@ -560,7 +578,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 		net_sheep.Baa( 1, "did not find a good path for each pair; expected %d, found %d cap_trip=%v", len( pair_list ), ok_count, lcap_trip )
 		pcount = 0
 		cap_trip = lcap_trip
-		return 
+		return
 	}
 
 	if len( ipaths ) == 1 {
