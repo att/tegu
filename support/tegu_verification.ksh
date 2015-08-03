@@ -1,4 +1,24 @@
 #!/usr/bin/env ksh
+# vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
+#!/usr/bin/env ksh
 
 #	Mnemonic:	tegu_verification.ksh
 #	Abstract:	Runs a few regression(ish) tests to verify that tegu is working.
@@ -81,7 +101,7 @@ function validate_fail
 	echo "OK:   $global_comment"
 }
 
-# ensure that the command retured ok, and that the output contains the
+# ensure that the command returned ok, and that the output contains the
 # indicated string/pattern
 # parms:  file "pattern" "message"
 function validate_contains
@@ -122,7 +142,7 @@ function validate_contains
 	fi
 }
 
-# ensure that the command retured ok (or failed if -f set), and that the output does NOT contain
+# ensure that the command returned ok (or failed if -f set), and that the output does NOT contain
 # the indicated string/pattern.
 # parms:  file "pattern"
 function validate_missing
@@ -512,9 +532,9 @@ else
 			capture $single_file "list concurrent reservations"
 
 			global_comment="concurrent list reservation has first reservation"
-			validate_contains $single_file "id.*$rida" 
+			validate_contains $single_file "id.*$rida"
 			global_comment="concurrent list reservation has second reservation"
-			validate_contains $single_file "id.*$ridb" 
+			validate_contains $single_file "id.*$ridb"
 		
 			run tegu_req $secure $host cancel $rida cookie >$single_file		# should fail
 			capture $single_file	"cancel first of the concurrent reservations"
@@ -525,9 +545,9 @@ else
 
 			run tegu_req $secure $host listres >$single_file
 			capture $single_file "list contains second reservation after first in multiple reservation test cancelled"
-			validate_missing $single_file "id.*$rida" 
+			validate_missing $single_file "id.*$rida"
 			global_comment="second concurrent reservation continues to be listed after first cancelled"
-			validate_contains $single_file "id.*$ridb" 
+			validate_contains $single_file "id.*$ridb"
 		else
 			echo "WARN: could not find reservation id for second reservation; rest of concurrent reservation tests skipped"
 		fi
