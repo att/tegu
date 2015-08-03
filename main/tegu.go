@@ -1,4 +1,22 @@
 // vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -99,7 +117,7 @@
 				11 Mar 2015 : Corrected bug in network manager causing coredump when gateway info missing on bleat message.
 				25 Mar 2015 : Added support for IPv6 in bandwidth reservations, and new bandwidth flow-mod script in the agent.
 				31 Mar 2015 : Added abilty to force a load of any specific project's VM data into the graph, or all that are
-							known to Tegu. 
+							known to Tegu.
 				03 Apr 2015 : Added role verification for graph and listhosts to allow any admin to submit these from afar.
 				10 Apr 2015 : Added ability to delete reservation via post, corrected slice bounds error (tokeniser library fix).
 				16 Apr 2015 : Now supports openstack regions.
@@ -131,9 +149,9 @@ import (
 	"sync"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/ipc"
-	"codecloud.web.att.com/tegu/managers"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/managers"
 )
 
 var (

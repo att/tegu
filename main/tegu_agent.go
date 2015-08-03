@@ -1,4 +1,22 @@
-/*rm/ vi: sw=4 ts=4:
+// vi: sw=4 ts=4:
+/*
+ ---------------------------------------------------------------------------
+   Copyright (c) 2013-2015 AT&T Intellectual Property
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+ ---------------------------------------------------------------------------
+*/
+
 
 /*
 
@@ -45,7 +63,7 @@
 				17 Jul 2015 : Merge with steering, reference wa scripts from /var/lib/tegu/bin rather
 					than /opt/app/bin.
 
-	NOTE:		There are three types of generic error/warning messages which have 
+	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
 				dedicated functions rather than direct calls to Baa().
 */
@@ -62,11 +80,11 @@ import (
 	"strings"
 	"time"
 
-	"codecloud.web.att.com/gopkgs/bleater"
-	"codecloud.web.att.com/gopkgs/connman"
-	"codecloud.web.att.com/gopkgs/jsontools"
-	"codecloud.web.att.com/gopkgs/ssh_broker"
-	"codecloud.web.att.com/gopkgs/token"
+	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/connman"
+	"github.com/att/gopkgs/jsontools"
+	"github.com/att/gopkgs/ssh_broker"
+	"github.com/att/gopkgs/token"
 )
 
 // globals
@@ -90,7 +108,7 @@ type json_action struct {
 	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
 	Aid		uint32				// action id to be sent in the response
 	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
-	Qdata	[]string			// queue parms 
+	Qdata	[]string			// queue parms
 	Fdata	[]string			// flow-mod parms
 	Hosts	[]string			// hosts to execute on if a multihost command
 	Dscps	string				// space separated list of dscp values
@@ -115,7 +133,7 @@ type agent_msg struct {
 }
 //--- generic message functions ---------------------------------------------------------------------
 
-/* 
+/*
 	These message functions ensure that the message text is the same regardless of the function that
 	needs to generate a message with the given IDs.
 */
@@ -195,15 +213,15 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 // --------------- request support (command execution) ----------------------------------------------------------
 
 /*	Run a wide area command which fits a generic profile. The agent (us) is expected to know what values need to be pulled
-	from the parm list and how they are placed on the command line. Tegu's agent manager knows what the 
-	interface is with the caller (could be WACC, could be something different) and thus tegu is 
+	from the parm list and how they are placed on the command line. Tegu's agent manager knows what the
+	interface is with the caller (could be WACC, could be something different) and thus tegu is
 	responsible for taking the raw stdout and putting it into a form that the requestor can digest.
 
 	Type is "wa_del_conn" "wa_port", "wa_tunnel", or "wa_route"
  */
 func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
     var (
-		cmd_str string  
+		cmd_str string
 		allow_exists bool = false		// we might allow file exists "errors" if this is set
     )
 	
@@ -223,7 +241,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANTunnel %s %s %s`, pstr, parms["localrouter"], parms["localip"], parms["remoteip"] )
 
 		case "wa_route":
-				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANRoute %s %s %s %s`, 
+				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANRoute %s %s %s %s`,
 						pstr, parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
 
 		case "wa_del_conn":
@@ -273,7 +291,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 							sheep.Baa( 1, "WRN wa_cmd (%s) indicates element (route, etc.) exists;  stdout: %d lines; stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
 							msg.State = 0
 						}
-					} 
+					}
 					sheep.Baa( 1, "WRN: error running wa command: host=%s: %s", host, err )
 				} else {
 					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
@@ -298,12 +316,12 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 }
 
 /*
-	Builds an option string of the form '-X value' if value passed in is not nil, and an empty string if 
+	Builds an option string of the form '-X value' if value passed in is not nil, and an empty string if
 	if the value is nil.  If the value is "true" or "True", then '-X' is returned, if value is "false"
 	or "False", then an empty string is returned.  Opt is the -X or --longname option to use. If
 	opt ends in an equal sign, (e.g. --longname=), then no space will separate the key and value
 	in the resulting string.  If opt is empty (""), then that results in just the value being placed
-	in the return string such that -x could be sent in the map, or positional paramters sussed out 
+	in the return string such that -x could be sent in the map, or positional paramters sussed out
 	this way too.
 */
 
@@ -320,11 +338,11 @@ func build_opt( value string, opt string ) ( parm string ) {
 
 	have_eq := false
 	fmt_str := "%s %s "				// default to -x value
-	li := len(opt) 					// last index 
+	li := len(opt) 					// last index
 	if opt[li-1:li] == "=" {		// --longopt=  we assume, so tokens have no space
 		fmt_str = "%s%s "
 		have_eq = true
-	} 
+	}
 
 	switch( value ) {
 		case "True", "true", "TRUE":
@@ -349,13 +367,13 @@ func build_opt( value string, opt string ) ( parm string ) {
 }
 
 /*	
-	Bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which 
+	Bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which
 	eliminates the need for Tegu to understand/know things like command line parms, bridge names and
 	such.  Parms in the map are converted to script command line options.
  */
 func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
     var (
-		cmd_str string  
+		cmd_str string
     )
 	
 	pstr := ""
@@ -379,7 +397,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 			build_opt( parms["timeout"],  "-t" ) +
 			build_opt( parms["dscp"],  "-T" ) +
 			build_opt( parms["oneswitch"], "-o" )  +
-			build_opt( parms["ipv6"], "-6" ) 
+			build_opt( parms["ipv6"], "-6" )
 
 
 	sheep.Baa( 1, "via broker on %s: %s", act.Hosts[0], cmd_str )
@@ -444,13 +462,13 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 }
 
 /*	
-	Oneway bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which 
+	Oneway bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which
 	eliminates the need for Tegu to understand/know things like command line parms, bridge names and
 	such.  Parms in the map are converted to script command line options.
  */
 func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
     var (
-		cmd_str string  
+		cmd_str string
     )
 	
 	pstr := ""
@@ -469,7 +487,7 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
 			build_opt( parms["timeout"],  "-t" ) +
 			build_opt( parms["dscp"],  "-T" ) +
 			build_opt( parms["vlan_match"],  "-V" ) +
-			build_opt( parms["ipv6"], "-6" ) 
+			build_opt( parms["ipv6"], "-6" )
 
 
 	sheep.Baa( 1, "via broker on %s: %s", act.Hosts[0], cmd_str )
@@ -490,7 +508,7 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
 		return
 	}
 
-	// TODO: this can be moved to a function 
+	// TODO: this can be moved to a function
 	rdata := make( []string, 8192 )								// response output converted to strings
 	edata := make( []string, 8192 )
 	ridx := 0													// index of next insert point into rdata
@@ -534,8 +552,8 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
 }
 
 /*
-	Generate a map that lists physical host and mac addresses. Timeout is the max number of 
-	seconds that we will wait for all responses.  If timeout seconds passes before all 
+	Generate a map that lists physical host and mac addresses. Timeout is the max number of
+	seconds that we will wait for all responses.  If timeout seconds passes before all
 	responses are received we will return what we have. The map command is executed on all
 	hosts, so we send a non-blocking command to the broker for each host and wait for the
 	responses to come back on the channel.  This allows them to run in parallel across
@@ -795,7 +813,7 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 					host, _, _ := resp.Get_info()
 					sheep.Baa( 1, "send-fmod: received response from %s elap=%d err=%v, waiting for %d more", host, elapsed, err != nil, wait4 )
 					if err != nil {
-						sheep.Baa( 0, "ERR: unable to execute send-fmod command on %s: data=%s  %s	[TGUAGN004]", host, cstr, err )  
+						sheep.Baa( 0, "ERR: unable to execute send-fmod command on %s: data=%s  %s	[TGUAGN004]", host, cstr, err )
 						errcount++
 					}  else {
 						sheep.Baa( 1, "flow mod set on: %s", host )
