@@ -1,12 +1,29 @@
 #!/usr/bin/env ksh
-# vi: ts=4 sw=4:
+#vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	ql_bwow_fmods
 #	Abstract:	Generates all needed flow-mods on an OVS for a oneway bandwidth reservation.
 #				One way reservations mark and potentially rate limit traffic on the ingress
 #				OVS only.  There is no attempt to set any flow-mods for inbound traffic as
 #				we do NOT expect that the traffic has been marked by us on the way "in".
-#				A oneway reservation is generally implemented when the other endpint is 
+#				A oneway reservation is generally implemented when the other endpint is
 #				external (cross project, or on the other side of the NAT box), and the router
 #				is not a neutron router (i.e. not under OVS).
 #
@@ -24,7 +41,7 @@
 #								resub 0 to apply openstack fmods
 #
 #				We no longer need to set VLAN on outbound nor do we need to strip VLAN on inbound, so
-#				vlan options are currently ignored (supported to be compatable with old/unchanged
+#				vlan options are currently ignored (supported to be compatible with old/unchanged
 #				agents).  Same with queues. We aren't queuing at the moment so the queue options are
 #				ignored. In future, there will (should) be a concept of flow-limits (meters maybe)
 #				which will be passed in as queue numbers, so the -q option needs to be kept and should

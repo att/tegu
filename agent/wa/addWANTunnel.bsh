@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+
+
+IP=/sbin/ip
+IFCONFIG=/sbin/ifconfig
+LOCKFILE='/tmp/WAQoSAgent.lock'
+
+TUNMODE='gre'
+IFTUN=${TUNMODE}-`uuidgen`
+# the 14-character if name length limit here reflects constants in neutron
+# we probably should generate a more mnemonic name for the interface
+IFTUN=`echo $IFTUN | sed 's/^\([a-zA-Z0-9\-]\{14\}\).*/\1/'`
+
+if [ $# -lt 3 ]; then
+ echo "USAGE: $0 router-uuid local-ip remote-ip"
+ exit 99
+fi
+
+ROUTER=`echo $1 | sed 's/[^0-9a-fA-F\-]//g'`
+NSROUTER=qrouter-${ROUTER}
+IPLOCAL=`echo $2 | sed 's/[^0-9.]//g'`
+IPREMOTE=`echo $3 | sed 's/[^0-9.]//g'`
+
+if [ -z $ROUTER -o -z $IPLOCAL -o -z $IPREMOTE ]; then
+ echo "USAGE: $0 router-uuid local-ip remote-ip"
+ exit 99
+fi
+
+(
+  flock 7
+  $IP netns exec $NSROUTER \
+   $IP tunnel add $IFTUN mode $TUNMODE local $IPLOCAL remote $IPREMOTE
+) 7>$LOCKFILE

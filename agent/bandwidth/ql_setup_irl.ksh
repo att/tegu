@@ -1,5 +1,23 @@
 #!/usr/bin/env bash 
-# vi: sw=4: ts=4:
+#vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
 # -----------------------------------------------------------------------------------------------------------------
 #	Mnemonic:	ql_setup_irl.ksh
 #	Abstract:	Sets up ingress rate limiting bridge veth connector and flow-mods.
@@ -142,7 +160,7 @@ delete=0
 
 while [[ $1 == "-"* ]]
 do
-	case $1 in 
+	case $1 in
 		-D)	delete=1;;
 		-h)	
 			if [[ $2 != $rhost  &&  $2 != "localhost" ]]
@@ -207,7 +225,7 @@ else
 	then
 		add_fmod=1			# f-mod gone missing; force creation
 	fi
-fi 
+fi
 
 if (( add_fmod ))
 then
@@ -238,7 +256,7 @@ else
 fi
 
 
-$forreal timeout 15 $ssh $sudo ovs-ofctl mod-port br-int $ve0 noflood		# we should always do this 
+$forreal timeout 15 $ssh $sudo ovs-ofctl mod-port br-int $ve0 noflood		# we should always do this
 warn_if_bad $? "unable to set no flood on br-int:$ve0"
 
 

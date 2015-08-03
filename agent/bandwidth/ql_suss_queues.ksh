@@ -1,13 +1,31 @@
 #!/usr/bin/env bash 
-# vi: sw=4: ts=4:
+#vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
+
 # -----------------------------------------------------------------------------------------------------------------
 #	Mnemonic:	ql_suss_queues.ksh
-#	Abstract:	Dumps several 'tables' from the ovs database and builds a 
-#				summary of queue information. 
+#	Abstract:	Dumps several 'tables' from the ovs database and builds a
+#				summary of queue information.
 #	Author:		E. Scott Daniels
 #	Date:		08 September 2014
 #
-#	Mods:		26 Dec 2013 - Added support for finding and printing queue priority and eliminated the 
+#	Mods:		26 Dec 2013 - Added support for finding and printing queue priority and eliminated the
 #					need for user to run under sudu (we'll detect that need and do it).
 #				08 Sep 2014 - Ported from the original quick and dirty script (suss_ovs_queues) to make
 #					it usable by the tegu agents in a q-lite environment.
@@ -31,7 +49,7 @@ show_units=1
 
 while [[ $1 == "-"* ]]
 do
-	case $1 in 
+	case $1 in
 		-b)	backlevel_ovs=1;;
 		-B)	show_headers=0; bridge=$2; shift;;
 		-h)	
@@ -52,7 +70,7 @@ do
 done
 
 # we make a blind assumption that data is presented in the order requested by the --column flag
-# grrr.... bleeding ovs-vsctl 1.4.x is broken and doesn't recognise --column even though the man page says otherwise. 
+# grrr.... bleeding ovs-vsctl 1.4.x is broken and doesn't recognise --column even though the man page says otherwise.
 (
 	if (( ! backlevel_ovs ))
 	then
@@ -75,7 +93,7 @@ done
 	NF < 4 { next; }
 
 	/^BRIDGE: name/	{ bname = $NF; seen[seen_idx++] = bname; next; }
-	/^BRIDGE: ports/	{ 
+	/^BRIDGE: ports/	{
 		pidx[bname] = 0;
 		for( i = 4; i <= NF; i++ )
 		{
@@ -91,7 +109,7 @@ done
 	/^PORT: qos/	{ p2qos[puname] = $NF; next; }			# map port to the qos entry
 
 	/^QOS: _uuid/	{ qoname = $NF; next; }
-	/^QOS: other_config/	{ 
+	/^QOS: other_config/	{
 		for( i = 4; i <= NF; i++ )
 		{
 			if( split( $(i), a, "=" ) == 2 )
@@ -99,7 +117,7 @@ done
 		}
 		next;
 	}
-	/^QOS: queues/	{ 
+	/^QOS: queues/	{
 		for( i = 4; i <= NF; i++ )
 		{
 			maxqueue[qoname] = 0;
@@ -114,7 +132,7 @@ done
 	}
 
 	/^QUEUE: _uuid/	{ qname = $NF; next; }
-	/^QUEUE: other_config/	{ 
+	/^QUEUE: other_config/	{
 		for( i = 4; i <= NF; i++ )
 		{
 			if( split( $(i), a, "=" ) == 2 )		
@@ -140,7 +158,7 @@ done
 						
 					for( k = 0; k <= maxqueue[qos]; k++ )
 					{
-						qid = qos_q[qos,k]; 
+						qid = qos_q[qos,k];
 						if( qid != "" )
 						{
 							if( show_units )
@@ -167,7 +185,7 @@ exit $?
 #ports               : 6b200e3a-cfa1-4168-9510-879ee789bc0c 929dc121-d271-4657-8c9a-278712742589 9cb5e906-02d3-4819-9ece-6c8e949a857d c32ec7a5-eb4b-4484-86e5-6ea7f527b969
 #
 #
-#port: 
+#port:
 #name                : s2-eth2
 #_uuid               : 4a301fb0-df46-4739-8b53-b1f4a46f927c
 #qos                 : 414f8f52-3632-4028-a104-78a364bcb0c9

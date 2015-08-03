@@ -1,10 +1,28 @@
 #!/usr/bin/env ksh
+#vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	ql_set_trunks
 #	Abstract:	Read the output from ovs_sp2uuid and suss off all VLAN IDs for br-int. Then
 #				generate a trunk command that adds the trunk list to the qosirl0 interface.
 #				Trunks must be set on the interface in order to set the vlan-id in a flow-mod
-#				as data passes to the interface. Trunks canNOT be set as a range. 
+#				as data passes to the interface. Trunks canNOT be set as a range.
 #
 #				As of OVS 2.1 it seems that the listing of VLAN IDs on a trunk port isn't
 #				needed, so this script may now be deprecated.
@@ -21,14 +39,14 @@ forreal=""
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-n)		forreal="echo would execute: ";;
 
-		-\?)	echo "usage: $0 [-n]" 
+		-\?)	echo "usage: $0 [-n]"
 				exit 0
 				;;
 
-		*)		echo "usage: $0 [-n]" 
+		*)		echo "usage: $0 [-n]"
 				exit 1
 				;;
 	esac
@@ -64,7 +82,7 @@ ovs_sp2uuid -a | awk '
 		for( i = 1; i <= max; i++ ) {			# keeps them sorted
 			if( seen[i] ) {
 				list = list sprintf( "%s%d", sep, i )
-				sep = "," 
+				sep = ","
 			}
 		}
 

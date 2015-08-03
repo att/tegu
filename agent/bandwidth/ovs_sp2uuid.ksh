@@ -1,10 +1,27 @@
 #!/usr/bin/env ksh
-# vi: sw=4 ts=4:
+#vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	ovs_sp2uuid -- map a switch dpid/port combination to ovs UUID.
-#	Abstract:	This script accepts the dpid for a switch and an openflow port 
+#	Abstract:	This script accepts the dpid for a switch and an openflow port
 #				number and writes the UUID of the asscoiated internal OVS port
-#				that is needed when managing queues.  The UUID can then be given on 
+#				that is needed when managing queues.  The UUID can then be given on
 #				an an ovs command to set the qos queues (e.g.
 #					ovs-vsctl set Port <uuid> qos=<qos-name>
 #
@@ -12,32 +29,32 @@
 #				is the uuid of the qos entry that should be assigned to the port.
 #
 #				If -k file is given to the script the ovs data needed to suss out the
-#				answer is saved in file and that can be supplied on future calls to 
-#				this script (-d file) to avoid repeated queries against the ovs 
+#				answer is saved in file and that can be supplied on future calls to
+#				this script (-d file) to avoid repeated queries against the ovs
 #				environment.
 #
-#				To allow our stuff to run on a centralised host, where  the remote host consists 
+#				To allow our stuff to run on a centralised host, where  the remote host consists
 #				only of a user id and 	none of our code,  we bundle ovs-* commands into as large
-#				of a batch as is possible and submit them in one ssh session as session setup is 
-#				painfully expensive. 
+#				of a batch as is possible and submit them in one ssh session as session setup is
+#				painfully expensive.
 #
 #	Date:		05 February 2014
 #	Author:		E. Scott Daniels
 #
 #	Mods:		03 Mar 2014 - Added sudo when needed to the ovs-vsctl calls
 #				07 Mar 2014 - Corrected bug with default name.
-#				20 Mar 2014 - Added -a option which shows additional information for each 
-#					switch and port. Fixed bug that was causing some info to be missed 
+#				20 Mar 2014 - Added -a option which shows additional information for each
+#					switch and port. Fixed bug that was causing some info to be missed
 #					on some systems.
 #				23 Apr 2014 - Hacked to support running the commands on a remote host.
 #				27 Apr 2014 - Added support to generate external mac and id when -a is given.
-#				04 May 2014 - Added some error checking and reporting. 
+#				04 May 2014 - Added some error checking and reporting.
 #				13 May 2014 - Added ssh options to prevent prompts when new host tried
 #				24 Sep 2014 - Now captures vlan-id and puts that out with additional info
 #				10 Nov 2014 - Added connect timeout to ssh calls
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				05 Dec 2014 - Default to dropping interfaces marked as internal
-#				10 Dec 2014 - Reert the default to dropping interfaces marked as internal as some 
+#				10 Dec 2014 - Reert the default to dropping interfaces marked as internal as some
 #					gateways (router) are marked by quantum as internal.
 #				28 Dec 2015 - Prevent actually using ssh if the host given with -h is the localhost.
 #				14 Apr 2015 - Added call to filter_rtr which should eliminate any Openstack routers
@@ -50,13 +67,13 @@
 # (allows for easy retry)
 function cat_ovs_cmds
 {
-		cat <<endKat 
+		cat <<endKat
 			echo "BRIDGEDATA"
-			$sudo ovs-vsctl list Bridge 
+			$sudo ovs-vsctl list Bridge
 			echo "PORTDATA"
-			$sudo ovs-vsctl list Port 
+			$sudo ovs-vsctl list Port
 			echo "IFACEDATA"
-			$sudo ovs-vsctl list Interface 
+			$sudo ovs-vsctl list Interface
 endKat
 }
 
@@ -85,7 +102,7 @@ ssh_opts="-o ConnectTimeout=2 -o StrictHostKeyChecking=no -o PreferredAuthentica
 
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-a)	show_adtl=1;;
 		-d)	data=$2; shift;;
 		-f)	filter=0;;
@@ -109,7 +126,7 @@ do
 				-k keeps the data file for reuse
 				-d supplies the data file to use from a previous execution
 
-				The word "all" can be used for the switch id to cause all switches to be listed. 
+				The word "all" can be used for the switch id to cause all switches to be listed.
 			endKat
 			exit 1
 	esac
@@ -174,20 +191,20 @@ fi
 		next;
 	}
 
-	/^name/ { 
+	/^name/ {
 		gsub( "\"", "" );
 		gsub( "}", "" );
 		gsub( "{", "" );
-		name = $NF; 
+		name = $NF;
 		id2name[id] = $NF;
-		next; 
+		next;
 	}
 
-	/^_uuid/ { 
+	/^_uuid/ {
 		gsub( "\"", "" );
 		gsub( "}", "" );
 		gsub( "{", "" );
-		id = $NF; 
+		id = $NF;
 		if( bridge_type )
 			seen[id] = 1;
 	}
@@ -201,17 +218,17 @@ fi
 	}
 
 	/^ofport_request/ { next; }		
-	/^ofport/ { 
-		ofport[id] = $NF;  
+	/^ofport/ {
+		ofport[id] = $NF;
 		ofname[id] = name;
-		next; 
+		next;
 	}
 
-	/^datapath_id/ { 
+	/^datapath_id/ {
 		gsub( "\"", "" );
-		dpid[id] = $NF; 
+		dpid[id] = $NF;
 		dpid2uuid[$NF] = id;
-		next; 
+		next;
 	}
 
 	/^interfaces/ {

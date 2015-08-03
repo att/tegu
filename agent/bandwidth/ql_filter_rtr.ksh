@@ -1,14 +1,32 @@
 #!/usr/bin/env ksh
+#vi: sw=4 ts=4:
+#
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+#
 
 #	Mnemonic:	ql_fiilter_rtr
 #	Abstract:	Run various ip commands to get a list of router/gw mac addresses that are currently
-# 				active on the node.  Using the list, and the output from ovs_sp2uuid (stdin) 
-#				generate an augmented set of ovs_sp2uuid output.  The filter applied allows all 
-#				non-router elements to pass, and blocks router elements if there is no corresponding 
+# 				active on the node.  Using the list, and the output from ovs_sp2uuid (stdin)
+#				generate an augmented set of ovs_sp2uuid output.  The filter applied allows all
+#				non-router elements to pass, and blocks router elements if there is no corresponding
 #				mac address listed by the series of ip commands.
 #
 # 				Running through the name spaces seems to be expensive, based on a trial on a loaded L3,
-#				so we'll cache the list and regenerate it only if we think it is out of date. 
+#				so we'll cache the list and regenerate it only if we think it is out of date.
 #			
 #				DANGER:  This can be _extremely_ expensive (in terms of wall clock execution time)
 #						and thus any code that calls it, and is expected to return a result quickly
@@ -23,7 +41,7 @@
 age=300								# reload only every 5 minutes by default
 while [[ $1 == -* ]]
 do
-	case $1 in 
+	case $1 in
 		-a)		age=$2; shift;;
 		-f)		age=0;;				# force a reload of data regardless of how old the cache is
 
@@ -61,7 +79,7 @@ if (( need ))
 then
 	echo "snarfing netns data"
 	ip netns | grep "qrouter-" | while read r 			# suss out the list of router name spaces
-	do 
+	do
 		if (( verbose ))
 		then
 			echo "suss from $r   [OK]" >&2

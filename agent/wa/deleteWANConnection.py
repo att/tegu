@@ -1,4 +1,21 @@
 #!/usr/bin/python
+# ---------------------------------------------------------------------------
+#   Copyright (c) 2013-2015 AT&T Intellectual Property
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at:
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+# ---------------------------------------------------------------------------
+
+
 from sys import argv, exit
 from httplib import HTTPConnection
 from uuid import UUID
@@ -22,7 +39,7 @@ portDetailsPath = NeutronPath + '/ports'
 
 #
 def routerFor(subnet, token):
-  # this isn't really correct -- there could easily be more than one 
+  # this isn't really correct -- there could easily be more than one
   # router on the subnet, and we'll only find the first one.  owell.
   subnetUUID = UUID(subnet)
   req = HTTPConnection(NeutronHost, NeutronPort)
@@ -41,7 +58,7 @@ def routerFor(subnet, token):
          return routerDetails['id']
   req.close()
   return None
- 
+
 def routerPortFor(router, subnet, token):
   # this is a little closer to correct: neutron allows only one router
   # interface per subnet.
@@ -84,7 +101,7 @@ req = HTTPConnection(NeutronHost, NeutronPort)
 wanPort = routerPortFor(router, wan, token)
 if(wanPort):
   routerNS = NS_PREFIX + router
-  
+
   # 1. grab the old route, we'll need the interface name.
   # produces ['10.7.0.0', 'dev', 'gre-90db5528-0d',  'src', '10.0.2.1']
   tunnelIF = subprocess.check_output(['/sbin/ip', 'netns', 'exec', routerNS,
@@ -121,7 +138,7 @@ if(wanPort):
   # 5. delete the IP, or the port if it's the last remaining address
   subprocess.call(['/sbin/ip', 'netns', 'exec', routerNS,
                    '/sbin/ip', 'address', 'del', tunnelIP, 'dev', portIF])
-  if(len(wanPort['fixed_ips']) > 1): 
+  if(len(wanPort['fixed_ips']) > 1):
     req.request('PUT',
                 portDetailsPath +'/'+ wanPort['id'] +'.json',
                 json.dumps({'port':
