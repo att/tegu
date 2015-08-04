@@ -45,21 +45,10 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
-	//"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
 	"strings"
 	"time"
 
-	//"github.com/att/att/gopkgs/bleater"
-	"github.com/att/att/gopkgs/clike"
-	//"github.com/att/att/gopkgs/token"
-	//"github.com/att/att/gopkgs/ipc"
+	"github.com/att/gopkgs/clike"
 )
 
 

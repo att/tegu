@@ -34,7 +34,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/att/att/tegu/gizmos"
+	"github.com/att/tegu/gizmos"
 )
 
 const (

@@ -36,10 +36,8 @@ package gizmos
 
 import (
 	"os"
-	"github.com/att/att/gopkgs/bleater"
+	"github.com/att/gopkgs/bleater"
 )
-
-//import "github.com/att/att/tegu"
 
 const (
 	PT_BANDWIDTH	int = iota				// pledge types
