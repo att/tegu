@@ -36,7 +36,7 @@ package gizmos
 import (
 	"fmt"
 
-	//"github.com/att/att/gopkgs/clike"
+	//"github.com/att/gopkgs/clike"
 )
 
 type Spq struct {

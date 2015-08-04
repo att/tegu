@@ -50,7 +50,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/att/att/tegu"
+	"github.com/att/tegu"
 )
 
 

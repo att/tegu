@@ -30,19 +30,11 @@
 package gizmos_test
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
-	//"strings"
-	//"time"
 	"testing"
 
-	"github.com/att/att/tegu/gizmos"
+	"github.com/att/tegu/gizmos"
 )
 
 const (

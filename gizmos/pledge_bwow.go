@@ -42,7 +42,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/att/att/gopkgs/clike"
+	"github.com/att/gopkgs/clike"
 )
 
 type Pledge_bwow struct {
