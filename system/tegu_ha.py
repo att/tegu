@@ -73,6 +73,9 @@ TEGU_PROTO = 'http'
 
 SSH_CMD = 'ssh -o StrictHostKeyChecking=no %s@%s '
 
+RETRY_COUNT = 3      # How many times to retry ping command
+CONNECT_TIMEOUT = 3  # Ping timeout
+
 DEACTIVATE_CMD = '/usr/bin/tegu_standby on;' \
     'killall tegu; killall tegu_agent'               # Command to kill tegu
 ACTIVATE_CMD = '/usr/bin/tegu_standby off;' \
@@ -217,14 +220,16 @@ def is_active(host='localhost'):
 
     # must use no-proxy to avoid proxy servers gumming up the works
     # grep stderr redirected to avoid pipe complaints
-    curl_str = ('curl --noproxy \'*\' --connect-timeout 3 -s -d '\
+    curl_str = ('curl --noproxy \'*\' --connect-timeout %d -s -d '\
                 + '"ping" %s://%s:%d/tegu/api | grep -q -i pong 2>/dev/null')\
-                % (TEGU_PROTO, host, TEGU_PORT)
-    try:
-        subprocess.check_call(curl_str, shell=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
+                % (CONNECT_TIMEOUT, TEGU_PROTO, host, TEGU_PORT)
+    for i in xrange(RETRY_COUNT):
+        try:
+            subprocess.check_call(curl_str, shell=True)
+            return True
+        except subprocess.CalledProcessError:
+            continue
+    return False
 
 def deactivate_tegu(host=''):
     ''' Deactivate tegu on a given host. If host is omitted, local
