@@ -153,7 +153,7 @@ def my_aliases():
         map[toks[0]] = True
     else:
         p1 = subprocess.Popen( ["dig", toks[1], "axfr"], stdout=subprocess.PIPE )
-        p2 = subprocess.Popen( ["sed", "-r", "/^" + toks[0] + "[^a-zA-Z]/! d; s/. .*//"],
+        p2 = subprocess.Popen( ["sed", "-r", "/^" + toks[0] + "[^a-zA-Z0-9]/! d; s/. .*//"],
             stdin=p1.stdout, stdout=subprocess.PIPE )
         for a in str.split( p2.communicate()[0], "\n" ):
             if not a == None:
