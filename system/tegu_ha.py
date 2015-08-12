@@ -37,6 +37,8 @@
                     2015 06 Aug - Adjusted retry to offset response time delays.
                     2015 11 Aug - Added ability to recognise all host aliases for
                         this machine.
+                    2015 12 Aug - Tweaked to allow for the case where the host
+                        isn't in DNS.
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -145,8 +147,9 @@ def my_aliases():
     '''
 
     p = subprocess.Popen( ["hostname", "-f"], stdout=subprocess.PIPE, shell=False )
-    sout = p.communicate()[0]
-    toks = str.split( str.split( sout, "\n" )[0], ".", 1 ) # split host and domain
+    sout = p.communicate()[0]                       # get standard out buf
+    recs = str.split( sout, "\n" )                  # split output into records
+    toks = str.split( recs[0], ".", 1 )             # host and domain tokens
 
     map = {}
     if len( toks ) == 1:    # odd case where -f returns just foo and not foo.domain
@@ -156,8 +159,11 @@ def my_aliases():
         p2 = subprocess.Popen( ["sed", "-r", "/^" + toks[0] + "[^a-zA-Z0-9]/! d; s/. .*//"],
             stdin=p1.stdout, stdout=subprocess.PIPE )
         for a in str.split( p2.communicate()[0], "\n" ):
-            if not a == None:
+            if not a == None and not a == "":
                 map[a] = True
+
+        if len( map ) < 1:
+            map[recs[0]] = True     # nothing back from dig, just use fqdn
 
     return map
 
