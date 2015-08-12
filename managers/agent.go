@@ -253,7 +253,30 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// we don't expect a response
 
 									msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
-				
+
+							default:
+								if req.Rid > 0 {
+									pr := rt_map[req.Rid]
+									if pr != nil {
+										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: %d", req.Rid )
+										msg := pr.req					// message block that was sent to us; fill out the response and return
+										msg.Response_data = req.Rdata
+										if req.State == 0 {
+											msg.State = nil
+										} else {
+											msg.State = fmt.Errorf( "rc=%d", req.State )
+										}
+
+										delete( rt_map, req.Rid )						// done with the pending request block
+										msg.Response_ch <- msg							// send response back to the process that caused the command to run
+									} else {
+										am_sheep.Baa( 1, "WRN: agent response ignored: request id in response didn't map to a pending request: %d [TGUAGTXXX]", req.Rid )   //FIX message id
+									}
+								} else {
+									am_sheep.Baa( 1, "WRN: agent response didn't have a request id  or match a generic type: %s [TGUAGTXXX]", req.Rtype )   //FIX message id
+								}
+
+/*
 							default:	
 								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )		// if we don't recognise it we assume it should be ignored
 								if am_sheep.Would_baa( 2 ) {
@@ -262,6 +285,7 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 										am_sheep.Baa( 2, "[%d] %s", i, req.Rdata[i] )
 									}
 								}
+*/
 						}								// end rtype switch
 					} else {							// failed request
 						switch( req.Rtype ) {
