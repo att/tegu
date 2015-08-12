@@ -67,6 +67,12 @@ type wa_port_req struct {
 	host	*string		// tegu private information
 }
 
+type wa_ping_req struct {
+	State	string
+
+	host	*string
+}
+
 type wa_tunnel_req struct {
 	Local_tenant	string	`json:"localTenant"`		// uuid
 	Local_router	string	`json:"localRouter"`		// uuid
@@ -189,6 +195,9 @@ func wa_dig_data( in *http.Request, request interface{} ) ( state int, reason st
 	if err != nil {
 		reason = "bad json request"
 		http_sheep.Baa( 1, "http_wa_api: json format error: %s", err )
+		if ! http_sheep.Would_baa( 2 ) {
+			http_sheep.Baa( 1, "raw_json=(%s)", data )
+		}
 		return
 	}
 
@@ -197,7 +206,7 @@ func wa_dig_data( in *http.Request, request interface{} ) ( state int, reason st
 }
 
 func send_http_err( out http.ResponseWriter, state int, msg string ) {
-	http_sheep.Baa( 1, "unable to complete http request: %s", msg )
+	http_sheep.Baa( 1, "unable to complete http request: state=%d %s", state, msg )
 
 	//out.Header().Set( "Content-Type", "application/json" )
 	out.Header().Set( "Content-Type", "text/pain" )
@@ -378,6 +387,76 @@ func http_wa_ports( out http.ResponseWriter, in *http.Request ) {
 	}
 
 	http_sheep.Baa( 1, "wa_port finished: %d: %s", state, data )
+	fmt.Fprintf( out, "%s", data )
+	return
+}
+
+/*
+	Handle a ping. We'll actually send a ping to the agent and wait for a response back and return the data
+	that comes back from the agent so that we test all the way to the far end.
+*/
+func http_wa_ping( out http.ResponseWriter, in *http.Request ) {
+	var (
+		state	= http.StatusMethodNotAllowed
+		data	string
+	)
+
+	request := &wa_ping_req{}							// empty request for dig_data to fill
+	state, _ = wa_dig_data( in, request )
+
+	switch in.Method {
+		case "POST":
+			state = http.StatusOK
+			http_sheep.Baa( 1, "wa_ping called" )
+			my_ch := make( chan *ipc.Chmsg )								// channel for responses (osif and agent requests)
+
+			request.State = "OK"
+			lh := "localhost"
+			request.host = &lh
+
+			msg := ipc.Mk_chmsg( )
+			msg.Send_req( am_ch, my_ch, REQ_WA_PING, request, nil )			// send request to agent and block
+			msg = <- my_ch
+			
+			if msg != nil {
+				if msg.State == nil {										// success if no state
+					state = http.StatusOK
+					output := msg.Response_data.( []string )						// a collection of records from the stdout
+					if len( output ) > 0  {													// expected output is some string
+						data = fmt.Sprintf( `{ "output": %q }`, output[0] )
+					} else {
+						data = fmt.Sprintf( "wa_ping response wasn't correct" )
+						state = http.StatusInternalServerError
+					}
+				} else {
+					http_sheep.Baa( 1, "wa_ping request failed: %s", msg.State )
+					state = http.StatusInternalServerError
+					data = fmt.Sprintf( "wa_ping/post: script failed: %s", msg.State )
+				}
+			} else {
+				http_sheep.Baa( 1, "wa_ping response from agent was nil" )
+				state = http.StatusInternalServerError
+				data = "wa_ping/post: missing or no response from agent"
+			}
+
+		default:
+			http_sheep.Baa( 1, "http_wa_ping: called for unrecognised method: %s", in.Method )
+			data = fmt.Sprintf( "%s request method not supported", in.Method )
+			state = http.StatusMethodNotAllowed
+	}
+
+	if state > 299 {
+		out.Header().Set( "Content-Type", "text/plain" ) 			// must set type and force write with state before writing data
+		data = fmt.Sprintf( `{ "reason": %q }`, data )
+	} else {
+		out.Header().Set( "Content-Type", "application/json" )
+	}
+	out.WriteHeader( state )		
+	if state > 299 && data == "" {
+		data = "bad json request"
+	}
+
+	http_sheep.Baa( 1, "wa_ping finished: %d: %s", state, data )
 	fmt.Fprintf( out, "%s", data )
 	return
 }

@@ -95,6 +95,7 @@
 				29 Jun 2015 : Now checkpoints after a delete reservation (tracker 272).
 								Fixed mirroring references from config.
 				16 Jul 2015 : Correct typo in the default admin role string.
+				11 Aug 2015 : Added wa ping support.
 */
 
 package managers
@@ -1495,6 +1496,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	http.HandleFunc( "/tegu/rest/routes", http_wa_route )
 	http.HandleFunc( "/tegu/rest/connections", http_wa_conn )
 
+	http.HandleFunc( "/tegu/wa/ping", http_wa_ping )	// wide area rest api handlers
 	http.HandleFunc( "/tegu/wa/ports", http_wa_ports )	// wide area rest api handlers
 	http.HandleFunc( "/tegu/wa/tunnels", http_wa_tunnel )
 	http.HandleFunc( "/tegu/wa/routes", http_wa_route )

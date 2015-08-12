@@ -131,6 +131,7 @@
 				25 Jun 2015 : Corrected bug with mirror expiration and xlation of proj/vm to mac.
 				02 Jul 2015 : Corrected physical host fetch bug in osif.
 				06 Jul 2015 : Version bump
+				11 Aug 2015 : Corrected bug in agent response processing (wa)
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -165,7 +166,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.2/17165"		// wide area version
+		version		string = "v3.2/18115"		// wide area version
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

@@ -126,6 +126,7 @@ const (
 	REQ_WA_TUNNEL				// create a tunnel
 	REQ_WA_ROUTE				// create a route
 	REQ_WA_DELCONN				// delete connection
+	REQ_WA_PING					// ping wa stuff
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
 	REQ_GET_MIRRORS				// get a list of mirrors from res mgr
 	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)

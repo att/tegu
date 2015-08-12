@@ -62,6 +62,7 @@
 				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
 				17 Jul 2015 : Merge with steering, reference wa scripts from /var/lib/tegu/bin rather
 					than /opt/app/bin.
+				11 Aug 2015 : Corrected initialisation of state value in port.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -89,7 +90,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.1.1/17175"		// wide area support added with broker
+	version		string = "v2.1.1/18115"		// wide area support added with broker
 	sheep *bleater.Bleater
 	// the next two should be deprecated with broker
 	shell_cmd	string = "/bin/ksh"
@@ -233,6 +234,9 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 	parms := act.Data
 
 	switch cmd_type {
+		case "wa_ping":
+				cmd_str = fmt.Sprintf( `echo "tegu running on $(hostname) parm=%s`,  parms["state"] )
+
 		case "wa_port":
 				allow_exists = true
 				cmd_str = fmt.Sprintf( `%s sudo /var/lib/tegu/bin/addWANPort %s %s %s`, pstr, parms["token"], parms["wan_uuid"], parms["subnet"] )
@@ -255,7 +259,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 	msg.Rtype = cmd_type
 	msg.Rid = act.Aid				// response id so tegu can map back to requestor
 	msg.Vinfo = version
-	msg.State = 1
+	msg.State = 0
 
 	//msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as json in response format
 
@@ -264,6 +268,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 	if err != nil {
 		sheep.Baa( 1, "WRN: error submitting wa command  to %s: %s", act.Hosts[0], err )
 		jout, _ = json.Marshal( msg )
+		sheep.Baa( 1, "returning error: %s", jout )
 		return
 	}
 
@@ -312,6 +317,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 	}
 
 	jout, err = json.Marshal( msg )
+	sheep.Baa( 1, "json_out: %s", jout )
 	return
 }
 
@@ -919,7 +925,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					}
 
 
-			case "wa_port", "wa_tunnel", "wa_route", "wa_del_conn":									// execute one of the wa commands
+			case "wa_ping", "wa_port", "wa_tunnel", "wa_route", "wa_del_conn":									// execute one of the wa commands
 					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype, broker, nil, 5 )		// no path needed at the moment for these
 					if err == nil {
 						resp[ridx] = p
