@@ -410,7 +410,7 @@ func http_wa_ping( out http.ResponseWriter, in *http.Request ) {
 			http_sheep.Baa( 1, "wa_ping called" )
 			my_ch := make( chan *ipc.Chmsg )								// channel for responses (osif and agent requests)
 
-			request.State = "OK"
+			request.State = request.State
 			lh := "localhost"
 			request.host = &lh
 

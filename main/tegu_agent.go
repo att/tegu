@@ -235,7 +235,11 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 
 	switch cmd_type {
 		case "wa_ping":
-				cmd_str = fmt.Sprintf( `echo "tegu running on $(hostname) parm=%s`,  parms["state"] )
+				if parms["state"] != "fail"  {
+					cmd_str = fmt.Sprintf( `echo "tegu running on $(hostname) parm=%s`,  parms["state"] )
+				} else {
+					cmd_str = fmt.Sprintf( `no-such-command` )
+				}
 
 		case "wa_port":
 				allow_exists = true

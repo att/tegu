@@ -274,11 +274,7 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: tpe=%s rid=%d state=%d", req.Rtype, req.Rid, req.State )
 										msg := pr.req					// message block that was sent to us; fill out the response and return
 										msg.Response_data = req.Rdata
-										if req.State == 0 {
-											msg.State = nil
-										} else {
-											msg.State = fmt.Errorf( "rc=%d", req.State )
-										}
+										msg.State = nil
 
 										delete( rt_map, req.Rid )						// done with the pending request block
 										msg.Response_ch <- msg							// send response back to the process that caused the command to run
@@ -289,6 +285,7 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 									am_sheep.Baa( 1, "agent response ignored: no request id: type=%s state=%d", req.Rtype, req.State )
 								}
 
+
 						}								// end rtype switch
 					} else {							// failed request
 						switch( req.Rtype ) {
@@ -298,10 +295,31 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 									am_sheep.Baa( 1, "  [%d] %s", i, req.Rdata[i] )
 								}
 
+/*
+----- don't let this code overlay the default below when merging master in.
 							default:
 								am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: state=%d %s  [TGUAGT002]", req.State, req.Rtype )
 								for i := 0; i < len( req.Rdata ) && i < 20; i++ {
 									am_sheep.Baa( 2, "  [%d] %s", i, req.Rdata[i] )
+								}
+*/
+
+							default:
+								if req.Rid > 0 {			// find the pending request and fill it in, then write it on the channel referenced by the request
+									pr := rt_map[req.Rid]
+									if pr != nil {
+										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: tpe=%s rid=%d state=%d", req.Rtype, req.Rid, req.State )
+										msg := pr.req					// message block that was sent to us; fill out the response and return
+										msg.Response_data = req.Rdata
+										msg.State = fmt.Errorf( "rc=%d", req.State )
+
+										delete( rt_map, req.Rid )						// done with the pending request block
+										msg.Response_ch <- msg							// send response back to the process that caused the command to run
+									} else {
+										am_sheep.Baa( 1, "WRN: agent failure response ignored: no pending req for id: type=%s rid=%d [TGUAGTXXX]", req.Rtype, req.Rid )   //FIX message id
+									}
+								} else {
+									am_sheep.Baa( 1, "agent failure response ignored: no request id: type=%s state=%d", req.Rtype, req.State )
 								}
 						}
 					}
