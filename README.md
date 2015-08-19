@@ -61,22 +61,22 @@ __flight_if.go__ - A floodlight interface providing methods that allow queries t
 the controller for gathering link and host information.  
 __host.go__ - Represents a single host in the network graph and in a path.  
 __init.go__ - Package level initialization.  
-__link.go__ - Represents a link between switches in the network graph and in a path.
+__link.go__ - Represents a link between switches in the network graph and in a path.  
 __lite.go__ - Functions that were implemented quickly to support tegu-lite.
 These probably should be moved to separate files, or likely into tools, but during the
 hasty implementation of -lite it was easier to keep them bunched here.  
-__mbox.go__ - Middlebox representation for steering reservations.
+__mbox.go__ - Middlebox representation for steering reservations.  
 __obligation.go__ - Used to manage an obligation of something over time;
 references many time slices.  
-__path.go__ - Manages a path that has been created with a given amount of bandwith.
+__path.go__ - Manages a path that has been created with a given amount of bandwith.  
 __pledge.go__ - An interface representing a reservation tracked by resmgr.
 Implemented by the various pledge types in the pledge_* files.  
 __pledge_window.go__ - Manages a time window for pledges and provides basic
 *is_active*, *is_expired* functions.  
-__queue.go__ - Manages information needed to set individual queues for a reservation.
+__queue.go__ - Manages information needed to set individual queues for a reservation.  
 __spq.go__ - A very simple object which allows the return of queue information to
 a caller in a single bundle (presently, just the struct, no functions exist).  
-switch.go__ - Represents a switch in the network graph.  
+__switch.go__ - Represents a switch in the network graph.  
 __time_slice.go__ - A single range of time for which a given amount of bandwith
 has been allocated.  
 __tools.go__ - Some generic tools but not generic enough to put in *gopkgs*.
