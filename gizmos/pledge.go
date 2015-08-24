@@ -28,16 +28,15 @@
 				Functions defined by the interface should make sense for ALL
 				pledge types.  If they don't then the type(s) that require
 				them should implement them and the user will need to convert
-				the more generic interface type to the speciic type to invoke
+				the more generic interface type to the specific type to invoke
 				the function needed. Examples of this which have been
 				specifically omitted: Get_values(), Clone(), Set_path_list.
 
 				There are also some generic functions such as json2pledge().
 	Date:		21 May 2015
-	Author:		E.
-Scott Daniels
+	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		16 Aug 2015 - listed funcs provided by Pledge_base, and those that must be written per Pledge type
 */
 
 package gizmos
@@ -47,14 +46,16 @@ import (
 	"encoding/json"
 )
 
+/*
+	This is the interface that all Pledge types must implement.
+	Most of these functions have a default implementation in Pledge_base.
+ */
 type Pledge interface {
+	// The following are implemented by Pledge_base
 	Concluded_recently( window int64 ) ( bool )
 	Commenced_recently( window int64 ) ( bool )
-	Equals( *Pledge ) ( bool )
-	Get_hosts() ( *string, *string )
 	Get_id( ) ( *string )
 	Get_window( ) ( int64, int64 )
-	Has_host( *string ) ( bool )
 	Is_active( ) ( bool )
 	Is_active_soon( window int64 ) ( bool )
 	Is_expired( ) ( bool )
@@ -63,18 +64,23 @@ type Pledge interface {
 	Is_pushed( ) (bool)
 	Is_paused( ) ( bool )
 	Is_valid_cookie( c *string ) ( bool )
-	Nuke()
 	Pause( bool )
 	Reset_pushed( )
 	Resume( bool )
 	Set_expiry( expiry int64 )
-	//Set_matchv6( bool )
 	Set_pushed()
+
+	// The following must be implemented by each separate Pledge type
+	Equals( *Pledge ) ( bool )
+	Get_hosts() ( *string, *string )
+	Has_host( *string ) ( bool )
+	Nuke()
 	String() ( string )
 	To_chkpt( ) ( string )
 	To_json( ) ( string )
 	To_str() ( string )
 
+	//Set_matchv6( bool )
 	//Get_ptype( ) ( int )		users should use assertion or type determination in switch for these
 	//Is_ptype( kind int ) ( bool )					// kind is one of the PT constants
 }
