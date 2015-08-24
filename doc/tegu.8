@@ -23,6 +23,7 @@
 .\"		Author:		Robert Eby (eby@research.att.com)
 .\"
 .\"     Mods:		04 Jul 2015 - Created
+.\"					16 Aug 2015 - Finished descriptions.
 .\"
 .TH TEGU 8 "Tegu Manual"
 .CM 4
@@ -42,6 +43,22 @@ and keeps track of scheduling of reservations and other operations.
 .PP
 The API interface provided by Tegu is described in the API INTERFACE section below.
 The HTTP server may require that its clients use SSL, if so configured.
+.PP
+\fItegu\fR is not started directly by the tegu init script.
+Rather, the service init script starts a Python program called \fItegu_ha\fP which will
+start tegu on exactly one host.
+The tegu_ha script runs on each tegu node in a continuous loop checking for hearbeats from
+all the tegu nodes found in the /etc/tegu/standby_list once every 5 secs (default).
+A heartbeat is obtained by invoking the "tegu ping" command via the HTTP API.
+If exactly one tegu is running, the script does nothing.
+If no tegu is running, then the local tegu is activated after waiting for 5*priority
+seconds to let a higher priority tegu take over first.
+A tegu node's priority is determined by its order in the standby_list file.
+If the current node's tegu is running and another tegu is found, then a conflict
+resolution process is invoked whereby the last modified timestamps from checkpoint files
+from both tegu's are compared, and the tegu with the older checkpoint is deactivated.
+The rationale is that the F5 only keeps a single tegu active at a time,
+so the tegu with the most recent checkpoint ought to be the active one.
 
 .SH COMMAND LINE OPTIONS
 \fITegu\fR interprets the following options:
@@ -122,30 +139,29 @@ Sets the discount value to either a percentage, or an absolute value.
 See the description of \fIsetdiscount\fP on tegu_req(1) for details of the value.
 .TP 8
 .B [auth=token] setulcap tenant percentage
-description
+Sets the user link capacity for a tenant.
+\fIpercentage\fP is a number from 0 to 100.
 .TP 8
 .B [auth=token] listulcap
-description
+List all user link capacities known by the network manager.
 .TP 8
-.B [auth=token] listres [key=value ...]
-description
+.B [auth=token] listres
+List all reservations (pledges) that Tegu knows about.
 .TP 8
 .B [auth=token] qdump
 This is the API equivalent of the \fItegu_req listqueue\fP command.
 It returns a JSON list of all queues on the switches or bridges being managed.
-
 .SS Topology Commands
 .TP 8
 .B [auth=token] graph [key=value ...]
-description
+This returns a JSON network graph, describing all of the switches in the network.
 .TP 8
 .B [auth=token] listhosts [key=value ...]
-description
-
+Returns a JSON list of hosts which includes IP address, name, switch(es) and port(s).
 .SS Flow Steering Commands
 .TP 8
 .B steer {[start-]end|+seconds} tenant src-host dest-host mbox-list cookie
-description
+This is a prototype flow-steering command (deprecated).
 
 .SS Mirroring Commands
 Mirroring commands follow a ReST-ful paradigm, so this section is a little bit different.
