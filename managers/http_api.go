@@ -94,6 +94,7 @@
 				29 Jun 2015 : Now checkpoints after a delete reservation (tracker 272).
 								Fixed mirroring references from config.
 				16 Jul 2015 : Correct typo in the default admin role string.
+				12 Aug 2015 : Corrected debug message.
 */
 
 package managers
@@ -282,7 +283,7 @@ func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed
 			//fallthrough
 		case "local", "localhost":
 			if ! is_token {
-				http_sheep.Baa( 2, "priv_auth set to localhost, validating local address %s", data )
+				http_sheep.Baa( 2, "priv_auth set to localhost, validating local address %s", *data )
 				return is_localhost( data )
 			}
 			fallthrough

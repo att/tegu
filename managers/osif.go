@@ -99,6 +99,7 @@
 				21 Jul 2015 - Extended has_role function to accept either a token or token/project pair.
 				29 Jul 2015 - Added lazy update of project info when a token/proj or token/proj/host
 						is validated.
+				25 Aug 2015 - Avoid making Mk_mac_map call during credential refresh.
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -518,7 +519,6 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string,
 */
 func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id2pname map[string]*string ) ( creds map[string]*ostack.Ostack, gerr error ) {
 	var (
-		r	*ostack.Ostack
 		err	error
 	)
 
@@ -527,7 +527,6 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 		old_list = creds
 	}
 
-	r = nil
 	for k, v := range id2pname {						// run the list of projects and add creds to the map if we don't have them
 		if old_list[*v] == nil  {	
 			osif_sheep.Baa( 1, "adding creds for: %s/%s", k, *v )
@@ -545,15 +544,10 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			osif_sheep.Baa( 2, "reusing credentials for: %s", *v )
 		}
 
-		if r == nil &&  creds[*v] != nil {							// need to test if this has admin -- ref must have admin
- 			_, _, err = creds[*v].Mk_mac_maps( nil, nil, false )
-			if  err == nil  {
-				r = creds[*v]
-			}
+		if creds["_ref"] == nil &&  creds[*v] != nil {				// set the quick reference key
+			creds["_ref_"] = creds[*v]
 		}
 	}
-
-	creds["_ref_"] = r				// set the reference entry
 
 	return
 }
