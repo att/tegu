@@ -39,6 +39,7 @@
                         this machine.
                     2015 12 Aug - Tweaked to allow for the case where the host
                         isn't in DNS.
+                    2015 27 Aug - Work around to recognize fqdn's
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -99,6 +100,8 @@ STDBY_LIST = ETCDIR + '/standby_list' # list of other hosts that might run tegu
 STDBY_FILE = ETCDIR + '/standby'
 VERBOSE = 0
 
+TEGUCONF_FILE = ETCDIR + '/tegu.cfg'
+
 def logit(msg):
     '''Log error message on stdout with timestamp'''
     now = time.gmtime()
@@ -136,37 +139,32 @@ def get_checkpoint(host=''):
         warn("Could not sync chkpts from %s" % host)
     return False
 
-def my_aliases():
-    '''
-        returns a map (dictionary?) of alias names. if map[name] == true then
-        name is an alias for this host.
-
-        this works if hostname returns foo and aliases are some 'extension'
-        of foo (e.g. foo-ops), but if foo-ops is returned by host name
-        we won't find foo.
-    '''
-
-    p = subprocess.Popen( ["hostname", "-f"], stdout=subprocess.PIPE, shell=False )
-    sout = p.communicate()[0]                       # get standard out buf
-    recs = str.split( sout, "\n" )                  # split output into records
-    toks = str.split( recs[0], ".", 1 )             # host and domain tokens
-
-    map = {}
-    if len( toks ) == 1:    # odd case where -f returns just foo and not foo.domain
-        map[toks[0]] = True
-    else:
-        p1 = subprocess.Popen( ["dig", toks[1], "axfr"], stdout=subprocess.PIPE )
-        p2 = subprocess.Popen( ["sed", "-r", "/^" + toks[0] + "[^a-zA-Z0-9]/! d; s/. .*//"],
-            stdin=p1.stdout, stdout=subprocess.PIPE )
-        for a in str.split( p2.communicate()[0], "\n" ):
-            if not a == None and not a == "":
-                map[a] = True
-
-        if len( map ) < 1:
-            map[recs[0]] = True     # nothing back from dig, just use fqdn
-
-    return map
-
+def parse_teguconfig():
+    ''' This function reads the tegu config file and returns configuration
+    attributes in key/value format ''' 
+    cdata = {}
+    section = "default"
+    cdata[section] = {}
+    try:
+        with open(TEGUCONF_FILE, "r") as tegufile:
+            for line in tegufile.readlines():
+                if line.strip(" \t\r\n")[:1] == '#':
+                    continue
+                elif line.lstrip(" \t")[:1] == ":":
+                    toks = line.lstrip(" \t").split(" ")
+                    section = toks[0][1:].strip("\n")
+                    cdata[section] = {}
+                else:
+                    if line[:1] == '\n':
+                        continue
+                    toks = line.split("=")
+                    key = toks[0].strip(" \t")
+                    value = toks[1].strip(" \t\n\r")
+                    cdata[section][key] = value
+        return cdata
+    except OSError:
+        logit("unable to open %s file for some reason" % TEGUCONF_FILE)
+    return
 
 def extract_dt(dt_str, dt_col, tm_col):
     '''
@@ -345,35 +343,42 @@ def main():
 
     logit("tegu_ha v1.0 started")
 
+    cdata = parse_teguconfig()
+    if not cdata["fqmgr"]["phost_suffix"]:
+        cdata["fqmgr"]["phost_suffix"] = ""
 
+    fqdn_list = []
+    this_node = socket.getfqdn()
+    fqdn_list.append(this_node)
+    fqdn_list.append(this_node.split(".")[0] + cdata["fqmgr"]["phost_suffix"] \
+                                            + this_node[this_node.index("."):])
     ok = False
     mcount = 0                  # critical error after an hour of waiting
     while not ok:               # loop until we find us
-        alias_map = my_aliases()    # generate each time round in case dns changes
-
-        ok = False
+        ok = True
         # Read list of standby tegu nodes and find us
         standby_list = [l.strip() for l in open(STDBY_LIST, 'r')]
 
-        for i in range( len( standby_list ) ):
-            if alias_map.has_key( standby_list[i] ):
-                priority = i
-                ok = True
-                this_node = standby_list[i]
-                break
-
-        if not ok:
+        try:
+            for fqdn in fqdn_list:
+                if fqdn in standby_list:
+                    priority = standby_list.index(fqdn)
+                    this_node = fqdn
+                    break
+            standby_list.remove(this_node)
+        except ValueError:
             if mcount == 0:         # dont flood the log
-                logit("Could not find this host in standby list: %s (waiting)" % STDBY_LIST)
-                logit( "aliases for this host: %s" % alias_map )
+                logit("Could not find host "+this_node+" in standby list: %s (waiting)" % STDBY_LIST)
             else:
                 if mcount == 60:
-                    crit("Could not find this host in standby list: %s" % STDBY_LIST)
+                    crit("Could not find host "+this_node+" in standby list: %s" % STDBY_LIST)
                     mcount = 0      # another message in about an hour
             mcount += 1
+            ok = False
             time.sleep( 60 )
 
-    logit( "host matched in standby list: %s priority=%d" % (standby_list[priority], priority) )
+    if mcount > 0:
+        logit( "finally found host "+this_node+" in standby list: %s" % STDBY_LIST)
 
     # Loop forever listening to heartbeats
     main_loop(standby_list, this_node, priority)
