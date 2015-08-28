@@ -124,6 +124,7 @@
 #								now written by ql_bw_fmods do not need them.
 #				29 May 2015 - Remove timeouts since ssh-broker is now used for agent commands.
 #								Added better error checking to the iptables setup commands.
+#				28 Aug 2015 - Added timeouts to ovs-vsctl commands since they seem to wedge on occasion.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -373,7 +374,9 @@ fi
 
 if (( $(id -u) != 0 ))
 then
-	sudo="sudo"					# must use sudo for the ovs-vsctl commands
+	sudo="timeout -s 9 30 sudo"					# must use sudo for the ovs-vsctl commands
+else
+	sudo="timeout -s 9 30"						# no sudo needed, must still use timeout
 fi
 
 
@@ -619,7 +622,7 @@ fi
 # Configure OVS to promote dscp value into gre header
 # Send request to remote ovs for bridge information that we'll suss out gre data from.
 # Then we'll execute the command that we generated back on the same host.
-$ssh_host sudo ovs-vsctl show | awk -v sudo=$sudo '
+$ssh_host sudo ovs-vsctl show | awk -v sudo="$sudo" '
 	BEGIN {
 		snarf = 0;
 		pidx = 0
