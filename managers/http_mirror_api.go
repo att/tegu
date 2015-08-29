@@ -78,7 +78,7 @@ func generateMirrorName( ) ( string ) {
  *	Convert "s" to startt, and "e" to endt.
  *	If s is "", set startt to "now"
  *	If e is "+nnn", set endt to start + nnn.
- *	If e is "+unbounded", set endt to 1/1/3000.
+ *	If e is "+unbounded", set endt to 1/1/2025. (this date is enforced elsewhere in the code)
  */
 func checkTimes(s string, e string) (startt int64, endt int64, err error) {
 	err = nil
@@ -93,7 +93,7 @@ func checkTimes(s string, e string) (startt int64, endt int64, err error) {
 		endt, err = strconv.ParseInt(e[1:], 0, 64)
 		endt += startt
 	} else if e == "unbounded" {
-		endt = 32503680000		// 1/1/3000
+		endt = gizmos.DEF_END_TS		// 1/1/2025
 	} else {
 		endt, err = strconv.ParseInt(e, 0, 64)
 	}
@@ -211,7 +211,7 @@ func convertToJSON(mirror *gizmos.Pledge_mirror, scheme string, host string) (st
 	bs.WriteString(fmt.Sprintf("  \"end_time\": %d,\n", end))
 	bs.WriteString(fmt.Sprintf("  \"start_time_ascii\": \"%s\",\n", cvttime(start)))
 	bs.WriteString(fmt.Sprintf("  \"end_time_ascii\": \"%s\",\n", cvttime(end)))
-	
+
 //	if mirror.usrkey != "" {
 //		// No harm including this since the user needed to provide it anyway
 //		bs.WriteString(fmt.Sprintf(`  "cookie": "%s",\n`, mirror.usrkey))
@@ -569,7 +569,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 				req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
 				req = <- my_ch											// get response from the network thread
 				if req.Response_data != nil  &&  req.Response_data.( *string ) != nil {	 // response is a pointer to string, if the pointer isn't nil it's a dup
-					rp := req.Response_data.( *string )	
+					rp := req.Response_data.( *string )
 					if rp != nil {
 						http_sheep.Baa( 1, "duplicate mirror reservation was dropped" )
 						err = fmt.Errorf( "reservation duplicates existing reservation: %s",  *rp )
