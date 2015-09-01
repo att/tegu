@@ -125,6 +125,7 @@
 #				29 May 2015 - Remove timeouts since ssh-broker is now used for agent commands.
 #								Added better error checking to the iptables setup commands.
 #				28 Aug 2015 - Added timeouts to ovs-vsctl commands since they seem to wedge on occasion.
+#				31 Aug 2015 - Prevent setting iptables rules in name spaces other than routers.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -192,7 +193,7 @@ function setup_iptables
 	typeset nslist="/tmp/PID$$.nslist"		# list of name spaces from the remote host
 	typeset err_file="/tmp/PID$$.ipterr"
 
-	$ssh_host ip netns list >$nslist 2>$err_file
+	$ssh_host ip netns list |grep "^qrouter" >$nslist 2>$err_file	# include only router namespaces
 	if (( $? != 0 ))
 	then
 		echo "CRI: unable to get network name space list from target-host: ${thost#* }  [FAIL] [QOSSOM007]"
