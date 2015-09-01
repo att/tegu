@@ -24,6 +24,7 @@
 .\"
 .\"     Mods:		04 Jul 2015 - Created
 .\"					16 Aug 2015 - Finished descriptions.
+.\"					01 Sep 2015 - Add section about state mismatch.
 .\"
 .TH TEGU 8 "Tegu Manual"
 .CM 4
@@ -59,7 +60,18 @@ resolution process is invoked whereby the last modified timestamps from checkpoi
 from both tegu's are compared, and the tegu with the older checkpoint is deactivated.
 The rationale is that the F5 only keeps a single tegu active at a time,
 so the tegu with the most recent checkpoint ought to be the active one.
-
+.PP
+It is important to note, that many of the commands that list Tegu's state (such as
+\fIlist-mirrors\fP, for example) will usually list the state of Tegu's internal database,
+and will not go out to query the actual network.
+Assuming no rogue actors (system crashes, other misbehaving software, or system administrator actions),
+Tegu's state should normally match the state of the network.
+And of course, reservations in Tegu may have expired or not yet commenced, in which case
+they will not be apparent in the network.
+However, if the state of the network does not match Tegu's internal state (because of rogue
+actors), the first thing to try is to restart Tegu.
+This will have the effect of re-pushing all reservations out to the network in order to
+resynchronize the network's state with Tegu's state.
 .SH COMMAND LINE OPTIONS
 \fITegu\fR interprets the following options:
 .\" ==========
@@ -265,7 +277,7 @@ Other possible return codes are 404 (Not Found) and 401 (Unauthorized).
 .TP 8
 .B ping
 This command is used to check connectivity to the Tegu system itself.
-It will always return success, so if a succesful connection is made, and a
+It will always return success, so if a successful connection is made, and a
 response received, the client can assume Tegu is running.
 
 .TP 8
