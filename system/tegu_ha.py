@@ -83,7 +83,8 @@ SSH_CMD = 'ssh -o StrictHostKeyChecking=no %s@%s '
 
 RETRY_COUNT = 3      # How many times to retry ping command
 CONNECT_TIMEOUT = 3  # Ping timeout
-MAX_QUICK_STARTS = 4 # we stop if there are 4 restarts in quick succession
+MAX_QUICK_STARTS = 4        # we stop if there are > 4 restarts in quick succession
+QUICK_RESTART_SEC = 150     # we consider it a quick restart if less than this
 
 DEACTIVATE_CMD = '/usr/bin/tegu_standby on;' \
     'killall tegu >/dev/null 2>&1; killall tegu_agent >/dev/null 2>&1'  # Command to kill tegu
@@ -336,7 +337,7 @@ def main_loop(standby_list, this_node, priority):
         if not any_active:
             if priority_wait or priority == 0:
                 now = int( time.time() )
-                if now - last_start < 10:           # quick restart (crash?)
+                if now - last_start < QUICK_RESTART_SEC:           # quick restart (crash?)
                     quick_start += 1
                     if quick_start > MAX_QUICK_STARTS:
                         crit( "refusing to restart tegu: too many restarts in quick succession.  [TGUHA001]" )
