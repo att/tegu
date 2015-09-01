@@ -40,6 +40,7 @@
                     2015 12 Aug - Tweaked to allow for the case where the host
                         isn't in DNS.
                     2015 27 Aug - Work around to recognize fqdn's
+                    2015 31 Aug - Prevent too many successive quick restarts.
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -82,6 +83,7 @@ SSH_CMD = 'ssh -o StrictHostKeyChecking=no %s@%s '
 
 RETRY_COUNT = 3      # How many times to retry ping command
 CONNECT_TIMEOUT = 3  # Ping timeout
+MAX_QUICK_STARTS = 4 # we stop if there are 4 restarts in quick succession
 
 DEACTIVATE_CMD = '/usr/bin/tegu_standby on;' \
     'killall tegu >/dev/null 2>&1; killall tegu_agent >/dev/null 2>&1'  # Command to kill tegu
@@ -290,6 +292,8 @@ def activate_tegu(host=''):
 
 def main_loop(standby_list, this_node, priority):
     '''Main heartbeat and liveness check loop'''
+    quick_start = 0           # number of restarts close together
+    last_start = 0
     priority_wait = False
     while True:
         if not priority_wait:
@@ -331,7 +335,22 @@ def main_loop(standby_list, this_node, priority):
         # If no active tegu, then we must try to start one
         if not any_active:
             if priority_wait or priority == 0:
-                logit("no running tegu found, starting here")
+                now = int( time.time() )
+                if now - last_start < 10:           # quick restart (crash?)
+                    quick_start += 1
+                    if quick_start > MAX_QUICK_STARTS:
+                        crit( "refusing to restart tegu: too many restarts in quick succession.  [TGUHA001]" )
+                        return
+                else:
+                    quick_start = 0               # reset if it's been a while since last restart
+
+                if last_start == 0:
+                    diff = "never by this instance"
+                else:
+                    diff = "%d seconds ago" % (now - last_start)
+                logit( "no running tegu found, starting here; last start %s" % diff )
+
+                last_start = now
                 priority_wait = False
                 activate_tegu()            # Start local tegu
             else:
@@ -341,7 +360,7 @@ def main_loop(standby_list, this_node, priority):
 def main():
     '''Main function'''
 
-    logit("tegu_ha v1.0 started")
+    logit("tegu_ha v1.1 started")
 
     cdata = parse_teguconfig()
     if not cdata["fqmgr"]["phost_suffix"]:
