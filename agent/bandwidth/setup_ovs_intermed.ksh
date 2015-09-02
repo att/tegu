@@ -126,6 +126,7 @@
 #								Added better error checking to the iptables setup commands.
 #				28 Aug 2015 - Added timeouts to ovs-vsctl commands since they seem to wedge on occasion.
 #				31 Aug 2015 - Prevent setting iptables rules in name spaces other than routers.
+#				02 Sep 2015 - Extracted the iptables setup (now in ql_setup_ipt) and replaed with a call.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -176,98 +177,6 @@ function expand
 function logit
 {
 	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $argv0: $@" >&2
-}
-
-# Delete and then install the iptables rules in mangle that do the right thing for our DSCP marked traffic
-# This must also handle all of the bloody routers that are created in namespaces, so we first generate a
-# set of commands for the main iptables, then generate the same set for each nameespace. This all goes
-# into a single command file which is then fed into ssh to be executed on the target host.
-#
-# we assume that this funciton is run asynch and so we capture all output into a file that can be spit out
-# at the end.
-function setup_iptables
-{
-	typeset cmd_string=""					# normall space iptables command list
-	typeset nscmd_string=""					# namespace command
-	typeset cmd_file=/tmp/PID$$.cmds		# cmds to send to the remote to set ip stuff
-	typeset nslist="/tmp/PID$$.nslist"		# list of name spaces from the remote host
-	typeset err_file="/tmp/PID$$.ipterr"
-
-	$ssh_host ip netns list |grep "^qrouter" >$nslist 2>$err_file	# include only router namespaces
-	if (( $? != 0 ))
-	then
-		echo "CRI: unable to get network name space list from target-host: ${thost#* }  [FAIL] [QOSSOM007]"
-		sed 's/^/setup_iptables:/' $err_file >&2
-	fi
-
-	typeset iptables_del_base="sudo iptables -D POSTROUTING -t mangle -m dscp --dscp"	# various pieces of the command string
-	typeset iptables_add_base="sudo iptables -A POSTROUTING -t mangle -m dscp --dscp"
-	typeset iptables_tail="-j CLASSIFY --set-class"
-
-	typeset iptables_nsbase="sudo ip netns exec" 										# must insert name space name between base and mid
-	typeset iptables_del_mid="iptables -D POSTROUTING -t mangle -m dscp --dscp"			# reset for the name space specific command
-	typeset iptables_add_mid="iptables -A POSTROUTING -t mangle -m dscp --dscp"
-	
-	echo "ecount=0" >$cmd_file										# we'll count errors and exit the command set with an error if > 0
-	(																# create the commands to send; first the master iptables rules, then rules for each name space
-		echo "echo ====  master ==== >&2"							# add separators to the output when it's run
-		echo "$iptables_del_base 0 $iptables_tail 1:2;"
-		for d in ${diffserv//,/ }													# d will be 4x the value that iptables needs
-		do
-			echo "$iptables_del_base $((d/4)) $iptables_tail 1:6;"					# add in delete commands
-		done
-
-		echo "$iptables_add_base 0 $iptables_tail 1:2 || (( ecount++ ))"
-		for d in ${diffserv//,/ }
-		do
-			echo "$iptables_add_base $((d/4)) $iptables_tail 1:6 || (( ecount++ ))"		# we care about errors only on add commands
-		done
-
-		while read ns 																		# for each name space we found
-		do
-			echo "echo ==== $ns delete  ==== >&2"											# add separators to the output when it's run
-			echo "$iptables_nsbase $ns $iptables_del_mid 0 $iptables_tail 1:2;" 			# odd ball delete case first
-			for d in ${diffserv//,/ }
-			do
-				echo "$iptables_nsbase $ns $iptables_del_mid $((d/4)) $iptables_tail 1:6;"	# put in delete commands, one per dscp type
-			done
-		
-			echo "echo ==== $ns add  ==== >&2"							# add separators to the output when it's run
-			echo "$iptables_nsbase $ns $iptables_add_mid 0 $iptables_tail 1:2 || (( ecount++ ))" 	# odd ball add case
-			for d in ${diffserv//,/ }
-			do
-				echo "$iptables_nsbase $ns $iptables_add_mid $((d/4)) $iptables_tail 1:6 || (( ecount++ ))"		# one per dscp type
-			done
-		done <$nslist
-	) >>$cmd_file
-	echo 'exit $(( ecount > 0 ))' >>$cmd_file		# cause the command set to finish bad if there was an error (single quotes are REQUIRED!)
-
-	if [[ -z $ssh_host ]]							# local host -- just pump into ksh
-	then
-		cmd_string="ksh"
-	else
-		typeset cmd_string="ssh -T $ssh_opts $thost" 	# different than what we usually use NO -n supplied!!
-	fi
-
-	if [[ -z $no_exec_str ]]								# empty string means we're live
-	then
-		$forreal $cmd_string <$cmd_file >$err_file 2>&1
-		if (( $? != 0 ))
-		then
-			echo "CRI: unable to set iptables on target-host: ${thost#* }  [FAIL] [QOSSOM006]"
-			sed 's/^/setup_iptables:/' $err_file >&2
-		else
-			echo "iptables successfully set up for mangle rules on target-host: ${thosts#* }"
-			if [[ -n $no_exec_str ]] || (( verbose ))					# if no exec string, then cat out the captured command
-			then
-				sed 's/^/setup_iptables: /' $err_file >&2
-			fi
-		fi
-	else
-		sed "s/^/iptables setup: $no_exec_str /" $cmd_file >&2
-	fi
-
-	rm -f /tmp/PID$$.ipterr
 }
 
 function usage
@@ -381,9 +290,11 @@ else
 fi
 
 
+ipt_output=/tmp/PID$$.ipt
+>$ipt_output
 if (( allow_iptables ))
 then
-	setup_iptables &			# do this asynch we'll wait at end
+	ql_setup_ipt -v $diffserv >$ipt_output 2>&1 &		# asynch, we'll wait at end
 fi
 
 if [[ -n $bridges ]]			# if user supplies bridges then we must set them up, so flag goes on
@@ -697,7 +608,8 @@ fi
 
 logit "waiting for asynch commands to complete"
 wait					# hold up for any asynch calls
-logit "finally finished"
+logit "asynch commands have finished"
+cat $ipt_output
 
 rm -f /tmp/PID$$.*
 exit $rc
