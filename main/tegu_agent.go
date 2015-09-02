@@ -58,6 +58,7 @@
 					if the agent pops the timeout.
 				25 Jun 2015 : Now puts stderr out from a mirror command on failure or bleat level 2+.
 				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
+				02 Sep 2015 : Pick up new agent script.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -84,7 +85,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.3/17165"
+	version		string = "v2.3/19025"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -856,6 +857,7 @@ func main() {
 			"/usr/bin/ovs_sp2uuid " +
 			"/usr/bin/purge_ovs_queues " +
 			"/usr/bin/ql_setup_irl " +
+			"/usr/bin/ql_setup_ipt " +
 			"/usr/bin/send_ovs_fmod " +
 			"/usr/bin/tegu_add_mirror " +
 			"/usr/bin/tegu_del_mirror " +
