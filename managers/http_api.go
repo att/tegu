@@ -95,6 +95,7 @@
 								Fixed mirroring references from config.
 				16 Jul 2015 : Correct typo in the default admin role string.
 				12 Aug 2015 : Corrected debug message.
+				03 Sep 2015 : Added latency option to verbose.
 */
 
 package managers
@@ -1117,6 +1118,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 									case "lib", "gizmos":
 										gizmos.Set_bleat_level( nv )
+
+									case "latency":											// openstack for now, maybe different later, so more generic
+										ostack.Set_latency_debugging( int( nv ) > 0  )		// show openstack api call latency (stdout, from libray) 1 turns on, 0 off
 
 									case "ostack_json":
 										ostack.Set_debugging( int( nv ) )			// this works backwards (setting 0 turns on for a short while)
