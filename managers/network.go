@@ -81,6 +81,7 @@
 				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
 				18 Jun 2015 - Added oneway rate limiting and delete support.
  				02 Jul 2015 - Extended the physical host refresh rate.
+				03 Sep 2015 - Correct nil pointer core dump cause.
 */
 
 package managers
@@ -1158,6 +1159,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_BWOW_RESERVE:								// one way bandwidth reservation, nothing really to vet, return a gate block
 						// host names are expected to have been vetted (if needed) and translated to project-id/IPaddr if IDs are enabled
 						var ipd *string
+						var dh  *gizmos.Host
 
 						req.Response_data = nil
 						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
@@ -1178,7 +1180,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								}
 
 								sh := act_net.hosts[*ips]
-								dh := act_net.hosts[*ipd]						// this will be nil for an external IP
+								if ipd != nil {
+									dh = act_net.hosts[*ipd]						// this will be nil for an external IP
+								}
 								ssw, _ := sh.Get_switch_port( 0 )
 								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
 								if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address
