@@ -74,6 +74,7 @@ const (
 	REQ_DEL			
 	REQ_GET			
 	REQ_CHKPT					// take a checkpoint (res_mgr)
+	REQ_RTRY_CHKPT				// tickler sends this to checkpoint if one was missed
 	REQ_LOAD					// load checkpoint file data (res_mgr)
 	REQ_NETUPDATE				// new network graph is attached (network)
 	REQ_LISTCONNS				// user request a port list for named host	(network)
