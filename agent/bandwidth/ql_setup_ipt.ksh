@@ -39,6 +39,7 @@
 #	Date: 		28 Aug 2015	(yanked from setup_ovs_intermed)
 #
 #	Mods:
+#				08 Sep 2015 - Corrected typo in verify_current check
 # -----------------------------------------------------------------------------------------------------------------------
 #
 
@@ -59,7 +60,7 @@ function verify_current
 	$cmd iptables -L -t mangle |awk -v dscp_list="${diffserv//,/ }"  '
 		/DSCP.*match.*0x00.*CLASSIFY/ && ! have_00 { have_00++; have++; next; }
 		/DSCP.*match.*0x2e.*CLASSIFY/ && ! have_2e { have_2e++; have++; next; }
-		/DSCP.*match.*0x1a.*CLASSIFY/ && ! have_12 { have_1a++; have++; next; }
+		/DSCP.*match.*0x1a.*CLASSIFY/ && ! have_1a { have_1a++; have++; next; }
 		/DSCP.*match.*0x12.*CLASSIFY/ && ! have_12 { have_12++; have++; next; }
 
 		END {
