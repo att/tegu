@@ -41,6 +41,8 @@
                         isn't in DNS.
                     2015 27 Aug - Work around to recognize fqdn's
                     2015 31 Aug - Prevent too many successive quick restarts.
+                    2015 09 Sep - Work around to handle hostnames which do not
+                        have a domain
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -364,13 +366,14 @@ def main():
     logit("tegu_ha v1.1 started")
 
     cdata = parse_teguconfig()
-    if not cdata["fqmgr"]["phost_suffix"]:
+    if "phost_suffix" not in cdata["fqmgr"].keys():
         cdata["fqmgr"]["phost_suffix"] = ""
 
     fqdn_list = []
     this_node = socket.getfqdn()
     fqdn_list.append(this_node)
-    fqdn_list.append(this_node.split(".")[0] + cdata["fqmgr"]["phost_suffix"] \
+    if len(this_node.split(".")) > 1:
+        fqdn_list.append(this_node.split(".")[0] + cdata["fqmgr"]["phost_suffix"] \
                                             + this_node[this_node.index("."):])
     ok = False
     mcount = 0                  # critical error after an hour of waiting
