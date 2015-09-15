@@ -16,17 +16,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 # ---------------------------------------------------------------------------
-#
 
-#
-#                            AT&T - PROPRIETARY
-#              THIS FILE CONTAINS PROPRIETARY INFORMATION OF
-#            AT&T AND IS NOT TO BE DISCLOSED OR USED EXCEPT IN
-#                  ACCORDANCE WITH APPLICABLE AGREEMENTS.
-#
-#                         Copyright (c) 2015 AT&T
-#                   Unpublished and Not for Publication
-#                          All Rights Reserved
 #
 #       Name:      tegu_add_mirror
 #       Usage:     tegu_add_mirror [-v] <name> <port1>[,<port2>...] <output> [<vlan>]
@@ -56,11 +46,12 @@
 #                  If succesful, this command prints the mirror name on exit.
 #
 #       Author:    Robert Eby
-#       Date:      4 February 2015
+#       Date:      04 February 2015
 #
-#       Mods:      4 Feb 2015 - created
+#       Mods:      04 Feb 2015 - created
 #                  27 Apr 2015 - allow IPv6 for <output> GRE address
-#					25 Jun 2015 - Corrected PATH.
+#                  25 Jun 2015 - Corrected PATH.
+#                  15 Sep 2015 - Remove extra copyright
 #
 
 function valid_ip4

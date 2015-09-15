@@ -16,28 +16,19 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 # ---------------------------------------------------------------------------
-#
 
-#
-#                            AT&T - PROPRIETARY
-#              THIS FILE CONTAINS PROPRIETARY INFORMATION OF
-#            AT&T AND IS NOT TO BE DISCLOSED OR USED EXCEPT IN
-#                  ACCORDANCE WITH APPLICABLE AGREEMENTS.
-#
-#                         Copyright (c) 2015 AT&T
-#                   Unpublished and Not for Publication
-#                          All Rights Reserved
 #
 #       Name:      tegu_del_mirror
 #       Usage:     tegu_del_mirror [-v] <name>
 #       Abstract:  This script deletes a mirror, named by <name>, from openvswitch.
 #
 #       Author:    Robert Eby
-#       Date:      4 February 2015
+#       Date:      04 February 2015
 #
-#       Mods:      4 Feb 2015 - created
+#       Mods:      04 Feb 2015 - created
 #                  11 Feb 2015 - remove temp file
-#					25 Jun 2015 - Corrected PATH.
+#                  25 Jun 2015 - Corrected PATH.
+#                  15 Sep 2015 - Remove extra copyright
 #
 
 function logit
@@ -90,7 +81,7 @@ $sudo ovs-vsctl list mirror "$mirrorname" > /tmp/m$$ && {
 	$echo $sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
 	$sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
 	rm -f /tmp/m$$
-	
+
 	echo Mirror $mirrorname removed.
 	exit 0
 }
