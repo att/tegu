@@ -24,8 +24,8 @@
 #
 #                  The port list for the mirror is named by <port1>, <port2>, etc. which
 #                  must be a comma-separated list of ports that already exist on br-int.
-#                  The ports can be named either by a UUID or MAC.  If a MAC is provided,
-#                  this script translates to a UUID.
+#                  The ports can be named either by a UUID (OVS or neutron) or MAC.
+#                  If a MAC is provided, this script translates to an OVS UUID.
 #
 #                  <output> directs where the output of the mirror goes.  There are three
 #                  possibilities:
@@ -52,6 +52,7 @@
 #                  27 Apr 2015 - allow IPv6 for <output> GRE address
 #                  25 Jun 2015 - Corrected PATH.
 #                  15 Sep 2015 - Remove extra copyright
+#                  17 Sep 2015 - Add ability to use neutron UUID for ports
 #
 
 function valid_ip4
@@ -99,6 +100,11 @@ function translatemac
 	ovs_sp2uuid -a | awk -v mac=$1 '/^port/ && $5 == mac { print $2 }'
 }
 
+function translateuuid
+{
+	ovs_sp2uuid -a | awk -v uuid=$1 '/^port/ && ($2 == uuid || $6 == uuid) { print $2 }'
+}
+
 # Preliminaries
 PATH=$PATH:/sbin:/usr/bin:/bin		# must pick up agent augmented path
 echo=:
@@ -143,9 +149,10 @@ do
 	case "$p" in
 	*-*-*-*-*)
 		# Port UUID
-		if valid_port "$p"
+		uuid=`translateuuid $p`
+		if valid_port "$uuid"
 		then
-			realports="$realports,$p"
+			realports="$realports,$uuid"
 		else
 			echo "tegu_add_mirror: there is no port with UUID=$p on $bridgename." >&2
 			exit 2

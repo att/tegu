@@ -40,6 +40,7 @@
 				05 Jun 2015 - added token auth to mirroring
 				22 Jun 2015 - write error messages in JSON, to play nice with tegu_req
 				29 Jun 2015 - Fixed fallout from config section name change.
+				18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
 */
 
 package managers
@@ -322,13 +323,16 @@ func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, e
  * Validate a port.
  */
 func validatePort(port *string) (vm *Net_vm, err error) {
-	// handle mac:port form
-	if strings.HasPrefix(*port, "mac:") {
-		// Map the port MAC to a phost
-		mac := (*port)[4:]
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	defer close ( my_ch )
 
-		my_ch := make( chan *ipc.Chmsg )
-		defer close ( my_ch )
+	// Handle mac:port form or a plain MAC
+	if strings.HasPrefix(*port, "mac:") || gizmos.IsMAC(*port) {
+		// Map the port MAC to a phost
+		mac := *port
+		if strings.HasPrefix(*port, "mac:") {
+			mac = mac[4:]
+		}
 
 		req := ipc.Mk_chmsg( )
 		req.Send_req( nw_ch, my_ch, REQ_GET_PHOST_FROM_MAC, &mac, nil )			// request MAC -> phost translation
@@ -342,10 +346,24 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 		return
 	}
 
-	// handle project/host form
-	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
-	defer close ( my_ch )
+	// Handle neutron port UUID
+	if gizmos.IsUUID(*port) {
+		// Verify port UUID - note: this goes to the openstack interface manager, since the network manager
+		// does not sem to keep track of port uuids
+		uuid := *port
+		req := ipc.Mk_chmsg( )
+		req.Send_req( osif_ch, my_ch, REQ_GET_PHOST_FROM_PORTUUID, &uuid, nil )	// request UUID -> phost translation
+		req = <- my_ch
+		if req.Response_data == nil {
+			err = fmt.Errorf("Cannot find Port UUID: " + uuid + ", " + req.State.Error())
+		} else {
+			vm = Mk_netreq_vm( nil, nil, nil, nil, req.Response_data.(*string), &uuid, nil, nil, nil )	// only use the two fields
+			http_sheep.Baa( 1, "name=NIL id=NIL ip4=NIL phost=%s uuid=%s gw=NIL fip=NIL", safe(vm.phost), safe(vm.mac) )
+		}
+		return
+	}
 
+	// handle project/host form
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, port, nil )				// request data
 	req = <- my_ch

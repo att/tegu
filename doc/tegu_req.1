@@ -25,6 +25,7 @@
 .\"
 .\"     Mods:		14 Jun 2015 - Created
 .\"					01 Sep 2015 - Filled in unfinished section.
+.\"					18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
 .\"
 .TH TEGU_REQ 1 "Tegu Manual"
 .CM 4
@@ -298,13 +299,17 @@ In this scenario, it is possible that only a subset of the mirrors may be constr
 the output JSON will indicate which mirrors succeeded.
 Ports are specified in the same way as hosts are for the Tegu reserve request; e.g.
 .IP
+mac:mac ID - names the port directly using the MAC id of the VM attached to the port.
+A port name that looks like a MAC address (without the "mac:" prefix) will also be accepted.
+.IP
+UUID - names the port directly using the Neutron port UUID of the port.
+The UUID must be formatted in the normal UUID style (with dashes).
+.IP
 name or IP - if not in "tenant aware mode", the name or IP address of the host attached to the port.
 .IP
 token/tenant/host - for "host" (with 1 port only) on "tenant".
 .IP
 token//vm_uuid - for the host with UUID "vm_uuid"
-.IP
-mac:mac ID - names the port directly using the MAC id of the VM attached to the port.
 Tegu will attempt to determine which physical machine the bridge is on and set up the mirror appropriately.
 
 .IP
@@ -329,10 +334,13 @@ This allows GRE endpoints to be pre-specified.
 Is an optional string that is used to provide a minimum of security for the mirror.
 If provided, it is required when deleting (del-mirror) or viewing (show-mirror) the mirror.
 The cookie may not contain any spaces, and does not need to be unique across mirror requests.
+If a cookie is not desired when specifying the \fIvlan\fP option (see below), hen the empty
+string should be provided for the cookie.
 .IP
 .B vlan
 Is an optional string that can be used to specify one or more (comma separated) VLANs to
 be added to the create mirror request passed to openvswitch.
+This specifies that only packets for the listed VLAN(s) should be mirrored.
 If provided, it must consist of a comma separated list of VLAN ids from 0 to 4095.
 If the string is provided and is syntactically incorrect, the mirror request is rejected.
 
