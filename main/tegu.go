@@ -133,6 +133,7 @@
 				06 Jul 2015 : Version bump
 				29 Jul 2015 : Tracker bug fixes (263,266) version bump.
 				03 Sep 2015 : Correct panic in network.go.
+				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -167,7 +168,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.4/19035"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.4/19085"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

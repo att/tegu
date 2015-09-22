@@ -67,13 +67,17 @@
 #				30 Jun 2015 - Fixed a bunch of typos.
 #				01 Jul 2015 - Correct bug in mirror timewindow parsing.
 #				20 Jul 2015 - Corrected potential bug with v2/3 selection.
+#				22 Sep 2015 - Added support to suss out our URL from the keystaone catalogue 
+#					and use that if it's there.
 # ----------------------------------------------------------------------------------------
 
 function usage {
 	cat <<endKat
 
-	usage: $argv0 [-d] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-r rname] [-s] [-t token|-T] command parms
+	version 2.0/19225
+	usage: $argv0 [-c] [-d] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-R region] [-r rname] [-S service] [-s] [-t token|-T] command parms
 
+	  -c Do not attempt to find our URL from the keystone catalogue.
 	  -d causes json output from tegu to be formatted in a dotted hierarch style
 	  -f force prompting for user and password if -T is used even if a user name or password is
 	     currrently set in the environment.
@@ -84,7 +88,12 @@ function usage {
 	     can be supplied when needed.
 	  -K Use keystone command line interface, rather than direct API, to generate a token
 	     (ignored unless -T is used)
+	  -R name  Allows a region name to be supplied to override the OS_REGION environment variable.
+	     If OS_REGION is not defined, and this option is not given, the the first region in the 
+	     list returned by Openstack will be used (specify the region if you must be sure!).
 	  -r allows a 'root' name to be supplied for the json output when humanised
+	  -S name  Overrides the QL_SERVICE name defined in the environment and uses name as
+	     the lookup key when sussing through the catalogue for the URL to use for Tegu.
 	  -s enables secure TLS (https://) protocol for requests to Tegu.
 	  -t allows a keystone token to be supplied for privileged commands; -T causes a token to
 	     be generated using the various OS_ environment variables. If a needed variable is
@@ -150,6 +159,14 @@ function usage {
 endKat
 }
 
+function verbose
+{
+	if (( vlevel > 0 ))
+	then
+		echo "$1" >&2
+	fi
+}
+
 # generate the input json needed to request a token using openstack/keystone v3 interface
 function gen_v3_token_json {
 cat <<endKat
@@ -174,6 +191,133 @@ cat <<endKat
 endKat
 }
 
+function ensure_osvars
+# ensure that the needed OS variables are set; prompt for them if not
+{
+	typeset token_value=""
+	typeset xOS_PASSWORD=""
+	typeset xOS_USERNAME=""
+	typeset xOS_TENANT_NAME=""
+
+	trap 'stty echo; exit 2' 1 2 3 15
+	if [[ -z $OS_USERNAME ]]
+	then
+		printf "Token generation:\n\tEnter user name: " >/dev/tty
+		read xOS_USERNAME
+		OS_USERNAME="${xOS_USERNAME:-nonegiven}"
+	fi
+
+	if [[ -z $OS_PASSWORD ]]
+	then
+		default="no-default"
+
+		printf "\tEnter password for $OS_USERNAME: " >/dev/tty
+		stty -echo
+		read xOS_PASSWORD
+		stty echo
+		printf "\n" >/dev/tty
+
+		OS_PASSWORD=${xOS_PASSWORD:-nonegiven999}
+	fi
+	trap - 1 2 3 15
+
+	if [[ -z $OS_TENANT_NAME ]]
+	then
+		printf "\tEnter tenant: " >/dev/tty
+		read OS_TENANT_NAME
+	fi
+
+	if [[ -z $OS_AUTH_URL ]]
+	then
+		printf "\tEnter keystone url: " >/dev/tty
+		read OS_AUTH_URL
+	fi
+
+	if [[ -z $region ]]
+	then
+		printf "\tEnter region: " >/dev/tty
+		read region
+	fi
+}
+
+# Parse output from a keystone token request to suss out the URL for tegu.
+# We assume that the service name is QL_SERVICE in the environment or netqos by
+# default.  We depend on rjprt as we use the dotted output format which makes
+# it fairly straight forward to parse.  Echo nothing from this function as the
+# url is written to stdout for the caller.
+function suss_url
+{
+	ensure_osvars
+	export OS_USERNAME
+	export OS_TENANT_NAME
+	export OS_AUTH_URL
+
+	typeset	url="$OS_AUTH_URL/tokens"
+	rjprt -r x -d -J -t  $url -m POST -D "{\"auth\": {\"tenantName\": \"${OS_TENANT_NAME:-garbage}\", \"passwordCredentials\": {\"username\": \"$OS_USERNAME\", \"password\": \"${OS_PASSWORD:-garbage}\" }}}" | awk -F "=" \
+		-v url_type="$url_type" \
+		-v region=${region:-any}  \
+		-v sname="${1:-none}" \
+	'
+	function strip( src ) {
+		while( substr( src, 1, 1 ) == " " )
+			src = substr( src, 2 )
+		return src
+	}
+
+	{
+		split( $1, a, "." )
+		if( a[2] == "access" && substr( a[3], 1, 14 )  == "serviceCatalog" ) {
+			split( a[3], b, "[" )
+			if( b[2] == "len" )
+				next;
+
+			idx = b[2]+0			# [len] will map to 0
+	
+			if( index( a[4], "type" ) > 0  ) {
+				cat_type[idx] = strip( $NF );
+			} else {
+				if( index( a[4], "name" ) > 0  ) {
+					cat_name[idx] = strip( $NF );
+					cat_len++;
+				} else {
+					if( substr( a[4], 1, 5 ) == "endpo" ) {
+						split( a[4], b, "[" );
+						if( b[2] != "len" ) {
+							ep_idx = b[2] + 0;
+		
+							if( index( a[5], url_type ) > 0  ) {
+								ep_url[idx,ep_idx] = strip( $NF );
+							} else {
+								if( index( a[5], "region" ) > 0 ) {
+									ep_reg[idx,ep_idx] = strip( $NF );
+									ep_len[idx]++;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		next;
+	}
+
+	END {
+		for( i = 0; i < cat_len; i++ ) {			# for each catalogue type
+			if( cat_name[i] == sname ) {
+				for( j = 0; j < ep_len[i]; j++ ) {
+					if( region == "any" || ep_reg[i,j] == region ) {
+						printf( "%s\n", ep_url[i,j] );
+						exit( 0 );
+					}
+				}
+			}
+		}
+
+		exit( 1 )
+	}
+	'
+}
 
 # parse the output from keystone/openstack version2 token generation
 function v2_suss_token {
@@ -235,46 +379,10 @@ function set_xauth
 	fi
 }
 
+
 function gen_token
 {
-	typeset token_value=""
-	typeset xOS_PASSWORD=""
-	typeset xOS_USERNAME=""
-	typeset xOS_TENANT_NAME=""
-
-	trap 'stty echo; exit 2' 1 2 3 15
-	if [[ -z $OS_USERNAME ]]
-	then
-		printf "Token generation:\n\tEnter user name: " >/dev/tty
-		read xOS_USERNAME
-		OS_USERNAME="${xOS_USERNAME:-nonegiven}"
-	fi
-
-	if [[ -z $OS_PASSWORD ]]
-	then
-		default="no-default"
-
-		printf "\tEnter password for $OS_USERNAME: " >/dev/tty
-		stty -echo
-		read xOS_PASSWORD
-		stty echo
-		printf "\n" >/dev/tty
-
-		OS_PASSWORD=${xOS_PASSWORD:-nonegiven999}
-	fi
-	trap - 1 2 3 15
-
-	if [[ -z $OS_TENANT_NAME ]]
-	then
-		printf "\tEnter tenant: " >/dev/tty
-		read OS_TENANT_NAME
-	fi
-
-	if [[ -z $OS_AUTH_URL ]]
-	then
-		printf "\tEnter keystone url: " >/dev/tty
-		read OS_AUTH_URL
-	fi
+	ensure_osvars
 
 	export OS_TENANT_NAME
 	export OS_PASSWORD
@@ -322,10 +430,14 @@ port=29444
 host=localhost:$port
 opts=""
 root=""
-proto="http"
+proto="http://"
 prompt4token=0
 force=0
 use_keystone=0
+url_type="adminURL"
+skip_catalogue=0			# -c causes this to set and we don't look in keystone catalogue for our url/port
+vlevel=0
+region=${OS_REGION:=any}	# if not supplied, default to first region (any)
 
 bandwidth="bandwidth"		# http api collections
 steering="api"				# eventually this should become steering
@@ -334,17 +446,21 @@ default="api"
 while [[ $1 == -* ]]
 do
 	case $1 in
+		-c)		skip_catalogue=1;;						# allow for default host (locahost)
 		-d)		opts+=" -d";;
 		-f)		force=1;;
 		-F)		bandwidth="api"; steering="api";;		# force collection to old single set style
-		-h) 	host=$2; shift;;
+		-h) 	skip_catalogue=1; host=$2; shift;;
 		-j)		opts+=" -j";;
 		-k)		kv_pairs+="$2 "; shift;;
 		-K)		use_keystone=1;;
+		-R)		region=$2; shift;;
 		-r)		root="$2"; shift;;
-		-s)		proto="https";;
+		-s)		proto="https://";;
+		-S)		QL_SERVICE=$2; shift;;
 		-t)		raw_token="$2"; token=$"auth=$2"; shift;;
 		-T)		prompt4token=1;;
+		-v)		(( vlevel++ ));;
 		-\?)	usage
 				exit 1
 				;;
@@ -366,11 +482,24 @@ then
 	OS_PASSWORD=""
 fi
 
+if (( ! skip_catalogue ))
+then
+	port="443"										# assume some kind of proxy with this default port
+	cat_host=$( suss_url ${QL_SERVICE:-netqos} )	# suss out the url for our service
+	if [[ -z $cat_host ]]
+	then
+		verbose "WARNING: unable to find  ${QL_SERVICE:-netqos} in service catalogue; using $host"
+	else
+		proto=""							# assume proto comes from catalogue
+		host="$cat_host"
+		verbose "using url from service catalogue: $host"
+	fi
+fi
+
 if [[ $host != *":"* ]]
 then
 	host+=":$port"
 fi
-
 
 if (( prompt4token ))						# if -T given, prompt for information needed to generate a token
 then
@@ -386,23 +515,23 @@ fi
 opts+=$( set_xauth $raw_token )
 case $1 in
 	ping)
-		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" -D "$token ping"
+		rjprt  $opts -m POST -t "$proto$host/tegu/$default" -D "$token ping"
 		;;
 
 	listq*|qdump|dumpqueue*)
-		rjprt  $opts -m POST -t "$proto://$host/tegu/$bandwidth" -D "$token qdump"
+		rjprt  $opts -m POST -t "$proto$host/tegu/$bandwidth" -D "$token qdump"
 		;;
 
 	listr*)
-		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" -D "$token listres $kv_pairs"
+		rjprt  $opts -m POST -t "$proto$host/tegu/$default" -D "$token listres $kv_pairs"
 		;;
 
 	listh*)						# list hosts
-		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" -D "$token listhosts $kv_pairs"
+		rjprt  $opts -m POST -t "$proto$host/tegu/$default" -D "$token listhosts $kv_pairs"
 		;;
 
 	listul*)						# list user link caps
-		rjprt  $opts -m POST -t "$proto://$host/tegu/$bandwidth" -D "$token listulcaps"
+		rjprt  $opts -m POST -t "$proto$host/tegu/$bandwidth" -D "$token listulcaps"
 		;;
 
 	listc*)						# list connections
@@ -417,12 +546,12 @@ case $1 in
 			done >/tmp/PID$$.data
 		fi
 
-		rjprt  $opts -m POST -t "$proto://$host/tegu/$default" </tmp/PID$$.data
+		rjprt  $opts -m POST -t "$proto$host/tegu/$default" </tmp/PID$$.data
 		rm -f /tmp/PID$$.data
 		;;
 
 	graph)
-		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto://$host/tegu/$default"
+		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto$host/tegu/$default"
 		;;
 
 
@@ -436,19 +565,19 @@ case $1 in
 				;;
 		esac
 
-		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto://$host/tegu/$bandwidth"
+		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto$host/tegu/$bandwidth"
 		;;
 
 	pause)
-		rjprt $opts -m POST -D "$token pause" -t "$proto://$host/tegu/$default"
+		rjprt $opts -m POST -D "$token pause" -t "$proto$host/tegu/$default"
 		;;
 
 	refresh)
-		rjprt  $opts -m POST -D "$token refresh $2" -t "$proto://$host/tegu/$default"
+		rjprt  $opts -m POST -D "$token refresh $2" -t "$proto$host/tegu/$default"
 		;;
 
 	resume)
-		rjprt $opts -m POST -D "$token resume" -t "$proto://$host/tegu/$default"
+		rjprt $opts -m POST -D "$token resume" -t "$proto$host/tegu/$default"
 		;;
 
 	reserve)
@@ -480,7 +609,7 @@ case $1 in
 				exit 1
 			fi
 		fi
-		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/$bandwidth"
+		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/tegu/$bandwidth"
 		;;
 
 	owres*|ow_res*)
@@ -493,26 +622,26 @@ case $1 in
 			exit 1
 		fi
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "ow_reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto://$host/tegu/$bandwidth"
+		rjprt  $opts -m POST -D "ow_reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/tegu/$bandwidth"
 		;;
 
 	setdiscount)
-		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto://$host/tegu/$bandwidth"
+		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto$host/tegu/$bandwidth"
 		;;
 
 	setulcap)
-		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto://$host/tegu/$default"
+		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto$host/tegu/$default"
 		;;
 
 	steer*)
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto://$host/tegu/$steering"
+		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto$host/tegu/$steering"
 		;;
 
 	verbose)
 		case $2 in
-			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto://$host/tegu/$default";;		# assume tegu way: level subsystem
-			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto://$host/tegu/$default";;		# assume entered backwards: subsystem level
+			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto$host/tegu/$default";;		# assume tegu way: level subsystem
+			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto$host/tegu/$default";;		# assume entered backwards: subsystem level
 		esac
 		;;
 
@@ -573,17 +702,17 @@ case $1 in
 			json="$json, \"vlan\": \"$5\""
 		fi
 		json="$json }"
-		rjprt $opts -m POST -D "$json" -t "$proto://$host/tegu/mirrors/"
+		rjprt $opts -m POST -D "$json" -t "$proto$host/tegu/mirrors/"
 		;;
 
 	del-mirror|delmirror)
 		shift
 		case $# in
 			1)
-				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/" </dev/null
+				rjprt $opts -m DELETE -t "$proto$host/tegu/mirrors/$1/" </dev/null
 				;;
 			2)
-				rjprt $opts -m DELETE -t "$proto://$host/tegu/mirrors/$1/?cookie=$2" </dev/null
+				rjprt $opts -m DELETE -t "$proto$host/tegu/mirrors/$1/?cookie=$2" </dev/null
 				;;
 			*)
 				echo "bad number of positional parameters for del-mirror [FAIL]" >&2
@@ -594,17 +723,17 @@ case $1 in
 		;;
 
 	list-mirrors|listmirror)
-		rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/"
+		rjprt $opts -m GET -t "$proto$host/tegu/mirrors/"
 		;;
 
 	show-mirror|showmirror)
 		shift
 		case $# in
 			1)
-				rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/$1/"
+				rjprt $opts -m GET -t "$proto$host/tegu/mirrors/$1/"
 				;;
 			2)
-				rjprt $opts -m GET -t "$proto://$host/tegu/mirrors/$1/?cookie=$2"
+				rjprt $opts -m GET -t "$proto$host/tegu/mirrors/$1/?cookie=$2"
 				;;
 			*)
 				echo "bad number of positional parameters for show-mirror [FAIL]" >&2
