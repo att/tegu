@@ -472,55 +472,6 @@ func (p *osif_project) Get_all_info( creds *ostack.Ostack, inc_project bool ) ( 
 	return
 }
 
-/*
-	Builds an array of gizmos.Endpt structs for all VMs known to the project.
-*/
-/*
-REVAMP:  finish
-func (p *osif_project) Build_eplist( creds *ostack.Ostack, inc_project bool ) ( eplist []*gizmos.Endpt, err error ) {
-
-	err = nil
-	ilist = nil
-
-	if p == nil  ||  creds == nil {
-		err = fmt.Errorf( "creds were nil" )
-		osif_sheep.Baa( 2, "lazy update: unable to get_all: nil creds" )
-		return
-	}
-
-	if time.Now().Unix() - p.lastfetch > 90 {					// if not fresh force a reload first
-		err = p.refresh_maps( creds )
-		osif_sheep.Baa( 2, "lazy update: data reload for: build_ep" )
-		if err != nil {
-			return
-		}
-	}
-
-	
-	found := 0
-	ilist = make( []*gizmos.Endpt, len( p.ip2uuid ) )
-//func Mk_endpt( uuid, string, phost string, project string, ip string, switch *Switch, port int ) (h *Endporint) {
-
-	for k, _ := range p.ip2uuid {				// translate each ip address to a unique uuid that is in the OVS interface's external id list
-		name := p.ip2vm[k]
-		_, id, ip4, fip4, mac, gw, phost, gwmap, _, lerr := p.Get_info( &k, creds, true )
-		if lerr == nil  {
-			if name == nil {
-				n := "unknown"
-				name = &n
-			}
-			ilist[found] = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, fip4, gwmap )
-			found++
-		}
-	}
-
-	pname, _ := creds.Get_project()
-	osif_sheep.Baa( 1, "get all osvm info found %d VMs in %s", found, *pname )
-
-	return
-}
-*/
-
 /* Public interface to get the default gateway (router) for a project. Causes data to
 	be loaded if stale.  Search is the project name or ID and can be of the form
 	project/<stuff> where stuff will be ignored. New data (return) is true if the data
