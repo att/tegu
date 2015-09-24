@@ -188,9 +188,13 @@ reservation to be deleted if a matching cookie is supplied.
 The cookie may not contain any spaces, and does not need to be unique across reservations.
 .IP
 \fBdscp\fP
-The DSCP value to use.
-Must be between 0 and 64.
-The default, if not specified is WTF?
+The traffic classification. 
+This is one of three strings, "voice", "control", or "data"; each may be prefixed with 
+"global_."
+The strings map to one of the supported ITONS DSCP values.
+If the global_ prefix is added, the traffic markings (dscp values) are kept as the traffic 
+passes out of the cloud environment. 
+If omitted, "voice" is assumed.
 
 .TP 8
 .B owreserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie [dscp]

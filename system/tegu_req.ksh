@@ -68,21 +68,22 @@
 #				01 Jul 2015 - Correct bug in mirror timewindow parsing.
 #				20 Jul 2015 - Corrected potential bug with v2/3 selection.
 #				22 Sep 2015 - Added support to suss out our URL from the keystaone catalogue 
-#					and use that if it's there.
+#					and use that if it's there. Corrected dscp value check (was numeric).
+#					Added ability to use %p in endpoint name for project (pulls from OS_ var).
 # ----------------------------------------------------------------------------------------
 
 function usage {
 	cat <<endKat
 
 	version 2.0/19225
-	usage: $argv0 [-c] [-d] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-R region] [-r rname] [-S service] [-s] [-t token|-T] command parms
+	usage: $argv0 [-c] [-d] [-f] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-R region] [-r rname] [-S service] [-s] [-t token|-T] command parms
 
-	  -c Do not attempt to find our URL from the keystone catalogue.
+	  -c Do not attempt to find our URL from the keystone catalogue. (see -h)
 	  -d causes json output from tegu to be formatted in a dotted hierarch style
 	  -f force prompting for user and password if -T is used even if a user name or password is
 	     currrently set in the environment.
 	  -h is needed when tegu is running on a different host than is being used to run tegu_req
-	     and/or when tegu is listening on a port that isn't the default
+	     and/or when tegu is listening on a port that isn't the default. Implies -c.
 	  -j causes raw json to be spilled to the standard out device
 	  -k k=v Supplies a key/value pair that is necessary on some requests. Multiple -k options
 	     can be supplied when needed.
@@ -94,13 +95,15 @@ function usage {
 	  -r allows a 'root' name to be supplied for the json output when humanised
 	  -S name  Overrides the QL_SERVICE name defined in the environment and uses name as
 	     the lookup key when sussing through the catalogue for the URL to use for Tegu.
+	     If -S not supplied, and QL_SERVICE not defined, then netqos is assumed.
 	  -s enables secure TLS (https://) protocol for requests to Tegu.
 	  -t allows a keystone token to be supplied for privileged commands; -T causes a token to
 	     be generated using the various OS_ environment variables. If a needed variable is
 	     not in the environment, then a prompt will be issued. When either -t or -T is given
 	     a %t can be used on the commandline in place of the token and the token will
 	     substituted. For example: %t/cloudqos/daniels8  would substitute the generated
-	     token into the host name specification.
+	     token into the host name specification.  Similarly, %p can be used on the command line
+	     to cause the project name (assuming OS_TENANT_NAME is set) to be substituted.
 
 	commands and parms are one of the following:
 	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
@@ -130,9 +133,10 @@ function usage {
 	  bandwidth from host2 (in) to host1. Both values may be specified with trailing
 	  G/M/K suffixes (e.g. 10M,20M).
 
-	  The dscp value is the desired value that should be left tagging the data as it
-	  reaches the egress point.  This allows applications to have their data tagged
-	  in cases when the application does not, or cannot, tag it's own data.
+	  The dscp value is one of three strings, (voice, data, control) with an optional
+	  global_ as a prefix.  This causes the reserved traffic to be marked with one 
+	  of the three ITONs values.  Adding global_ causes the marking to be left
+	  on the traffic as it passes out of the cloud environment.
 
 	  For the listconns command, "name" may be a VM name, VM ID, or IP address. If
 	  a file is supplied on stdin, then it is assumed to consist of one name per
@@ -159,12 +163,28 @@ function usage {
 endKat
 }
 
+function cleanup
+{
+	trap - 1 2 3 15 EXIT
+	stty echo
+	rm -f /tmp/PID$$.*
+}
+
 function verbose
 {
 	if (( vlevel > 0 ))
 	then
 		echo "$1" >&2
 	fi
+}
+
+# takes a string $3 and makes substitutions such that %t is replaced with $1 and %p is 
+# replaced with $2
+function expand_epname
+{
+	typeset s="${3//%t/$1}"
+	s="${s//%p/$2}"
+	echo "$s"
 }
 
 # generate the input json needed to request a token using openstack/keystone v3 interface
@@ -199,7 +219,6 @@ function ensure_osvars
 	typeset xOS_USERNAME=""
 	typeset xOS_TENANT_NAME=""
 
-	trap 'stty echo; exit 2' 1 2 3 15
 	if [[ -z $OS_USERNAME ]]
 	then
 		printf "Token generation:\n\tEnter user name: " >/dev/tty
@@ -219,7 +238,6 @@ function ensure_osvars
 
 		OS_PASSWORD=${xOS_PASSWORD:-nonegiven999}
 	fi
-	trap - 1 2 3 15
 
 	if [[ -z $OS_TENANT_NAME ]]
 	then
@@ -244,7 +262,8 @@ function ensure_osvars
 # We assume that the service name is QL_SERVICE in the environment or netqos by
 # default.  We depend on rjprt as we use the dotted output format which makes
 # it fairly straight forward to parse.  Echo nothing from this function as the
-# url is written to stdout for the caller.
+# url is written to stdout for the caller.  As a side effect of this funciton we
+# do get the user's token
 function suss_url
 {
 	ensure_osvars
@@ -253,10 +272,11 @@ function suss_url
 	export OS_AUTH_URL
 
 	typeset	url="$OS_AUTH_URL/tokens"
-	rjprt -r x -d -J -t  $url -m POST -D "{\"auth\": {\"tenantName\": \"${OS_TENANT_NAME:-garbage}\", \"passwordCredentials\": {\"username\": \"$OS_USERNAME\", \"password\": \"${OS_PASSWORD:-garbage}\" }}}" | awk -F "=" \
+	rjprt -r x -d -J -t  $url -m POST -D "{\"auth\": {\"tenantName\": \"${OS_TENANT_NAME:-garbage}\", \"passwordCredentials\": {\"username\": \"$OS_USERNAME\", \"password\": \"${OS_PASSWORD:-garbage}\" }}}" | awk \
 		-v url_type="$url_type" \
 		-v region=${region:-any}  \
 		-v sname="${1:-none}" \
+		-v tfname="/tmp/PID$$.tk" \
 	'
 	function strip( src ) {
 		while( substr( src, 1, 1 ) == " " )
@@ -297,6 +317,13 @@ function suss_url
 					}
 				}
 			}
+		} else {
+			if( a[2] == "access" && a[3] == "token" && a[4] == "id" ) {
+				if( ! have_token ) {
+					have_token = 1;
+					printf( "%s\n", $NF ) >tfname			# save token since bash incapable of reading two values from a function
+				}
+			}
 		}
 
 		next;
@@ -316,7 +343,7 @@ function suss_url
 
 		exit( 1 )
 	}
-	'
+	'		# end
 }
 
 # parse the output from keystone/openstack version2 token generation
@@ -382,6 +409,14 @@ function set_xauth
 
 function gen_token
 {
+	if [[ -s /tmp/PID$$.tk ]]		# token generated during catalogue url search
+	then
+		token_value=$( </tmp/PID$$.tk  )		# just pull what we have and use it
+		rm /tmp/PID$$.tk						# don't wait for end, trash now
+		echo "$token_value"
+		return
+	fi
+
 	ensure_osvars
 
 	export OS_TENANT_NAME
@@ -425,6 +460,8 @@ function gen_token
 
 # ------------------------------------------------------------------------------------------------------------
 
+trap cleanup 1 2 3 15 EXIT		# ensure tty is restored to sane state, and cleanup scratch files in /tmp
+
 argv0="${0##*/}"
 port=29444
 host=localhost:$port
@@ -434,14 +471,14 @@ proto="http://"
 prompt4token=0
 force=0
 use_keystone=0
-url_type="adminURL"
+url_type="publicURL"
 skip_catalogue=0			# -c causes this to set and we don't look in keystone catalogue for our url/port
 vlevel=0
 region=${OS_REGION:=any}	# if not supplied, default to first region (any)
 
-bandwidth="bandwidth"		# http api collections
-steering="api"				# eventually this should become steering
-default="api"
+bandwidth="tegu/bandwidth"		# http api collections
+steering="tegu/api"				# eventually this should become steering
+default="tegu/api"
 
 while [[ $1 == -* ]]
 do
@@ -457,7 +494,7 @@ do
 		-R)		region=$2; shift;;
 		-r)		root="$2"; shift;;
 		-s)		proto="https://";;
-		-S)		QL_SERVICE=$2; shift;;
+		-S)		QL_SERVICE=$2; shift;;					# override environment
 		-t)		raw_token="$2"; token=$"auth=$2"; shift;;
 		-T)		prompt4token=1;;
 		-v)		(( vlevel++ ));;
@@ -474,6 +511,8 @@ do
 	shift
 done
 
+ql_service="${QL_SERVICE:-netqos}"			# use environment or default
+
 opts+=" -r ${root:-$1}"
 
 if (( force > 0 ))							# force username and password prompts; other OS vars default if set
@@ -485,14 +524,25 @@ fi
 if (( ! skip_catalogue ))
 then
 	port="443"										# assume some kind of proxy with this default port
-	cat_host=$( suss_url ${QL_SERVICE:-netqos} )	# suss out the url for our service
+	cat_host=$( suss_url $ql_service )	# suss out the url for our service
 	if [[ -z $cat_host ]]
 	then
-		verbose "WARNING: unable to find  ${QL_SERVICE:-netqos} in service catalogue; using $host"
+		verbose "WARNING: unable to find  $ql_service in service catalogue; using $host"
 	else
 		proto=""							# assume proto comes from catalogue
 		host="$cat_host"
 		verbose "using url from service catalogue: $host"
+
+		# NOTE: the conditional statement below  is a temporary hack until AICv2 is installed and the requirement for
+		# the 'tag' to be netqos goes away if it's an old system the ping will fail and we need to replace tegu/api
+		# etc. with netqos in the url.
+		if  ! rjprt  $opts -m POST -t "$proto$host/$default " -D "$token ping" 2>/dev/null |grep -q pong
+		then
+			default=netqos
+			steering=netqos
+			bandwidth=netqos
+		fi
+
 	fi
 fi
 
@@ -515,23 +565,23 @@ fi
 opts+=$( set_xauth $raw_token )
 case $1 in
 	ping)
-		rjprt  $opts -m POST -t "$proto$host/tegu/$default" -D "$token ping"
+		rjprt  $opts -m POST -t "$proto$host/$default" -D "$token ping"
 		;;
 
 	listq*|qdump|dumpqueue*)
-		rjprt  $opts -m POST -t "$proto$host/tegu/$bandwidth" -D "$token qdump"
+		rjprt  $opts -m POST -t "$proto$host/$bandwidth" -D "$token qdump"
 		;;
 
 	listr*)
-		rjprt  $opts -m POST -t "$proto$host/tegu/$default" -D "$token listres $kv_pairs"
+		rjprt  $opts -m POST -t "$proto$host/$default" -D "$token listres $kv_pairs"
 		;;
 
 	listh*)						# list hosts
-		rjprt  $opts -m POST -t "$proto$host/tegu/$default" -D "$token listhosts $kv_pairs"
+		rjprt  $opts -m POST -t "$proto$host/$default" -D "$token listhosts $kv_pairs"
 		;;
 
 	listul*)						# list user link caps
-		rjprt  $opts -m POST -t "$proto$host/tegu/$bandwidth" -D "$token listulcaps"
+		rjprt  $opts -m POST -t "$proto$host/$bandwidth" -D "$token listulcaps"
 		;;
 
 	listc*)						# list connections
@@ -546,12 +596,12 @@ case $1 in
 			done >/tmp/PID$$.data
 		fi
 
-		rjprt  $opts -m POST -t "$proto$host/tegu/$default" </tmp/PID$$.data
+		rjprt  $opts -m POST -t "$proto$host/$default" </tmp/PID$$.data
 		rm -f /tmp/PID$$.data
 		;;
 
 	graph)
-		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto$host/tegu/$default"
+		rjprt  $opts -m POST -D "$token graph $kv_pairs" -t "$proto$host/$default"
 		;;
 
 
@@ -565,24 +615,24 @@ case $1 in
 				;;
 		esac
 
-		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto$host/tegu/$bandwidth"
+		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto$host/$bandwidth"
 		;;
 
 	pause)
-		rjprt $opts -m POST -D "$token pause" -t "$proto$host/tegu/$default"
+		rjprt $opts -m POST -D "$token pause" -t "$proto$host/$default"
 		;;
 
 	refresh)
-		rjprt  $opts -m POST -D "$token refresh $2" -t "$proto$host/tegu/$default"
+		rjprt  $opts -m POST -D "$token refresh $2" -t "$proto$host/$default"
 		;;
 
 	resume)
-		rjprt $opts -m POST -D "$token resume" -t "$proto$host/tegu/$default"
+		rjprt $opts -m POST -D "$token resume" -t "$proto$host/$default"
 		;;
 
 	reserve)
 		shift
-			#teg command is: reserve <bandwidth>[K|M|G] [<start>-]<end>  <host1-host2> [cookie [dscp]]
+		#tegu command is: reserve <bandwidth>[K|M|G] [<start>-]<end>  <host1-host2> [cookie [dscp]]
 		if (( $# < 4 ))
 		then
 			echo "bad number of positional parms for reserve  [FAIL]" >&2
@@ -596,20 +646,20 @@ case $1 in
 			echo "host pair must be specified as host1-host2 OR host1,host2   [FAIL]" >&2
 			exit 1
 		fi
-		if [[ $3 == *"-any" ]] || [[ $3 == *",any" ]]
-		then
-			echo "second host in the pair must NOT be 'any'   [FAIL]" >&2
-			exit 1
-		fi
 		if [[ -n $5 ]]
 		then
-			if (( $5 < 0 || $5 > 64 ))
-			then
-				echo "dscp value ($5) must be between 0 and 64  [FAIL]" >&2
-				exit 1
-			fi
+			case $5 in
+				voice|data|control) ;;			# valid
+				global_voice|global_data|global_control) ;;  # valid
+				
+				*)
+						echo "dscp value ($5) must be one of [global_]voice, [global_]data or [global_]control  [FAIL]" >&2
+						exit 1
+						;;
+			esac
 		fi
-		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/tegu/$bandwidth"
+		#rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/$bandwidth"
+		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry $(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) $4 $5" -t "$proto$host/$bandwidth"
 		;;
 
 	owres*|ow_res*)
@@ -622,26 +672,26 @@ case $1 in
 			exit 1
 		fi
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "ow_reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/tegu/$bandwidth"
+		rjprt  $opts -m POST -D "ow_reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/$bandwidth"
 		;;
 
 	setdiscount)
-		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto$host/tegu/$bandwidth"
+		rjprt  $opts -m POST -D "$token setdiscount $2" -t "$proto$host/$bandwidth"
 		;;
 
 	setulcap)
-		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto$host/tegu/$default"
+		rjprt  $opts -m POST -D "$token setulcap $2 $3" -t "$proto$host/$default"
 		;;
 
 	steer*)
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto$host/tegu/$steering"
+		rjprt  $opts -m POST -D "steer $kv_pairs $expiry ${3//%t/$raw_token} $4 $5 $6 $7" -t "$proto$host/$steering"
 		;;
 
 	verbose)
 		case $2 in
-			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto$host/tegu/$default";;		# assume tegu way: level subsystem
-			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto$host/tegu/$default";;		# assume entered backwards: subsystem level
+			[0-9]*) rjprt  $opts -m POST -D "$token verbose $2 $3" -t "$proto$host/$default";;		# assume tegu way: level subsystem
+			*) 		rjprt  $opts -m POST -D "$token verbose $3 $2" -t "$proto$host/$default";;		# assume entered backwards: subsystem level
 		esac
 		;;
 
@@ -747,6 +797,10 @@ case $1 in
 		shift
 		echo "test: raw_token=($raw_token)"
 		echo "test: options: ($opts)"
+		if [[ -n $1 ]]
+		then
+			echo "expanded name: $(expand_epname "$raw_token" "$OS_TENANT_NAME" $1)"
+		fi
 		;;
 
 	*)
