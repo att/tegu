@@ -159,8 +159,8 @@ func (s *Switch) Has_host( host *string ) (bool) {
 		return false
 	}
 
-	if s.vmid[*host] != nil {			// allow searches based on the uuid
-		return s.vmid[*host]
+	if s.hvmid[*host] != nil {			// allow searches based on the uuid
+		return true
 	}
 
 	return s.hosts[*host]
