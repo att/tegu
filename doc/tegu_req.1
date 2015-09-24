@@ -26,6 +26,7 @@
 .\"     Mods:		14 Jun 2015 - Created
 .\"					01 Sep 2015 - Filled in unfinished section.
 .\"					18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
+.\"					22 Sep 2015 - Updates based on code changes.
 .\"
 .TH TEGU_REQ 1 "Tegu Manual"
 .CM 4
@@ -48,6 +49,12 @@ For details on the Tegu HTTP API, look at \fItegu(8)\fP.
 .SH COMMAND LINE OPTIONS
 \fItegu_req\fR interprets the following options:
 .\" ==========
+.TP 8
+.B \-c
+Causes a search of the keystone service catalogue to be skipped. If not supplied, then 
+tegu_req will attempt to find the URL for Tegu by searching for the netqos service 
+name (see -S) in the catalogue.  If the service is not defined, then localhost is 
+assumed unless -h is supplied.
 .TP 8
 .B \-d
 Causes JSON output from Tegu to be formatted in a dotted hierarchical style.
@@ -78,9 +85,16 @@ Only useful if -T is not used.
 Causes extra arguments, in the form of key=value, to be passed to Tegu for certain requests.
 The commands where this is used are: listres, listhosts, graph, reserve, steer.
 .TP 8
+.B \-R name
+Supplies the region name overriding the OS_REGION from the environment.
+.TP 8
 .B \-r name
 Allow specification of a "root" name for the JSON output.
 The default root name is the name of the command (e.g. "graph" when using the graph command).
+.TP 8
+.B \-S name
+Allows the user to supply the service name that is searched for in the keystone catalogue.
+If not supplied netqos is used.
 .TP 8
 .B \-s
 Causes tegu_req to use secure TLS (HTTPS) protocol for requests to Tegu.
@@ -174,9 +188,13 @@ reservation to be deleted if a matching cookie is supplied.
 The cookie may not contain any spaces, and does not need to be unique across reservations.
 .IP
 \fBdscp\fP
-The DSCP value to use.
-Must be between 0 and 64.
-The default, if not specified is WTF?
+The traffic classification. 
+This is one of three strings, "voice", "control", or "data"; each may be prefixed with 
+"global_."
+The strings map to one of the supported ITONS DSCP values.
+If the global_ prefix is added, the traffic markings (dscp values) are kept as the traffic 
+passes out of the cloud environment. 
+If omitted, "voice" is assumed.
 
 .TP 8
 .B owreserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie [dscp]
