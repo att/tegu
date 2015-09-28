@@ -643,11 +643,14 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	tegu_sheep.Add_child( fq_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 	// -------------- pick up config file data if there --------------------------------
-	if *sdn_host == "" {													// not supplied on command line, pull from config	
+	/* ---- deprecated
+	if sdn_host != nil && *sdn_host == "" {													// not supplied on command line, pull from config	
 		if sdn_host = cfg_data["default"]["sdn_host"];  sdn_host == nil {	// no default; when not in config, then it's turned off and we send to agent
 			sdn_host = &empty_str
 		}
 	}
+	---- */
+	sdn_host = &empty_str		// FIXME
 
 	if cfg_data["default"]["queue_type"] != nil {					
 		if *cfg_data["default"]["queue_type"] == "endpoint" {

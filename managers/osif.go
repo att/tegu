@@ -854,6 +854,14 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg = nil																	// prevent response from this function
 				}
 
+			case REQ_GET_ENDPTS:																// generate a map of endpoints for the indicated project or all
+				if msg.Response_ch != nil {
+					osif_sheep.Baa( 0, ">>>>> requesting ostack endpoint info" )
+					go get_all_osep_info( msg, os_refs )										// do it asynch and return the result on the message channel
+					msg = nil																	// prevent response from this function
+				}
+
+
 			case REQ_GET_DEFGW:							// dig out the default gateway for a project
 				if msg.Response_ch != nil {
 					go get_os_defgw( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel

@@ -62,7 +62,7 @@ type Switch struct {
 	id			*string				// reference id for the switch
 	links		[]*Link				// links to other switches
 	lidx		int					// next open index in links
-	hosts		map[string] bool	// hosts that are attched to this switch
+	hosts		map[string] bool	// hosts that are attched to this switch (aka endpoints)
 	hvmid		map[string]*string	// vmids of attached hosts
 	hport		map[string] int		// the port that the host (string) attaches to
 
@@ -148,6 +148,18 @@ func (s *Switch) Add_host( host *string, vmid *string, port int ) {
 	s.hosts[*host] = true
 	s.hport[*host] = port
 	s.hvmid[*host] = vmid
+}
+
+/*
+	Track an attached endpoint (aka host).
+*/
+func (s *Switch) Add_endpt( epid *string, port int ) {
+	if s == nil {
+		return
+	}
+
+	s.hosts[*epid] = true
+	s.hport[*epid] = port
 }
 
 /*

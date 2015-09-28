@@ -134,12 +134,14 @@
 				29 Jul 2015 : Tracker bug fixes (263,266) version bump.
 				03 Sep 2015 : Correct panic in network.go.
 				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
+				28 Sep 2015 : Major revsion to network management functions; endpoint support.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
 				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
 				3.1		- QoS-Lite with steering and mirroring added
 				3.2		- QoS-Lite with steering and WACC support added
+				4.1		- QoS-Lite with steering, mirroring; major endpoint network changes
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
 
@@ -168,7 +170,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.4/19085"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v4.1.0/19285"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -194,9 +196,10 @@ func main() {
 
 	chkpt_file = flag.String( "c", "", "check-point-file" )
 	cfg_file = flag.String( "C", "", "configuration-file" )
-	fl_host = flag.String( "f", "", "floodlight_host:port" )
+	//fl_host = flag.String( "f", "", "floodlight_host:port" )
 	api_port = flag.String( "p", "29444", "api_port" )
 	super_cookie = flag.String( "s", "", "admin-cookie" )
+	topo_file := flag.String( "t", "", "topo_file" )
 	verbose = flag.Bool( "v", false, "verbose" )
 
 	flag.Parse()									// actually parse the commandline
@@ -232,7 +235,7 @@ func main() {
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// start early so we bind to port quickly, but don't allow requests until late
 	go managers.Res_manager( rmgr_ch, super_cookie ); 				// manage the reservation inventory
 	go managers.Osif_mgr( osif_ch )									// openstack interface; early so we get a list of stuff before we start network
-	go managers.Network_mgr( nw_ch, fl_host )						// manage the network graph
+	go managers.Network_mgr( nw_ch, topo_file )						// manage the network graph
 	go managers.Agent_mgr( am_ch )
 	go managers.Fq_mgr( fq_ch, fl_host );
 
