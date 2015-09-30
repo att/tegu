@@ -62,7 +62,8 @@ func TestNet( t *testing.T ) {			// must use bloody camel case to be recognised 
 
 	sw_list = make( map[string]*gizmos.Switch )
 	fmt.Fprintf( os.Stderr, "\n------------- net test starts -----------------\n" )
-	links, err := gizmos.Read_json_links( "test_net.json" )
+	fname := "static_links.json"
+	links, err := gizmos.Read_json_links( &fname )
 	if err == nil  {
 		fmt.Fprintf( os.Stderr, "read  %d links from the file\n", len( links ) )
 	} else {

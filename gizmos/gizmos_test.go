@@ -115,6 +115,58 @@ func TestHasKey( t *testing.T ) {
 }
 
 /*
+	Test endpoint
+*/
+func TestEndpoint( t *testing.T ) {
+	fmt.Fprintf( os.Stderr, "\n------- endpoint tests -------------------\n" )
+	u := "uuid-string"
+	p := "phost-string" 
+	proj := "proj-string"
+	ip := "123.45.6.98"
+	m := "00:11:22:33:44:55" 
+	ep := gizmos.Mk_endpt( u, p, proj, ip,  m, nil, -1 )
+	fmt.Fprintf( os.Stderr,  "INFO:  endpoint: %s\n", ep )
+
+	x := ep.Get_project( )
+	if *x == proj {
+		fmt.Fprintf( os.Stderr, "OK:    endpoint project fetch matched expected value: %s\n", *x )
+	} else {
+		fmt.Fprintf( os.Stderr, "FAIL:  endpoint project fetch didn't match expected value: %s got %s\n", proj, *x )
+		t.Fail()
+	}
+
+	expect := "foo-value"
+	ep.Set_meta_value( "foo", expect )
+	fmt.Fprintf( os.Stderr,  "INFO:  endpoint: %s\n", ep )
+
+	x = ep.Get_meta_value( "foo" )
+	if *x == expect {
+		fmt.Fprintf( os.Stderr, "OK:    endpoint meta value fetch (foo) matched expected value: %s\n", *x )
+	} else {
+		fmt.Fprintf( os.Stderr, "FAIL:  endpoint meta value  fetch (foo) didn't match expected value: %s got %s\n", expect, *x )
+		t.Fail()
+	}
+
+	ep.Add_addr( "999.99.99.99" )
+	ep.Add_addr( "111.29.29.29" )
+	fmt.Fprintf( os.Stderr,  "INFO:  endpoint: %s\n", ep )
+	ep.Rm_addr( "999.99.99.99" )
+	fmt.Fprintf( os.Stderr,  "INFO:  endpoint: %s\n", ep )
+	fmt.Fprintf( os.Stderr,  "INFO:  endpoint: %s\n", ep.To_json() )
+
+	meta_copy := ep.Get_meta_copy( )
+	copy_uuid := "junkjunk"
+	meta_copy["uuid"] = copy_uuid				// verify it is a copy
+	x = ep.Get_meta_value( "uuid" )
+	if *x == copy_uuid {
+		fmt.Fprintf( os.Stderr, "FAIL:  metadata copy appears not to be a copy\n" )
+		t.Fail()
+	} else {
+		fmt.Fprintf( os.Stderr, "OK:    metadata copy seems to be a copy\n" )
+	}
+}
+
+/*
 func TestPledgeWindowOverlap( t *testing.T ) {
 	gizmos.Test_pwo( t )
 }

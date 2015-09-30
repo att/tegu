@@ -53,7 +53,7 @@ const (
 func TestTools( t *testing.T ) {			// must use bloody camel case to be recognised by go testing
 
 
-	fmt.Fprintf( os.Stderr, "----- tools testing begins--------\n" )
+	fmt.Fprintf( os.Stderr, "\n----- tools testing begins--------\n" )
 	s := "foo var1=value1 var2=val2 foo bar you"
 	toks := strings.Split( s, " " )
 	m := gizmos.Mixtoks2map( toks[1:], "a b c d e f" )
@@ -69,9 +69,9 @@ func test_one_hasany( t *testing.T, kstr string, ui interface{}, expect bool ) (
 
 	state := gizmos.Map_has_any( ui, toks )				// true if map has any key in the list
 	if state == expect {
-		fmt.Fprintf( os.Stderr, "[OK]   expected %v state checking key list (tokenised): %s\n", state, kstr )
+		fmt.Fprintf( os.Stderr, "OK:   expected %v state checking key list (tokenised): %s\n", state, kstr )
 	} else {
-		fmt.Fprintf( os.Stderr, "[FAIL] unexpected %v state checking key list (tokenised): %s\n", state, kstr )
+		fmt.Fprintf( os.Stderr, "FAIL: unexpected %v state checking key list (tokenised): %s\n", state, kstr )
 		t.Fail()
 		ecount++
 	}
@@ -79,10 +79,10 @@ func test_one_hasany( t *testing.T, kstr string, ui interface{}, expect bool ) (
 	// test passing a string
 	state = gizmos.Map_has_any( ui, kstr )				// true if map has any key in the list
 	if state == expect {
-		fmt.Fprintf( os.Stderr, "[OK]   expected %v state checking key list by string: %s\n", state, kstr )
+		fmt.Fprintf( os.Stderr, "OK:   expected %v state checking key list by string: %s\n", state, kstr )
 		return 0
 	} else {
-		fmt.Fprintf( os.Stderr, "[FAIL] unexpected %v state checking key list by string: %s\n", state, kstr )
+		fmt.Fprintf( os.Stderr, "FAIL: unexpected %v state checking key list by string: %s\n", state, kstr )
 		t.Fail()
 		ecount++
 	}
@@ -101,7 +101,7 @@ func TestAnyKey( t *testing.T ) {
 	m["admin"] = false
 
 	for k := range m {
-		fmt.Fprintf( os.Stderr, "[INFO] key in the map: %s\n", k )
+		fmt.Fprintf( os.Stderr, "INFO: key in the map: %s\n", k )
 	}
 
 	errs := test_one_hasany( t, "foo bar now are you here", m, true )
@@ -109,6 +109,8 @@ func TestAnyKey( t *testing.T ) {
 	errs += test_one_hasany( t, "tegu_mirror tegu_bwr", m, false )
 
 	if errs == 0 {
-		fmt.Fprintf( os.Stderr, "[OK]   All key checks passed\n" )
+		fmt.Fprintf( os.Stderr, "OK:   All key checks passed\n" )
 	}
+
+	fmt.Fprintf( os.Stderr, "\n------ endkey map testing ------\n" )
 }

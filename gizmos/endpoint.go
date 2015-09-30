@@ -36,65 +36,63 @@ import (
 	"fmt"
 )
 
+
 // --------------------------------------------------------------------------------------
+
 /*
 	Defines an endpoint in the network.  An endpoint is attached to a switch (conn_pt).
+	The struct is really just a few things with the metadata maintained as a map so 
+	that we can use more generic metadata keys down the road if we need them.  There 
+	are some 'hard coded' things like uuid, project, phost, etc. which have explicit 
+	get/set functions.
 */
 type Endpt struct {
-	uuid	string			// id given to host by creator (openstack, etc.)
-	project	string			// a project id if required by virtualiasation manager
-	phost	string			// the physical host this endpoint resides on
-	ip		string			// this either an IPv6 OR an IPv4 address
-	mac		string			// mac address
-	router	bool			// true if this is a router (gateway in openstack lingo)
-	conn_pt	*Switch			// the switch that it is connected to
-	port	int				// the port on the switch if known
+	meta		map[string]string	// generic metadata
+	ip_addrs	[]*string			// addresses associated with this endpoint
+	router		bool				// true if this is a router (gateway in openstack lingo)
+	conn_pt		*Switch				// the switch that it is connected to
+	port		int					// the port on the switch if known
 }
 
 /*
 	Create the object setting defaults and adding user supplied IP address strings.
+	The ip string is a space separated list of ip addresses or an array of string.
 */
-func Mk_endpt( uuid string, phost string, project string, ip string, mac string, sw *Switch, port int ) (ep *Endpt) {
+func Mk_endpt( uuid string, phost string, project string, ip interface{}, mac string, sw *Switch, port int ) (ep *Endpt) {
 
 	ep = &Endpt {
-		uuid: uuid,
-		phost: phost,
-		project: project,
-		ip:		ip,
-		mac:	mac,
 		conn_pt: 	sw,
 		port:	port,
 		router:	false,
 	}
 
-	return
-}
+	ep.ip_addrs = make( []*string, 0, 10 )		// initially room for 10; add function extends if needed
+	switch ipa := ip.( type ) {
+		case string:
+			ep.Add_addr( ipa )
 
-/*
-	Given a map of openstack endpoints, generate a map of our flavour of endpoint.
-	Connection point and port are set by network when it knows the swtitch object to point to.
-func Epmap_from_ostack( omap map[string]*ostack.End_pt ) (epmap map[string]*Endpt) {
-	
-	if( omap == nil ) {
-		return nil
+		case *string:
+			ep.Add_addr( *ipa )
+
+		case []string:
+			for _, v := range( ipa ) {
+				ep.Add_addr( v )
+			}
+
+		case []*string:
+			for _, v := range( ipa ) {
+				ep.Add_addr( *v )
+			}
 	}
 
-	epmap = make( map[string]*Endpt, len( omap ) )
-	for k, v := range omap {
+	ep.meta = make( map[string]string )
+	ep.meta["uuid" ] = uuid
+	ep.meta["phost" ]  = phost
+	ep.meta["project" ]  = project
+	ep.meta["mac" ]  = mac
 
-		epmap[k] = &Endpt {
-			uuid:	k,
-			phost:	*(v.Get_phost()),
-			project:	*(v.Get_project()),
-			ip:	*(v.Get_ip()),
-			mac:	*(v.Get_mac()),
-			router:	v.Is_router(),
-		}
-	}
-		
 	return
 }
-*/
 
 /*
 	Destruction.
@@ -107,10 +105,68 @@ func ( ep *Endpt ) Nuke() {
 }
 
 /*
+	Adds an address to the list, growing the slice if needed.
+*/
+func ( ep *Endpt ) Add_addr( ip string ) {
+	n := len( ep.ip_addrs )
+	if n == cap( ep.ip_addrs ) {
+		ns := make( []*string, n, cap( ep.ip_addrs ) * 2 )
+		copy( ns[:], ep.ip_addrs )
+		ep.ip_addrs = ns
+	}
+
+	ep.ip_addrs = ep.ip_addrs[0:n+1]
+	ep.ip_addrs[n] = &ip
+}
+
+/*
+	Remove a specific address from the list, closing the hole.
+*/
+func ( ep *Endpt ) Rm_addr( ip string ) {
+	if ep == nil {
+		return
+	}
+
+	for n, v := range ep.ip_addrs {			// search for the string passed in
+		if *v == ip {
+			ns := make( []*string, len( ep.ip_addrs ) -1, cap( ep.ip_addrs ) )
+			copy( ns, ep.ip_addrs[:n] )				// copy first n elements
+			copy( ns[n:], ep.ip_addrs[n+1:] )		// copy starting past the match
+			ep.ip_addrs = ns
+			return
+		}
+	}
+}
+
+/*
+	Reset the ip addresses to just the ip address passed in.
+*/
+func ( ep *Endpt ) Reset_addrs( ip string ) {
+	
+	ep.ip_addrs = make( []*string, 1, 10 )
+	ep.ip_addrs[0] = &ip
+}
+
+/*
+	Set any meta value.
+*/
+func ( ep *Endpt ) Set_meta_value( key string, val string ) {
+	if ep == nil {
+		return
+	}
+
+	ep.meta[key] = val
+}
+
+/*
 	Allows it to be changed later; sometimes it's not known at creation time.
 */
 func (ep *Endpt) Set_uuid( uuid *string ) {
-	ep.uuid = *uuid
+	if ep == nil {
+		return
+	}
+
+	ep.meta["uuid"] = *uuid
 }
 
 /*
@@ -118,6 +174,10 @@ func (ep *Endpt) Set_uuid( uuid *string ) {
 	special -128 port for late binding, or an integer > 0.
 */
 func (ep *Endpt) Set_switch( sw *Switch, port int ) ( error ) {
+	if ep == nil {
+		return fmt.Errorf( "pointer to struct was nil" )
+	}
+
 	if port > 0 || port == -128 {
 		ep.conn_pt = sw
 		ep.port = port
@@ -132,6 +192,9 @@ func (ep *Endpt) Set_switch( sw *Switch, port int ) ( error ) {
 	Allows router flag to be set.
 */
 func (ep *Endpt) Set_router( val bool ) {
+	if ep == nil {
+		return
+	}
 	ep.router = val
 }
 
@@ -139,11 +202,59 @@ func (ep *Endpt) Set_router( val bool ) {
 	Allows the port to be set
 */
 func (ep *Endpt) Set_port( val int ) {
+	if ep == nil {
+		return
+	}
+
 	ep.port = val
 }
 
 /*
-	Return the swwtich/port the endpoint is attached to. On error, returned port
+	Return any meta value.
+*/
+func ( ep *Endpt ) Get_meta_value( key string ) ( *string ) {
+	if ep == nil {
+		return nil
+	}
+
+	s := ep.meta[key]
+	return &s
+}
+
+/*
+	Returns a copy of the meta map; adds port and router as 'strings'.
+*/
+func ( ep *Endpt ) Get_meta_copy( ) ( map[string]string ) {
+	if ep == nil {
+		return nil
+	}
+
+	meta_cpy := make( map[string]string )
+	for k, v := range ep.meta {
+		meta_cpy[k] = v
+	}
+
+	meta_cpy["port"] = string( ep.port )
+	meta_cpy["router"] = fmt.Sprintf( "%v", ep.router )
+
+	return meta_cpy
+}
+
+
+/*
+	Return the project id.
+*/
+func ( ep *Endpt) Get_project( ) ( *string ) {
+	if ep == nil {
+		return nil
+	}
+
+	s := ep.meta["project"]
+	return &s
+}
+
+/*
+	Return the swtich/port the endpoint is attached to. On error, returned port
 	will be -1.
 */
 func (ep *Endpt) Get_switch_port( ) ( s *Switch, p int ) {
@@ -166,18 +277,21 @@ func ( ep *Endpt ) Get_phost() ( *string ) {
 		return nil
 	}
 
-	return &ep.phost
+	s := ep.meta["phost"]
+	return &s
 }
 
 /*
-	Returns the MAC and IP addresses
+	Returns the IP and the MAC address.
 */
 func ( ep *Endpt ) Get_addresses( ) ( ip *string, mac *string ) {
 	if ep == nil {
 		return nil, nil
 	}
 
-	return &ep.ip, &ep.mac
+	ips := ep.meta["ip"] 
+	macs := ep.meta["mac"]
+	return &ips, &macs
 }
 
 /*
@@ -188,14 +302,25 @@ func (ep *Endpt) String( ) ( s string ) {
 		return "--nil--"
 	}
 
-	s = fmt.Sprintf( "id=%s ",  ep.uuid )
-	if ep.ip != "" {
-		s += fmt.Sprintf( "ip=%s mac=%s",  ep.ip, ep.mac )
+	s = ""
+	sep := ""
+	for k, v := range ep.meta {
+		s += fmt.Sprintf( "%s%s=%s", sep, k, v )
+		sep = " "
 	}
+
+	s += " ip=[ "
+	sep = ""
+	for _, v := range ep.ip_addrs {
+		s += fmt.Sprintf( "%s%s", sep, *v )
+		sep = ", "
+	}
+	s += " ]"
+
 	if ep.conn_pt != nil {
-		s += fmt.Sprintf( "sw=%s port=%d",  ep.conn_pt.Get_id(), ep.port )
+		s += fmt.Sprintf( " sw=%s port=%d",  ep.conn_pt.Get_id(), ep.port )
 	} else {
-		s += fmt.Sprintf( "sw=none " )
+		s += fmt.Sprintf( " sw=none" )
 	}
 
 	s += fmt.Sprintf( " rtr=%v", ep.router )
@@ -208,20 +333,31 @@ func (ep *Endpt) String( ) ( s string ) {
 */
 func (ep *Endpt) To_json( ) ( s string ) {
 	if ep == nil {
-		s = `{ }`
-		return
+		return "--nil--"
 	}
 
-	s = fmt.Sprintf( `{ "uuid:" %q `,  ep.uuid )
-	if ep.ip != "" {
-		s += fmt.Sprintf( `, "ip: %q `,  ep.ip )
+	s = "{ "
+	sep := ""
+	for k, v := range ep.meta {
+		s += fmt.Sprintf( `%s"%s": %q`, sep, k, v )
+		sep = " "
 	}
+
+	s += " ip=[ "
+	sep = ""
+	for _, v := range ep.ip_addrs {
+		s += fmt.Sprintf( `%s%q`, sep, *v )
+		sep = ", "
+	}
+	s += " ], "
+
 	if ep.conn_pt != nil {
-		s += fmt.Sprintf( `, "sw:" %q, "port:" %q `,  ep.conn_pt.Get_id(), ep.port )
+		s += fmt.Sprintf( ` "sw"=%q, "port"=%d`,  ep.conn_pt.Get_id(), ep.port )
+	} else {
+		s += fmt.Sprintf( ` "sw"=%q, "port"=%d`,  "", -1 )
 	}
 
-	s += fmt.Sprintf( `, "router": %v`, ep.router )
-
+	s += fmt.Sprintf( ` "rtr": %v`, ep.router )
 	s += " }"
 
 	return
