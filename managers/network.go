@@ -561,6 +561,44 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 
 /*
 	REVAMP:	This needs to work based on endpoint information
+	Given an endpoint's uuid, returns the desired metadata (map) for an endpoint. 
+	This accepts either uuid or project/uuid. If the epname is an external (!/) specification
+	then no map is returned.
+*/
+func (n *Network) uuid2ep_meta( epname *string ) ( md map[string]string, err error) {
+	err = nil
+
+	if *epname == "" {
+		net_sheep.Baa( 1, "internal mishap: bad name passed to ep2meta_data: empty" )
+		err = fmt.Errorf( "endpoint unknown: empty name passed to network manager" )
+		return nil, err
+	}
+
+	if (*epname)[0:2] == "!/" {					// special external name (no project string following !)
+		md = make( map[string]string, 1 )
+		md["uuid"] = *epname					// dummy map with the !/address as the uuid 
+		return	
+	}
+
+	tokens := strings.Split( *epname, "/" )		// could be project/uuid or just uuid
+	uuid := tokens[0]
+	if len( tokens ) > 1  {
+		uuid = tokens[1]
+	} 
+
+	ep := n.endpts[uuid]
+	if ep == nil {
+		net_sheep.Baa( 2, "endpoint not found: %s", *epname )
+		err = fmt.Errorf( "endpoint unknown: %s", *epname )
+		return
+	}
+
+	return ep.Get_meta_copy(), nil		// returns a map of nearly all the data (the switch pointer is not included)
+}
+	
+
+/*
+	DEPRECATED
 	Returns the ip address associated with the name. The name may indeed be
 	an IP address which we'll look up in the hosts table to verify first.
 	If it's not an ip, then we'll search the vm2ip table for it.
@@ -572,6 +610,7 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 	The special case !/ip-address is used to designate an external address. It won't
 	exist in our map, and we return it as is.
 */
+/* deprecated------
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
@@ -618,6 +657,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 
 	return
 }
+*/
 
 /*
 	Given two switch names see if we can find an existing link in the src->dest direction
@@ -1049,18 +1089,22 @@ func req_ep_list( rch chan *ipc.Chmsg, block bool ) ( map[string]*gizmos.Endpt )
 func (n *Network) host_list( ) ( jstr string ) {
 	var( 	
 		sep 	string = ""
-		hname	string = ""
-		seen	map[string]bool
+		//hname	string = ""
+		//seen	map[string]bool
 	)
 
-	seen = make( map[string]bool )
+	//seen = make( map[string]bool )
 	jstr = ` [ `						// an array of objects
 
-	if n != nil && n.hosts != nil {
-		for _, h := range n.hosts {
-			ip4, ip6 := h.Get_addresses()
-			mac :=  h.Get_mac()						// track on this as we will always see this
+	//--- deprecated if n != nil && n.hosts != nil {
+	if n != nil && n.endpts != nil {
+		//--- dep for _, h := range n.hosts {
+		for vmid, ep := range n.endpts {
+			ip, mac := ep.Get_addresses()
+			proj := ep.Get_project()
+			//mac :=  h.Get_mac()						// track on this as we will always see this
 
+			/*---- deprecated
 			if seen[*mac] == false {
 				seen[*mac] = true;					// we track hosts by both mac and ip so only show once
 
@@ -1073,12 +1117,20 @@ func (n *Network) host_list( ) ( jstr string ) {
 				if n.ip2vmid[*ip4] != nil {
 					vmid = *n.ip2vmid[*ip4]
 				}
-				jstr += fmt.Sprintf( `%s { "name": %q, "vmid": %q, "mac": %q, "ip4": %q, "ip6": %q `, sep, hname, vmid, *(h.Get_mac()), *ip4, *ip6 )
-				if nconns := h.Get_nconns(); nconns > 0 {
+			--- */
+				sw, port := ep.Get_switch_port( )
+				sw_str := &empty_str
+				if sw != nil {
+					sw_str = sw.Get_id()
+				}
+				jstr += fmt.Sprintf( `%s { "epid": %q, "mac": %q, "project": %q, "ip": %q, "switch": %q, "port": %d }`, sep, vmid, *mac, *proj, *ip, *sw_str, port )
+
+				/* ------
+				if nconns := ep.Get_nconns(); nconns > 0 {
 					jstr += `, "conns": [`
 					sep = ""
 					for i := 0; i < nconns; i++ {
-						sw, port := h.Get_switch_port( i )
+						sw, port := ep.Get_switch_port( i )
 						if sw == nil {
 							break
 						}
@@ -1091,9 +1143,10 @@ func (n *Network) host_list( ) ( jstr string ) {
 				}
 
 				jstr += ` }`						// end of this host
+				---- */
 
 				sep = ","
-			}
+			//---- }
 		}
 	} else {
 		net_sheep.Baa( 0, "ERR: host_list: n is nil (%v) or n.hosts is nil  [TGUNET007]", n == nil )
@@ -1417,6 +1470,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									usr = toks[0]										// the 'user' for queue setting
 								}
 	
+///// fixme
 								ips, err := act_net.name2ip( src )
 								if err == nil {
 									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
@@ -1463,10 +1517,11 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 						}
 
 					case REQ_BW_RESERVE:
-						var ip2		*string = nil					// tmp pointer for this block
+						//var ip2		*string = nil					// tmp pointer for this block
+						var ep2_meta map[string]string					// end point metadata map
 
 						// host names are expected to have been vetted (if needed) and translated to project-id/name if IDs are enabled
-						// NEW:  host names are expected to have been vetted (if needed) and translated to uuid
+						// NEW:  host names are expected to have been vetted (if needed) and translated to uuid or project/uuid
 						p, ok := req.Req_data.( *gizmos.Pledge_bw )
 						if ok {
 							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
@@ -1492,15 +1547,19 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 								net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", cfg.discount, suffix, bandw_in, bandw_out )
 							}
 
-							ip1, err := act_net.name2ip( h1 )
+							ep1_meta, err := act_net.uuid2ep_meta( h1 )					// get all of the metadata back for the endpoints
+							//depracated---- ip1, err := act_net.name2ip( h1 )
 							if err == nil {
-								ip2, err = act_net.name2ip( h2 )
+								//deprecated---- ip2, err = act_net.name2ip( h2 )
+								ep2_meta, err = act_net.uuid2ep_meta( h2 )					// get all of the metadata back for the endpoints
 							}
 
 							if err == nil {
 								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
-								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
+								//deparecated----- pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
+								//deparecated----- pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
+								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_meta["uuid"], &ep2_meta["uuid"], commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
+								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_meta["uuid"], &ep1_meta["uuid"], commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
 
 								if pcount_out > 0  &&  pcount_in > 0  {
 									net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )

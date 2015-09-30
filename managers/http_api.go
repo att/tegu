@@ -192,6 +192,7 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 		return
 	}
 
+	http_sheep.Baa( 2, "host validate: %s %s", h1, h2 )
 	return
 }
 
@@ -786,6 +787,80 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 				case "reserve":
+					var res *gizmos.Pledge_bw
+
+					key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs
+					tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
+					ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
+					if !ok {
+						nerrors++
+						reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <uuid1>[,<uuid2>] cookie dscp; received: %s", mlist, recs[i] );
+						break
+					}
+
+					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
+						subtokens := strings.Split( *tmap["bandw"], "," )
+						bandw_in = int64( clike.Atof( subtokens[0] ) )
+						bandw_out = int64( clike.Atof( subtokens[1] ) )
+					} else {
+						bandw_in = int64( clike.Atof( *tmap["bandw"] ) )		// no comma, so single value applied to each
+						bandw_out = bandw_in
+					}
+
+					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
+					h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+
+					res = nil
+					h1, h2, p1, p2, v1, v2, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+
+					if err == nil {
+						//--- deprecated update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
+						//--- deprecated update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
+
+						dscp := tclass2dscp["voice"]							// default to using voice traffic class
+						dscp_koe := false										// we do not keep it as the packet exits the environment
+
+						if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
+							if strings.HasPrefix( *tmap["dscp"], "global_" ) {
+								dscp_koe = true											// global_* causes the value to be retained when packets exit the environment
+								dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
+							} else {
+								dscp = tclass2dscp[*tmap["dscp"]]
+							}
+							if dscp <= 0 {
+								err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
+							}
+						}
+
+						if err == nil {
+							res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+							res, err = gizmos.Mk_bw_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
+						}
+					}
+
+					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+						res.Set_vlan( v1, v2 )							// augment the rest of the reservation
+						/* deprecated -------
+						if tmap["ipv6"] != nil {
+							res.Set_matchv6( *tmap["ipv6"] == "true" )
+						}
+						--- */
+						
+						reason, jreason, ecount = finalise_bw_res( res, res_paused )	// check for dup, allocate in network, and add to res manager inventory
+						if ecount == 0 {
+							state = "OK"
+						} else {
+							nerrors += ecount - 1 												// number of errors added to the pile by the call
+						}
+					} else {
+						if err == nil {
+							reason = fmt.Sprintf( "reservation rejected: specific reason unknown" )						// ensure we have something for message
+						} else {
+							reason = fmt.Sprintf( "reservation rejected: %s", err )
+						}
+					}
+
+				case "old_reserve":					//----- deprecated 
 					var res *gizmos.Pledge_bw
 
 						key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs

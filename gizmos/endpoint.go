@@ -108,6 +108,7 @@ func ( ep *Endpt ) Nuke() {
 	Adds an address to the list, growing the slice if needed.
 */
 func ( ep *Endpt ) Add_addr( ip string ) {
+	/*
 	n := len( ep.ip_addrs )
 	if n == cap( ep.ip_addrs ) {
 		ns := make( []*string, n, cap( ep.ip_addrs ) * 2 )
@@ -117,6 +118,8 @@ func ( ep *Endpt ) Add_addr( ip string ) {
 
 	ep.ip_addrs = ep.ip_addrs[0:n+1]
 	ep.ip_addrs[n] = &ip
+	*/
+	ep.ip_addrs = append( ep.ip_addrs, &ip )
 }
 
 /*
