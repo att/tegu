@@ -99,6 +99,8 @@
 				21 Jul 2015 - Extended has_role function to accept either a token or token/project pair.
 				29 Jul 2015 - Added lazy update of project info when a token/proj or token/proj/host
 						is validated.
+				25 Aug 2015 - Avoid making Mk_mac_map call during credential refresh.
+				18 Sep 2015 - Added code to map a neutron port UUID to a phost
 
 	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -164,7 +166,7 @@ func token2project(  os_refs map[string]*ostack.Ostack, token *string ) ( pname 
 	osif_sheep.Baa( 2, "unable to validate token with any set of creds: %s", err )
 	return
 }
-			
+
 
 /*
 	Given a raw string of the form [[<token>]/{project-name|ID}]/<data> verify
@@ -200,7 +202,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			} else {
 				return raw, nil
 			}
-		
+
 		case 2:							// assume just project/hostname; translate project
 			if tok_req {
 				return nil, err
@@ -223,7 +225,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			if tokens[1] == "" {								// empty project name, must attempt to extract from the token
 				if tokens[0] != "!" {							//  if !//stuff we leave things alone and !//stuff is returned later
 					pname, idp, err :=  token2project( os_refs, &tokens[0] )	// generate the project name and it's id from token
-				
+
 					if pname == nil {			// not a valid token, bail now
 						return nil, err //fmt.Errorf( "invalid token" )
 					}
@@ -272,14 +274,14 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 			osif_sheep.Baa( 2, "validation: %s: proj/host ==> %s", *raw, xstr )
 			return &xstr, nil
 	}
-	
+
 	return nil, fmt.Errorf( "invalid token/tenant pair" )
 }
 
 /*
 	Verifies that the token passed in is a valid token for the default user (a.k.a. the tegu admin) given in the
 	config file.
-	Returns "ok" (err is nil) if it is good, and an error otherwise. 	
+	Returns "ok" (err is nil) if it is good, and an error otherwise.
 */
 func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) ( error ) {
 
@@ -316,7 +318,7 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 		if toks[p] == "" {
 			osif_sheep.Baa( 2, "has_any_role: project/token had empty project" )
 			return false, fmt.Errorf( "project portion of token/project was empty" )
-		}	
+		}
 
 		stuff, err := admin.Crack_ptoken( &toks[t], &toks[p], false )			// crack user info based on project and token
 		if err == nil {
@@ -363,10 +365,10 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 	var (
 		err	error
 	)
-	
+
 	m = nil
 	for k, ostk := range os_refs {
-		if k != "_ref_" {	
+		if k != "_ref_" {
 			osif_sheep.Baa( 2, "mapping VMs from: %s", ostk.To_str( ) )
 			m, err = ostk.Mk_vm2ip( m )
 			if err != nil {
@@ -375,7 +377,7 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 			}
 		}
 	}
-	
+
 	return
 }
 
@@ -398,14 +400,14 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		return
 	}
 
-	
+
 	osif_sheep.Baa( 2, "physical host query starts: %d sets of creds", len( os_refs ) )
 	for k, ostk := range os_refs {
 		bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
 
 	osif_sheep.Baa( 2, "physical host query for %s", k )
 		if k != "_ref_" {
-			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )	
+			list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )
 			osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 			if err != nil {
 				osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
@@ -415,9 +417,9 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 				if *list != "" {
 					ts += sep + *list
 					sep = " "
-					osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )	
+					osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )
 				} else {
-					osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )	
+					osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )
 				}
 			}
 		}
@@ -445,7 +447,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	Converted to get from project maps rather than an openstack call
 */
 func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err error ) {
-	
+
 	err = nil
 	m = make( map[string]*string )
 	for _, p := range os_projs {
@@ -456,7 +458,7 @@ func get_ip2mac( os_projs map[string]*osif_project ) ( m map[string]*string, err
 	m = nil
 	for k, ostk := range os_refs {
 		if k != "_ref_" {
-			m, _, err = ostk.Mk_mac_maps( m, nil, true )	
+			m, _, err = ostk.Mk_mac_maps( m, nil, true )
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to map MAC info: %s; %s   [TGUOSI005]", os_refs["_ref_"].To_str( ), err )
 				ostk.Expire()					// force re-auth next go round
@@ -518,7 +520,6 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string,
 */
 func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id2pname map[string]*string ) ( creds map[string]*ostack.Ostack, gerr error ) {
 	var (
-		r	*ostack.Ostack
 		err	error
 	)
 
@@ -527,12 +528,11 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 		old_list = creds
 	}
 
-	r = nil
 	for k, v := range id2pname {						// run the list of projects and add creds to the map if we don't have them
-		if old_list[*v] == nil  {	
+		if old_list[*v] == nil  {
 			osif_sheep.Baa( 1, "adding creds for: %s/%s", k, *v )
 			creds[*v], err = admin.Dup( v )				// duplicate creds for this project and then authorise to get a token
-	
+
 			if err != nil {
 				osif_sheep.Baa( 1, "WRN: unable to authorise credentials for project: %s   [TGUOSI008]", *v )
 				delete( creds, *v )
@@ -545,15 +545,10 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 			osif_sheep.Baa( 2, "reusing credentials for: %s", *v )
 		}
 
-		if r == nil &&  creds[*v] != nil {							// need to test if this has admin -- ref must have admin
- 			_, _, err = creds[*v].Mk_mac_maps( nil, nil, false )
-			if  err == nil  {
-				r = creds[*v]
-			}
+		if creds["_ref"] == nil &&  creds[*v] != nil {				// set the quick reference key
+			creds["_ref_"] = creds[*v]
 		}
 	}
-
-	creds["_ref_"] = r				// set the reference entry
 
 	return
 }
@@ -563,7 +558,7 @@ func refresh_creds( admin *ostack.Ostack, old_list map[string]*ostack.Ostack, id
 	Returns:
 		osack reference map
 		project name to id map
-		id to project name map	
+		id to project name map
 
 	On error err is set, and nil values returned for conversion maps and the old os_list is returned
 */
@@ -657,16 +652,16 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		def_usr = cfg_data["osif"]["usr"]
 		def_url = cfg_data["osif"]["url"]
 		def_project = cfg_data["osif"]["project"]
-	
+
 		p := cfg_data["osif"]["refresh"]
 		if p != nil {
-			refresh_delay = clike.Atoi( *p ); 			
+			refresh_delay = clike.Atoi( *p )
 			if refresh_delay < 15 {
 				osif_sheep.Baa( 1, "resresh was too small (%ds), setting to 15", refresh_delay )
 				refresh_delay = 15
 			}
 		}
-	
+
 		p = cfg_data["osif"]["debug"]
 		if p != nil {
 			v := clike.Atoi( *p )
@@ -732,7 +727,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			} else {
 				os_sects = strings.Split( os_list, " " )
 			}
-		
+
 			os_refs = make( map[string]*ostack.Ostack, len( os_sects ) * 2 )		// length is a guideline, not a hard value
 			for i := 0; i < len( os_sects ); i++ {
 				osif_sheep.Baa( 1, "creating openstack interface for %s", os_sects[i] )
@@ -769,7 +764,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 	if os_admin != nil {														// only if we are using openstack as a database
 		//tklr.Add_spot( 3, my_chan, REQ_GENCREDS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
-		tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER );  	
+		tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER )
 	}
 
 	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
@@ -833,7 +828,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 						msg.Response_data = pname
 					}
 				}
-				
+
 */
 
 			case REQ_VALIDATE_TOKEN:						// given token/tenant validate it and translate tenant name to ID if given; returns just ID
@@ -900,7 +895,6 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 						msg.State = fmt.Errorf( "has_any_role: bad input data" )
 						msg.Response_data = false
 					}
-
 				}
 
 			case REQ_PNAME2ID:							// user, project, tenant (what ever) name to ID
@@ -914,7 +908,20 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 						}
 					}
 				}
-				
+
+			case REQ_GET_PHOST_FROM_PORTUUID:                       // try to map a UUID to a phost -- used for mirroring
+				if msg.Response_ch != nil {
+					uuid := msg.Req_data.( *string )
+					for _, v := range os_refs {		
+						porthost, err := v.FetchHostInfo( uuid )
+						if err == nil {
+							msg.Response_data = porthost
+							break
+						} else {
+							msg.State = err
+						}
+					}
+				}
 
 			default:
 				osif_sheep.Baa( 1, "unknown request: %d", msg.Msg_type )
