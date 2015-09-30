@@ -595,6 +595,34 @@ func (n *Network) uuid2ep_meta( epname *string ) ( md map[string]string, err err
 
 	return ep.Get_meta_copy(), nil		// returns a map of nearly all the data (the switch pointer is not included)
 }
+
+/*
+	Defrock the epname and verifiy that we have that name in the list.  Returns the name if 
+	it is in the list, or if it's !/junk. If the name isn't in the list, an empty string
+	is returned.
+*/
+func (n *Network) defrock_epname( epname *string ) ( string ) {
+	if *epname == "" {
+		net_sheep.Baa( 1, "internal mishap: bad name passed to ep2meta_data: empty" )
+		return ""
+	}
+
+	if (*epname)[0:2] == "!/" {					// special external name (no project string following !)
+		return	*epname
+	}
+
+	tokens := strings.Split( *epname, "/" )		// could be project/uuid or just uuid
+	ename := tokens[0]
+	if len( tokens ) > 1  {
+		ename = tokens[1]
+	} 
+
+	if n.endpts[ename] != nil {
+		return ename
+	}
+
+	return ""
+}
 	
 
 /*
@@ -610,7 +638,6 @@ func (n *Network) uuid2ep_meta( epname *string ) ( md map[string]string, err err
 	The special case !/ip-address is used to designate an external address. It won't
 	exist in our map, and we return it as is.
 */
-/* deprecated------
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
@@ -657,7 +684,6 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 
 	return
 }
-*/
 
 /*
 	Given two switch names see if we can find an existing link in the src->dest direction
@@ -1518,7 +1544,6 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 
 					case REQ_BW_RESERVE:
 						//var ip2		*string = nil					// tmp pointer for this block
-						var ep2_meta map[string]string					// end point metadata map
 
 						// host names are expected to have been vetted (if needed) and translated to project-id/name if IDs are enabled
 						// NEW:  host names are expected to have been vetted (if needed) and translated to uuid or project/uuid
@@ -1547,19 +1572,27 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 								net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", cfg.discount, suffix, bandw_in, bandw_out )
 							}
 
+							/* -- maybe not 
 							ep1_meta, err := act_net.uuid2ep_meta( h1 )					// get all of the metadata back for the endpoints
 							//depracated---- ip1, err := act_net.name2ip( h1 )
 							if err == nil {
 								//deprecated---- ip2, err = act_net.name2ip( h2 )
 								ep2_meta, err = act_net.uuid2ep_meta( h2 )					// get all of the metadata back for the endpoints
 							}
+							*/
+							ep1_name := act_net.defrock_epname( h1 )
+							ep2_name := act_net.defrock_epname( h2 )
 
-							if err == nil {
-								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
+							//if err == nil {
+							if ep1_name != "" && ep2_name != "" {
+								//deprcated---- net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
 								//deparecated----- pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
 								//deparecated----- pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
-								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_meta["uuid"], &ep2_meta["uuid"], commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
-								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_meta["uuid"], &ep1_meta["uuid"], commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
+								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", ep1_name, ep2_name )
+								//pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_meta["uuid"], &ep2_meta["uuid"], commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
+								//pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_meta["uuid"], &ep1_meta["uuid"], commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
+								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_name, &ep2_name, commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
+								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_name, &ep1_name, commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
 
 								if pcount_out > 0  &&  pcount_in > 0  {
 									net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
@@ -1604,8 +1637,9 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
 								}
 							} else {
-								net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
-								req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
+								//net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
+								net_sheep.Baa( 0,  "network: unable to map to an enpoint uuid: %s %s",  h1, h2 )
+								req.State = fmt.Errorf( "one of the endpoint uuids is not known: %s %s", h1, h2 )
 							}
 						} else {									// pledge wasn't a bw pledge
 							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bw pledge: %s", p )

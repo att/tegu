@@ -805,7 +805,7 @@ func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
 				if err == nil {
 					osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", k, len( oseps ) )
 					for epid, v := range oseps {
-						epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), *(v.Get_ip()), *(v.Get_mac()), nil, -128 )
+						epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
 						epmap[epid].Set_router( v.Is_router() )
 					}
 				} else {
@@ -832,7 +832,7 @@ func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
 			if err == nil {
 				osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", *pid, len( oseps ) )
 				for epid, v := range oseps {
-					epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), *(v.Get_ip()), *(v.Get_mac()), nil, -128 )
+					epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
 					epmap[epid].Set_router( v.Is_router() )
 				}
 			} else {
