@@ -83,6 +83,7 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 		return
 	}
 
+	//FIXME -- pledge needs to track ip addresses and return them here.
 	h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, transport (tcp/udp) ports and expiry are all we need
 	v1, v2 := p.Get_vlan( )									// vlan match criteria for one/both endpoints
 
@@ -120,13 +121,16 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 				freq.Extip = &empty_str
 			}
 
-			espq1, _ := plist[i].Get_endpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
+			espq1, _ := plist[i].Get_leafpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
 			if espq1 == nil {												// if single switch ep1 will be nil
 				freq.Single_switch = true
 			}
 
-			freq.Match.Ip1 = plist[i].Get_h1().Get_address( pref_v6 )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
-			freq.Match.Ip2 = plist[i].Get_h2().Get_address( pref_v6 )
+			/// FIXME:  ip addresses need to move to be a part of the bw reservation and pulled earlier when we get host/tp-port values from the pledge
+			//deprecated --- freq.Match.Ip1 = plist[i].Get_h1().Get_address( pref_v6 )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
+			//deprecated --- freq.Match.Ip2 = plist[i].Get_h2().Get_address( pref_v6 )
+			freq.Match.Ip1, _ = plist[i].Get_h1().Get_addresses( )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
+			freq.Match.Ip2, _ = plist[i].Get_h2().Get_addresses( )
 			freq.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
 			if freq.Single_switch {
 				freq.Espq.Queuenum = 1										// same switch always over br-rl queue 1

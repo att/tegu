@@ -939,10 +939,10 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 		sw := n.switches[*swname]									// the switch object (should exist, but take no chances)
 		if ssw != nil {
 			_, port := v.Get_switch_port()
-			v.Set_switch( sw, port )								// allows us to find a starting switch by endpoint id for path finding
+			v.Set_switch( ssw, port )								// allows us to find a starting switch by endpoint id for path finding
 			mac, _ := v.Get_addresses( )
 			sw.Add_endpt( &k, port )									// allows switch to respond to Has_host() call by id or mac
-			net_sheep.Baa( 4, "saving host %s (%s) in switch : %s port: %d", mac, k, swname, port )
+			net_sheep.Baa( 4, "saving host %s (%s) in switch : %s port: %d", mac, k, *swname, port )
 		} else {
 			net_sheep.Baa( 1, "attachment switch for endpoint %s is missing: %s", k, swname )
 		}

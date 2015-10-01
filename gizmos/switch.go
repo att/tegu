@@ -238,7 +238,7 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 	found = nil
 	cap_trip = false
 
-	//fmt.Printf( "\n\nsearching neighbours of (%s) for %s\n", s.To_str(), *target )
+	obj_sheep.Baa( 3, "searching neighbours of (%s) for %s", s, *target )
 	for i := 0; i < s.lidx; i++ {
 		if s != fsw  {
   			has_room, err := s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max )
@@ -247,7 +247,6 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 				if (fsw.Flags & tegu.SWFL_VISITED) == 0 {
 					obj_sheep.Baa( 3, "switch:probe_neigbour: following link %d -- has capacity to (%s) and NOT visited", i, fsw.To_str() )
 					if s.Cost + s.links[i].Cost < fsw.Cost {
-						//fmt.Printf( "\tsetting cost: %d\n", s.Cost + s.links[i].Cost )
 						fsw.Cost = s.Cost + s.links[i].Cost
 						fsw.Prev = s								// shortest path to this node is through s
 						fsw.Plink = i								// using its ith link

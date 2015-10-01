@@ -52,10 +52,27 @@ type host_pair struct {
 }
 
 
-
 // ------------------------------------------------------------------------------------------------------------------
 
 /*
+	Search the list of endpoints looking for a router on the network given
+*/
+func (n *Network) find_router( netid *string ) ( epuuid *string ) {
+	for u, ep := range n.endpts {
+		if ep.Is_router() && *(ep.Get_netid()) == *netid {
+			return &u
+		}
+	}
+
+	return nil
+}
+
+/*
+	Given two endpoint uuids (ep1 and ep2) determine if they are in the same project. If not, then construct
+	an artifical endpoint such that the path is from host to router rather than host to host.  If both endpoints
+	are 'insside' of the cloud, then we construct two pairs, otherwise we construct only one pair (from the 
+	known endpoint to its router).
+
 	Look at tid/h1 and tid/h2 and split them into two disjoint path endpoints, tid/gw,h1 and tid/gw,h2, if
 	the project ids for the hosts differ.  This will allow for reservations between project VMs that are both
 	known to Tegu.  If the endpoints are in different project, then we require each to have a floating point
@@ -74,7 +91,61 @@ type host_pair struct {
 	(can be) associated with a VM, then we will not prohibit a reservation to an external IP address if
 	the VM doesn't have a floating IP.
 */
-func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
+func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list []host_pair, err error ) {
+	ep1 := n.endpts[*epuuid1]
+	ep2 := n.endpts[*epuuid2]
+
+	if ep1 == nil && ep2 == nil {
+		return nil, fmt.Errorf( "neither endpoint known to Tegu" )
+	}
+
+	nalloc := 2
+	if ep1 == nil || ep2 == nil {			// only one is known, alloc just one
+		nalloc = 1						
+	} else {								// both known, see if they cross projects
+		if *(ep1.Get_project()) == *(ep2.Get_project()) {				// same project; simple case hanle here
+			pair_list = make( []host_pair, 1 )
+			pair_list[0].h1 = epuuid1
+			pair_list[0].h2 = epuuid2
+			pair_list[0].usr = ep1.Get_project()
+	net_sheep.Baa( 2, ">>>>> both eps are in same proejct, returning pair list: %d", len(pair_list) )
+			return
+		}
+	}
+
+	pair_list = make( []host_pair, nalloc )
+
+// VERIFY -- do we need floating ip info in here any more?  I think not
+	plidx := 0
+	if ep1 != nil {											// find router for ep1 and set things up
+		r1 := n.find_router( ep1.Get_netid() )				// find the ep uuid for the router
+		if r1 == nil {
+			return nil, fmt.Errorf( "unable to find a router for ep1 (%s) netid (%s)", *epuuid1, *ep1.Get_netid() )
+		}
+
+		pair_list[plidx].h1 = epuuid1
+		pair_list[plidx].h2 = r1
+		pair_list[plidx].usr = ep1.Get_project()
+
+		plidx++
+	}
+	
+	if ep2 != nil {											// find router for ep1 and set things up
+		r2 := n.find_router( ep2.Get_netid() )				// find the ep uuid for the router
+		if r2 == nil {
+			return nil, fmt.Errorf( "unable to find a router for ep2 (%s) netid (%s)", epuuid1, ep1.Get_netid() )
+		}
+
+		pair_list[plidx].h1 = epuuid2
+		pair_list[plidx].h2 = r2
+		pair_list[plidx].usr = ep2.Get_project()
+	}
+
+	return
+}
+
+
+func (n *Network) deprecated_find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
 	var (
 		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different project
 		h2_auth bool = true
@@ -87,6 +158,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		pair_list[0].h1 = h1ip
 		pair_list[0].h2 = h2ip
 		pair_list[0].usr = nil
+net_sheep.Baa( 2, "early>>>>> returning pair list: %d", len(pair_list) )
 		return
 	}
 
@@ -113,6 +185,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		nalloc--											// need one less in return vector
 	}
 
+net_sheep.Baa( 2, ">>>>> find endpoints allocating %d", nalloc )
 	if nalloc <= 0 {
 		net_sheep.Baa( 1, "neither endpoint was validated, refusing to build a path for %s-%s", *h1ip, *h2ip )
 		return
@@ -189,6 +262,7 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 		}
 	}
 
+net_sheep.Baa( 2, ">>>>> returning pair list: %d", len(pair_list) )
 	return
 }
 
@@ -204,15 +278,21 @@ func (n *Network) find_endpoints( h1ip *string, h2ip *string ) ( pair_list []hos
 	This function assumes that the switches have all been initialised with a reset of the visited flag,
 	setting of inital cost, etc.
 */
-func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, cap_trip bool ) {
-	h1nm := h1.Get_mac()
-	h2nm := h2.Get_mac()
+//func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, cap_trip bool ) {
+func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Endpt, h2 *gizmos.Endpt, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, cap_trip bool ) {
+	//deprecated ---- h1nm := h1.Get_mac()				// path finding at the switch level is MAC based.
+	//deprecated ---- h2nm := h2.Get_mac()
+	h1nm := h1.Get_meta_value( "uuid" )				// path finding at the switch level is uuid based.
+	h2nm := h2.Get_meta_value( "uuid" )
+	_, port1 := h1.Get_switch_port()
+	_, port2 := h2.Get_switch_port()
 	path = nil
 
 	if usr_max <= 0 {
-		i41, _ := h1.Get_addresses()
-		i42, _ := h2.Get_addresses()
-		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *i41, *i42 )
+		//deprecated --- i41, _ := h1.Get_addresses()
+		//deprecated --- i42, _ := h2.Get_addresses()
+		//deprecated --- /net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *i41, *i42 )
+		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *(h1.Get_meta_value("uuid")), *(h1.Get_meta_value("uuid")) )
 		return
 	}
 
@@ -224,10 +304,11 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 		path.Set_bandwidth( inc_cap )
 		net_sheep.Baa( 2,  "find_spath: found target on %s", tsw.To_str( ) )
 				
-		lnk := n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1, nil, nil )		// add endpoint -- a virtual link out from switch to h2
+		//deprecated --- lnk := n.find_vlink( *(tsw.Get_id()), h2.Get_port( tsw ), -1, nil, nil )		// add leafpoint -- a virtual link out from switch to h2
+		lnk := n.find_vlink( *(tsw.Get_id()), port2, -1, nil, nil )		// add leafpoint -- a virtual link out from switch to h2
 		lnk.Add_lbp( *h2nm )
-		lnk.Set_forward( tsw )												// endpoints have only a forward link
-		path.Add_endpoint( lnk )
+		lnk.Set_forward( tsw )												// leafpoints have only a forward link
+		path.Add_leafpoint( lnk )
 
 		for ; tsw != nil ; {
 			if tsw.Prev != nil {								// last node won't have a prev pointer so no link
@@ -238,18 +319,22 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 
 			net_sheep.Baa( 3, "\t%s using link %d", tsw.Prev.To_str(), tsw.Plink )
 
-			if tsw.Prev == nil {													// last switch in the path, add endpoint
-				lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1, nil, nil )		// endpoint is a virt link from switch to h1
+			if tsw.Prev == nil {															// last switch in the path, add leafpoint
+				//deprecated --- lnk = n.find_vlink( *(tsw.Get_id()), h1.Get_port( tsw ), -1, nil, nil )		// endpoint is a virt link from switch to h1
+				lnk = n.find_vlink( *(tsw.Get_id()), port1, -1, nil, nil )					// leafpoint is a virt link from switch to h1
 				lnk.Add_lbp( *h1nm )
 				lnk.Set_forward( tsw )												// endpoints have only a forward link
-				path.Add_endpoint( lnk )
+				path.Add_leafpoint( lnk )
 			}
 			tsw = tsw.Prev
 		}
 
-		path.Flip_endpoints()		// path expects them to be in h1,h2 order; we added them backwards so must flip
+		path.Flip_leafpoints()		// path expects them to be in h1,h2 order; we added them backwards so must flip
 	}
 
+if path != nil {
+net_sheep.Baa( 2, ">>> returning path: %s", path )
+}
 	return
 }
 
@@ -265,7 +350,8 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *g
 	limit if larger than 100.
 
 */
-func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
+//func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmos.Host, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
+func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Endpt, h2 *gizmos.Endpt, usr *string, commence int64, conclude int64, inc_cap int64, usr_max int64 ) ( path *gizmos.Path, err error ) {
 
 	net_sheep.Baa( 1, "find_all: searching for all paths between %s  and  %s", *(h1.Get_mac()), *(h2.Get_mac()) )
 
@@ -280,15 +366,20 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 	path.Add_switch( ssw )
 	path.Add_switch( epsw )
 
-	lnk := n.find_vlink( *(ssw.Get_id()), h1.Get_port( ssw ), -1, nil, nil )			// add endpoint -- a virtual link out from switch to h1
+	_, port1 := h1.Get_switch_port()
+	_, port2 := h2.Get_switch_port()
+
+	//deprecated--- lnk := n.find_vlink( *(ssw.Get_id()), h1.Get_port( ssw ), -1, nil, nil )			// add endpoint -- a virtual link out from switch to h1
+	lnk := n.find_vlink( *(ssw.Get_id()), port1, -1, nil, nil )					// add leafpoint -- a virtual link out from switch to h1
 	lnk.Add_lbp( *(h1.Get_mac()) )
 	lnk.Set_forward( ssw )
-	path.Add_endpoint( lnk )
+	path.Add_leafpoint( lnk )
 
-	lnk = n.find_vlink( *(epsw.Get_id()), h2.Get_port( epsw ), -1, nil, nil )		// add endpoint -- a virtual link out from switch to h2
+	//deprecated ---lnk = n.find_vlink( *(epsw.Get_id()), h2.Get_port( epsw ), -1, nil, nil )		// add endpoint -- a virtual link out from switch to h2
+	lnk = n.find_vlink( *(epsw.Get_id()), port2, -1, nil, nil )					// add leafpoint -- a virtual link out from switch to h2
 	lnk.Add_lbp( *(h2.Get_mac()) )
 	lnk.Set_forward( epsw )
-	path.Add_endpoint( lnk )
+	path.Add_leafpoint( lnk )
 
 	for i := range links {
 		path.Add_link( links[i] )
@@ -302,7 +393,8 @@ func (n *Network) find_all_paths( ssw *gizmos.Switch, h1 *gizmos.Host, h2 *gizmo
 	actually find a path between the endpoints as we aren't doign admission control, but need to simulate
 	a path in order to set up the flow-mods on the endpoints correctly.
 */
-func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *gizmos.Switch, h2 *gizmos.Host ) ( path *gizmos.Path, err error ) {
+//func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *gizmos.Switch, h2 *gizmos.Host ) ( path *gizmos.Path, err error ) {
+func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Endpt, sw2 *gizmos.Switch, h2 *gizmos.Endpt ) ( path *gizmos.Path, err error ) {
 
 	net_sheep.Baa( 1, "find_lax: creating relaxed path between %s and %s", *(h1.Get_mac()), *(h2.Get_mac()) )
 
@@ -312,20 +404,24 @@ func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *g
 	path.Add_switch( sw2 )
 
 
-	lnk := n.find_vlink( *(sw1.Get_id()), h1.Get_port( sw1 ), -1, nil, nil )	// add endpoint -- a virtual from sw1 out to the host h1
+	_, port1 := h1.Get_switch_port()
+	_, port2 := h2.Get_switch_port()
+	//deprecated ---- lnk := n.find_vlink( *(sw1.Get_id()), h1.Get_port( sw1 ), -1, nil, nil )	// add endpoint -- a virtual from sw1 out to the host h1
+	lnk := n.find_vlink( *(sw1.Get_id()), port1, -1, nil, nil )					// add leafpoint -- a virtual from sw1 out to the host h1
 	lnk.Add_lbp( *(h1.Get_mac()) )
 	lnk.Set_forward( sw1 )
-	path.Add_endpoint( lnk )
+	path.Add_leafpoint( lnk )
 
 	lnk = n.find_swvlink( *(sw1.Get_id()), *(sw2.Get_id()) )					// suss out or create a virtual link between the two
 	lnk.Set_forward( sw2 )
 	lnk.Set_backward( sw1 )
 	path.Add_link( lnk )
 
-	lnk = n.find_vlink( *(sw2.Get_id()), h2.Get_port( sw2 ), -1, nil, nil )		// add endpoint -- a virtual link on sw2 out to the host h2
+	//deprecated --- lnk = n.find_vlink( *(sw2.Get_id()), h2.Get_port( sw2 ), -1, nil, nil )		// add endpoint -- a virtual link on sw2 out to the host h2
+	lnk = n.find_vlink( *(sw2.Get_id()), port2, -1, nil, nil )					// add leafpoint -- a virtual link on sw2 out to the host h2
 	lnk.Add_lbp( *(h2.Get_mac()) )
 	lnk.Set_forward( sw2 )
-	path.Add_endpoint( lnk )
+	path.Add_leafpoint( lnk )
 
 	return
 }
@@ -357,8 +453,10 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 	var (
 		path	*gizmos.Path
 		ssw 	*gizmos.Switch		// starting switch
-		h1		*gizmos.Host
-		h2		*gizmos.Host
+		//h1		*gizmos.Host
+		//h2		*gizmos.Host
+		h1		*gizmos.Endpt
+		h2		*gizmos.Endpt
 		lnk		*gizmos.Link
 		plidx	int = 0
 		swidx	int = 0				// index into host's switch list
@@ -371,65 +469,81 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		return 0, nil, false
 	}
 
-	h1 = n.hosts[*h1nm]
+	//h1 = n.hosts[*h1nm]
+	h1 = n.endpts[*h1nm]
 	if h1 == nil {
 		path_list = nil
 		net_sheep.Baa( 1,  "find-path: cannot find host(1) in network -- not reported by SDNC? %s", *h1nm )
 		return
 	}
-	h1nm = h1.Get_mac()			// must have the host's mac as our flowmods are at that level
+	//h1nm = h1.Get_mac()			// must have the host's mac as our flowmods are at that level
+	//h1mac := h1.Get_mac()
 
-	h2 = n.hosts[*h2nm]					// do the same for the second host
+	//h2 = n.hosts[*h2nm]					// do the same for the second host
+	h2 = n.endpts[*h2nm]
 	if h2 == nil {
 		path_list = nil
 		net_sheep.Baa( 1,  "find-path: cannot find host(2) in network -- not reported by the SDNC? %s", *h2nm )
 		return
 	}
-	h2nm = h2.Get_mac()
+	//h2nm = h2.Get_mac()
+	//h2mac := h2.Get_mac()			// must have the host's mac as our flowmods are at that level
 
+/* deprecated -- we use endpoint names passed in now and not mac addresses 
 	if h1nm == nil || h2nm == nil {			// this has never happened, but be parinoid
 		pcount = 0
 		path_list = nil
 		net_sheep.Baa( 0, "CRI: find-path: internal error: either h1nm or h2nm was nil after get mac  [TGUNET005]" )
 		return
 	}
+--- */
+	net_sheep.Baa( 1,  ">>>find-path: both hosts found in network: %s  %s", *h1nm, *h2nm )
 
 	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
 	pcount = 0
+	net_sheep.Baa( 1,  ">>>find-path: both hosts found in network: %s  %s  (iniital path_list size is %d)", *h1nm, *h2nm, len( path_list) )
 
-	for {													// we'll break after we've looked at all of the connection points for h1
+	ssw, p1 := h1.Get_switch_port()						// get the source switch and the port the VM is attached to
+	// REVAMP -- in the world of floodlight a host might appear attached to multiple switches. we had to find all paths
+	//deprecated -- for {													// we'll break after we've looked at all of the connection points for h1
 		if plidx >= len( path_list ) {
 			net_sheep.Baa( 0,  "CRI: find-path: internal error -- path size > num of links.  [TGUNET006]" )
 			return
 		}
 
-		ssw, _ = h1.Get_switch_port( swidx )				// get next switch that lists h1 as attached; we'll work 'out' from it toward h2
+		//deprecated -- 	ssw, _ = h1.Get_switch_port( swidx )				// get next switch that lists h1 as attached; we'll work 'out' from it toward h2
 		if ssw == nil {										// no more source switches which h1 thinks it's attached to
 			pcount = plidx
 			if pcount <= 0 || swidx == 0 {
-				net_sheep.Baa( 1, "find-path: early exit? no switch/port returned for h1 (%s) at index %d captrip=%v", *h1nm, swidx, lcap_trip )
+				net_sheep.Baa( 1, "find-path: early exit? no switch/port returned for h1 (%s) at aptrip=%v", h1, lcap_trip )
 			}
 			path_list = path_list[0:pcount]					// slice it down to size
 			cap_trip = lcap_trip							// set with overall state
-			return
+			return	plidx, path_list[0:plidx], cap_trip
 		}
 
 		fence := n.get_fence( usr )
 		if ssw.Has_host( h1nm )  &&  ssw.Has_host( h2nm ) {			// if both hosts are on the same switch, there's no path if they both have the same port (both external to our view)
-			p1 := h1.Get_port( ssw )
-			p2 := h2.Get_port( ssw )
-			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
-				m1 := h1.Get_mac( )
-				m2 := h2.Get_mac( )
+net_sheep.Baa( 1, ">>>> both endpoints on same switch" )
+			//p1 := h1.Get_port( ssw )
+			//p2 := h2.Get_port( ssw )
 
-				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, m1, m2 )
+			_, p2 := h2.Get_switch_port( )							// need the port for the second endpoint so we can test to see if they dup or are on same switch
+			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
+				//m1 := h1.Get_mac( )
+				//m2 := h2.Get_mac( )
+
+				//lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, m1, m2 )
+				//lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, h1mac, h2mac )
+				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, h1nm, h2nm )			// use endpoint names
 				has_room := true									// always room if relaxed mode, so start this way
 				if ! n.relaxed {
 					has_room, err = lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 	// admission control if not in relaxed mode
 				}
 				if has_room {										// room for the reservation
-					lnk.Add_lbp( *h1nm )
-					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
+					lnk.Add_lbp( *h1nm )		// REVAMP:  this is switching to uuid; was mac; make sure it doesn't break.
+					//net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
+					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), p1, p2 )
 					path = gizmos.Mk_path( h1, h2 )							// empty path
 					path.Set_bandwidth( inc_cap )
 					path.Set_extip( extip, ext_flag )
@@ -462,7 +576,8 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 			
 			if n.relaxed {				
-				dsw, _ := h2.Get_switch_port( swidx )					// need the switch associated with the second host (dest switch)
+				//dsw, _ := h2.Get_switch_port( swidx )					// need the switch associated with the second host (dest switch)
+				dsw, _ := h2.Get_switch_port( )							// need the switch associated with the second host (dest switch)
 				path, err = n.find_relaxed_path( ssw, h1, dsw, h2 )		// no admissions control we fake a link between the two
 				if err != nil {
 					net_sheep.Baa( 1, "find_paths: find_relaxed failed: %s", err )
@@ -488,12 +603,12 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 			}
 		}
 
-		swidx++
-	}
+		//swidx++
+	//}
 
-	pcount = plidx			// shouldn't get here, but safety first
-	cap_trip = lcap_trip
-	return
+	//cap_trip = lcap_trip
+	net_sheep.Baa( 2, ">>>>>> returning: %d things in path list", plidx )
+	return	plidx, path_list[0:plidx], lcap_trip		// slice it down to just what we actually used
 }
 
 /*
@@ -534,9 +649,11 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 		return
 	}
 	if pair_list == nil {										// likely no fip for one or the other VMs
+		net_sheep.Baa( 1, "internal mishap: pair list in build_path was nil" )
 		return
 	}
 
+	net_sheep.Baa( 2, "path building: pair list has %d elements", len( pair_list ) )
 	total_paths := 0
 	ok_count := 0
 	ipaths := make( [][]*gizmos.Path, len( pair_list ) )			// temp holder of each path list resulting from pair_list exploration
@@ -547,13 +664,20 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 		ext_flag = &dst_flag
 	}
 	for i := range pair_list {
+		net_sheep.Baa( 3, "path building: process pair list %d", i )
 		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
+net_sheep.Baa( 1, ">>>>> ipath count is %d/%d", num, len( ipaths ) )
 		if num > 0 {
 			total_paths += num
 			ok_count++
 
+			net_sheep.Baa( 2, "path building: looping over %d ipaths", len( ipaths[i] ) )
 			for j := range ipaths[i] {
-				ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation
+				if ipaths[i][j] != nil {
+					ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation
+				} else {
+			net_sheep.Baa( 1, ">>>>> j is nil: %d", j )
+				}
 			}
 		} else {
 			if pair_list[i].h1 != nil && pair_list[i].h2 != nil {											 // pair might be nil if no gateway; don't stack dump

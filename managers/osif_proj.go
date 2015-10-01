@@ -807,6 +807,7 @@ func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
 					for epid, v := range oseps {
 						epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
 						epmap[epid].Set_router( v.Is_router() )
+						epmap[epid].Set_meta_value( "netid", *(v.Get_netid()) )
 					}
 				} else {
 					osif_sheep.Baa( 1, "osep_info: could not dig out VM information for project: %s: %s", k, err )
@@ -834,6 +835,7 @@ func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
 				for epid, v := range oseps {
 					epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
 					epmap[epid].Set_router( v.Is_router() )
+					epmap[epid].Set_meta_value( "netid", *(v.Get_netid()) )
 				}
 			} else {
 				osif_sheep.Baa( 1, "osep_info: could not dig out VM information for project: %s: %s", *pid, err )

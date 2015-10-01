@@ -123,6 +123,60 @@ func ( ep *Endpt ) Add_addr( ip string ) {
 }
 
 /*
+	Return any meta value.
+*/
+func ( ep *Endpt ) Get_meta_value( key string ) ( *string ) {
+	if ep == nil {
+		return nil
+	}
+
+	s := ep.meta[key]
+	return &s
+}
+
+/*
+	Returns a copy of the meta map; adds port and router as 'strings'.
+*/
+func ( ep *Endpt ) Get_meta_copy( ) ( map[string]string ) {
+	if ep == nil {
+		return nil
+	}
+
+	meta_cpy := make( map[string]string )
+	for k, v := range ep.meta {
+		meta_cpy[k] = v
+	}
+
+	meta_cpy["port"] = string( ep.port )
+	meta_cpy["router"] = fmt.Sprintf( "%v", ep.router )
+
+	return meta_cpy
+}
+
+/*
+	Returns the associated network ID.
+*/
+func ( ep *Endpt ) Get_netid( ) ( *string ) {
+	if ep == nil {
+		return nil
+	}
+
+	s := ep.meta["netid"]
+	return &s
+}
+
+/*
+	Return true if this endpoint seems to be a router.
+*/
+func ( ep *Endpt ) Is_router() ( bool ) {
+	if ep == nil {
+		return false
+	}
+
+	return ep.router
+}
+
+/*
 	Remove a specific address from the list, closing the hole.
 */
 func ( ep *Endpt ) Rm_addr( ip string ) {
@@ -213,38 +267,6 @@ func (ep *Endpt) Set_port( val int ) {
 }
 
 /*
-	Return any meta value.
-*/
-func ( ep *Endpt ) Get_meta_value( key string ) ( *string ) {
-	if ep == nil {
-		return nil
-	}
-
-	s := ep.meta[key]
-	return &s
-}
-
-/*
-	Returns a copy of the meta map; adds port and router as 'strings'.
-*/
-func ( ep *Endpt ) Get_meta_copy( ) ( map[string]string ) {
-	if ep == nil {
-		return nil
-	}
-
-	meta_cpy := make( map[string]string )
-	for k, v := range ep.meta {
-		meta_cpy[k] = v
-	}
-
-	meta_cpy["port"] = string( ep.port )
-	meta_cpy["router"] = fmt.Sprintf( "%v", ep.router )
-
-	return meta_cpy
-}
-
-
-/*
 	Return the project id.
 */
 func ( ep *Endpt) Get_project( ) ( *string ) {
@@ -285,16 +307,34 @@ func ( ep *Endpt ) Get_phost() ( *string ) {
 }
 
 /*
-	Returns the IP and the MAC address.
+	Returns the IP and the MAC address. The IP address really cannot be trusted
+	as it is the first from the list and if the endpoint has multiple IP addresses
+	this could change from execution to execution of Tegu, or even if the endpoint
+	data is updated while running.
 */
 func ( ep *Endpt ) Get_addresses( ) ( ip *string, mac *string ) {
 	if ep == nil {
 		return nil, nil
 	}
 
-	ips := ep.meta["ip"] 
+	ips := ""
+	if len( ep.ip_addrs ) > 0 {
+		ips = *ep.ip_addrs[0]
+	}
+
 	macs := ep.meta["mac"]
 	return &ips, &macs
+}
+/*
+	Returns the mac.
+*/
+func ( ep *Endpt ) Get_mac( ) ( mac *string ) {
+	if ep == nil {
+		return nil
+	}
+
+	macs := ep.meta["mac"]
+	return &macs
 }
 
 /*
