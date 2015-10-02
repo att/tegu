@@ -226,8 +226,8 @@ net_sheep.Baa( 2, ">>>>> find endpoints allocating %d", nalloc )
 		return
 	}
 
-	//g1 := n.gateway4tid( t1 )						// map project id to gateway which become the second endpoint
-	//g2 := n.gateway4tid( t2 )
+	//deprecated ---- g1 := n.gateway4tid( t1 )						// map project id to gateway which become the second endpoint
+	//deprecated ---- g2 := n.gateway4tid( t2 )
 	g1 := n.vmip2gw[*h1ip]							// pick up the gateway for each of the VMs
 	g2 := n.vmip2gw[*h2ip]
 
@@ -299,6 +299,7 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Endpt, h2 *
 	ssw.Cost = 0														// seed the cost in the source switch
 	tsw, cap_trip := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
+net_sheep.Baa( 2, ">>>>> tsw = %s", *tsw.Get_id() )
 		path = gizmos.Mk_path( h1, h2 )
 		path.Set_reverse( true )								// indicate that the path is saved in reverse order
 		path.Set_bandwidth( inc_cap )
@@ -501,9 +502,9 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
 	pcount = 0
-	net_sheep.Baa( 1,  ">>>find-path: both hosts found in network: %s  %s  (iniital path_list size is %d)", *h1nm, *h2nm, len( path_list) )
 
 	ssw, p1 := h1.Get_switch_port()						// get the source switch and the port the VM is attached to
+	net_sheep.Baa( 1,  ">>>find-path: source switch: %s", *ssw.Get_id() )
 	// REVAMP -- in the world of floodlight a host might appear attached to multiple switches. we had to find all paths
 	//deprecated -- for {													// we'll break after we've looked at all of the connection points for h1
 		if plidx >= len( path_list ) {

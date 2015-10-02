@@ -62,8 +62,8 @@ func Mk_endpt( uuid string, phost string, project string, ip interface{}, mac st
 
 	ep = &Endpt {
 		conn_pt: 	sw,
-		port:	port,
-		router:	false,
+		port:		port,
+		router:		false,
 	}
 
 	ep.ip_addrs = make( []*string, 0, 10 )		// initially room for 10; add function extends if needed
@@ -163,6 +163,17 @@ func ( ep *Endpt ) Get_netid( ) ( *string ) {
 
 	s := ep.meta["netid"]
 	return &s
+}
+
+/*
+	Return true if this endpoint has a connection point already defined.
+*/
+func ( ep *Endpt ) Has_connpt() ( bool ) {
+	if ep == nil {
+		return false
+	}
+
+	return ep.conn_pt != nil
 }
 
 /*

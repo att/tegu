@@ -934,20 +934,23 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 	*/
 
 	// NEW:  expect hlist to be a list of endpoints which we just need to map to switches and add.
-	for k, v := range eps {											// for each end point, add to the graph
-		swname := v.Get_phost()
-		sw := n.switches[*swname]									// the switch object (should exist, but take no chances)
-		if ssw != nil {
-			_, port := v.Get_switch_port()
-			v.Set_switch( ssw, port )								// allows us to find a starting switch by endpoint id for path finding
-			mac, _ := v.Get_addresses( )
-			sw.Add_endpt( &k, port )									// allows switch to respond to Has_host() call by id or mac
-			net_sheep.Baa( 4, "saving host %s (%s) in switch : %s port: %d", mac, k, *swname, port )
+	for k, ep := range eps {											// for each end point, add to the graph
+		swname := ep.Get_phost()
+		csw := n.switches[*swname]									// connected switch is switch with the phost
+		if csw != nil {
+			_, port := ep.Get_switch_port()
+			ep.Set_switch( csw, port )								// allows us to find a starting switch by endpoint id for path finding
+			csw.Add_endpt( &k, port )								// allows switch to respond to Has_host() call by id or mac
+
+			if net_sheep.Would_baa( 2 ) {
+				mac, _ := ep.Get_addresses( )
+				net_sheep.Baa( 2, "saving host %s (%s) in switch : %s port: %d", *mac, k, *swname, port )
+			}
 		} else {
 			net_sheep.Baa( 1, "attachment switch for endpoint %s is missing: %s", k, swname )
 		}
 
-		n.endpts[k] = v									// reference only by uuid
+		n.endpts[k] = ep									// reference only by uuid
 	}
 
 /* ---- deprecated -----
