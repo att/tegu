@@ -57,7 +57,9 @@ import (
 type osif_project struct {
 	name		*string
 	lastfetch	int64						// timestamp of last map update to detect freshness
-	vmid2ip		map[string]*string			// translation maps for the project
+											// translation maps for the project
+	// REVAMP:   need a map of VMs interface uuids to IP addresses; endpoints use uuid of interface
+	vmid2ip		map[string]*string			
 	ip2vmid		map[string]*string
 	ip2vm		map[string]*string
 	vm2ip		map[string]*string			// vm name to ip; gateway IPs are used as names

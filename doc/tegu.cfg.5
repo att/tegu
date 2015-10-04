@@ -23,6 +23,7 @@
 .\"		Author:		Robert Eby (eby@research.att.com)
 .\"
 .\"     Mods:		03 Jul 2015 - Created
+.\"					16 Aug 2015 - Fixed an error.  Add more descriptive text.
 .\"
 .TH TEGU.CFG 5 "Tegu Manual"
 .CM 4
@@ -47,6 +48,7 @@ It contains parameters that configure Tegu globally.
 .B alttable
 An integer specifying the OVS table number to be used for metadata marking.
 If more than one table is required, then this is the base, lowest number table to use.
+If not specified, 90 is used.
 .TP 8
 .B favour_ipv6
 A boolean flag.
@@ -156,7 +158,7 @@ and provides the Tegu API.
 .B admin_roles
 A comma separated list of OpenStack roles, used to determine who may issue many of
 the non-mirroring API calls.
-The default admin role is \fIadmintegu_admin\fP.
+The default admin role list is \fIadmin,tegu_admin\fP.
 .TP 8
 .B cert
 The name of a file containing the certificate to use for the TLS (HTTPS) server Tegu
@@ -346,6 +348,7 @@ value to 1800 if this value is less than 120 seconds.
 .TP 8
 .B super_cookie
 Provides the value for a "super cookie" that can be used to manage any reservation.
+If not specified, the super cookie has a value that can be learned by inspecting the code.
 .TP 8
 .B verbose
 An integer that controls the verbosity level for reservation manager logging.

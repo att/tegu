@@ -20,11 +20,11 @@
 /*
 	Mnemonic:	globals.go
 	Abstract:	Global things shared by all managers.  Use caution when modifying or adding to iota lists order
-				might be important and note where new cosntant blocks are started as the reason is likely
+				might be important and note where new constant blocks are started as the reason is likely
 				that iota needs to be reset!
 
 				There is also one initialisation function that is managed here. We cannot make use of the
-				automatic package initialisation mechanism because the inititalisation requires specific
+				automatic package initialisation mechanism because the initialisation requires specific
 				information from the main which is passed into the init function.
 
 	Date:		02 December 2013
@@ -42,24 +42,43 @@
 				26 Feb 2015 - Added support for default gateway sussing.
 				20 Mar 2015 - Added REQ_GET_PHOST_FROM_MAC
 				31 Mar 2015 - Added REQ_GET_PROJ_HOSTS
+				21 Sep 2015 - Added REQ_GET_PHOST_FROM_PORTUUID
 */
 
+/*
+	The package "managers" provides the code for the various "manager" goroutines that comprise Tegu.
+	These include:
+
+	Agent_mgr() - responsible for communications with the tegu_agent processes.
+	These in turn communicate with the various OpenStack nodes to make switch changes.
+
+	Fq_mgr() - handles flow mods, etc. for bandwidth reservations.
+
+	Http_api() - provides the HTTP/S API interface for Tegu.
+
+	Network_mgr() - provides discovery and graphing of the underlying network.
+
+	Osif_mgr() - provides the interface to OpenStack.
+
+	Res_manager() - provides the repository for all reservations (Pledges) as well as
+	scheduling of these pledges into the network.
+ */
 package managers
 
 import (
 	"fmt"
 	"os"
-	
-	"github.com/att/gopkgs/clike"
-	"github.com/att/gopkgs/ipc"
-	"github.com/att/gopkgs/config"
+
 	"github.com/att/gopkgs/bleater"
+	"github.com/att/gopkgs/clike"
+	"github.com/att/gopkgs/config"
+	"github.com/att/gopkgs/ipc"
 
 	"github.com/att/tegu/gizmos"
 )
 
 const (
-	// request types placed into channel messages. Primary reciver of each type is
+	// request types placed into channel messages. Primary receiver of each type is
 	// indicated in parens (except for the more generic types).
 	REQ_NOOP		int = -1	// no operation
 	_				int = iota	// skip 0
@@ -71,9 +90,10 @@ const (
 	REQ_NETGRAPH				// return the network graph as a jThing (json)
 	REQ_HASCAP					// check for reservation capacity
 	REQ_ADD						// generic requests may mean slightly different things based on the go-routine receiving the request
-	REQ_DEL			
-	REQ_GET			
+	REQ_DEL
+	REQ_GET
 	REQ_CHKPT					// take a checkpoint (res_mgr)
+	REQ_RTRY_CHKPT				// tickler sends this to checkpoint if one was missed
 	REQ_LOAD					// load checkpoint file data (res_mgr)
 	REQ_NETUPDATE				// new network graph is attached (network)
 	REQ_LISTCONNS				// user request a port list for named host	(network)
@@ -81,6 +101,7 @@ const (
 	REQ_GETIP					// look up the VM name or ID and return the IP address
 	REQ_GWMAP					// map that translates mac to ip just for gateway nodes (not included in the vm list)
 	REQ_PUSH					// generic push depending on receiver
+	REQ_PUSHNOW					// force unpushed reservations out now
 	REQ_LIST					// generic list depending on receiver
 	REQ_GETLMAX					// get max link allocation across the network
 	REQ_SETQUEUES				// fqmgr - tickle to cause queues to be set if needed
@@ -97,7 +118,7 @@ const (
 	REQ_SENDALL					// send message to all
 	REQ_SENDSHORT				// send a long running request to a single agent (uses only one agent to handle all long running requests
 	REQ_SENDLONG				// send a short running request to a single agent (will round robin between all attached agents)
-	REQ_IP2MACMAP				// generate an ip to mac translation table and return to requestor
+	REQ_IP2MACMAP				// generate an ip to mac translation table and return to requester
 	REQ_MAC2PHOST				// request contains mac to physical host data
 	REQ_INTERMEDQ				// setup queues and flowmods on intermediate switches
 	REQ_IP2FIP					// request contains a translation of tenant/ip to floating ip
@@ -105,8 +126,8 @@ const (
 	REQ_STATE					// generate some kind of state data back to message sender
 	REQ_PAUSE					// put things into a paused mode
 	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
-	REQ_VALIDATE_HOST			// validaate a [token/][project/]hostname string
-	REQ_GENCREDS				// generate crdentials
+	REQ_VALIDATE_HOST			// validate a [token/][project/]hostname string
+	REQ_GENCREDS				// generate credentials
 	REQ_PROJNAME2ID				// translate project name to ID
 	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port
 	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
@@ -124,10 +145,13 @@ const (
 	REQ_GET_MIRRORS				// get a list of mirrors from res mgr
 	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
 	REQ_GET_PHOST_FROM_MAC		// used by mirroring to find the phost that goes with a MAC
+	REQ_GET_PHOST_FROM_PORTUUID // used by mirroring to find the phost that goes with a neutron UUID
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 	REQ_SETDISC					// set the discount value
 	REQ_DUPCHECK				// check for duplicate (resmgr)
+	REQ_SWITCHINFO				// request switch info from all hosts
+	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
 )
 
 const (
@@ -154,7 +178,7 @@ const (
 	FQ_TPSPORT					// transport source port number
 	FQ_TPDPORT					// transport dest port number
 	FQ_SMAC						// mac addresses (src and dest)
-	FQ_DMAC		
+	FQ_DMAC
 	FQ_NEXT_MAC					// mac address of next hop
 	FQ_SWID						// switch ID
 	FQ_PRI						// priority
@@ -188,14 +212,14 @@ var (
 
 	tklr	*ipc.Tickler				// tickler that will drive periodic things like checkpointing
 
-	pid int = 0							// process id for use in generating reservation names uniqueue across invocations
+	pid int = 0							// process id for use in generating reservation names unique across invocations
 	res_nmseed	int = 0					// reservation name sequential value
 	res_paused	bool = false			// set to true if reservations are paused
 
 	super_cookie	*string; 			// the 'admin cookie' that the super user can use to manipulate a reservation
 
 	tegu_sheep	*bleater.Bleater		// parent sheep that controls the 'master' bleating volume and is used by 'library' functions (allocated in init below)
-	net_sheep	*bleater.Bleater		// indivual sheep for each goroutine (each is responsible for allocating their own sheep)
+	net_sheep	*bleater.Bleater		// individual sheep for each goroutine (each is responsible for allocating their own sheep)
 	am_sheep	*bleater.Bleater		// global so that all related functions have access to them
 	fq_sheep	*bleater.Bleater
 	osif_sheep	*bleater.Bleater
@@ -207,19 +231,19 @@ var (
 		http manager needs globals because the http callback doesn't allow private data to be passed
 	*/
 
-	admin_roles *string					// roles which are allowed to submit privledged requests (pause, resume etc.)
+	admin_roles *string					// roles which are allowed to submit privileged requests (pause, resume etc.)
 	sysproc_roles *string				// list of roles that are valid for requests allowed for either system procs or admins (e.g. listhost)
 	mirror_roles *string				// list of openstack roles that are valid for mirroring commands
-	priv_auth *string					// type of authorisation needed for privledged commands
+	priv_auth *string					// type of authorisation needed for privileged commands
 	accept_requests bool = false		// until main says we can, we don't accept requests
-	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value	
+	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value
 	isSSL bool							// mirroring flag to know if ssl is on
 )
 
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------
 
 /*
-	Paramters that may need to be passed to fq-mgr for either matching or setting in the action. All
+	Parameters that may need to be passed to fq-mgr for either matching or setting in the action. All
 	fields are public for easier access and eventual conversion to json as a means to pass to the
 	agent.
 */
@@ -263,7 +287,7 @@ type Fq_req struct {
 	Nxt_mac	*string				// mac of next hop (steering)
 	Lbmac	*string				// late binding mac
 	Swid	*string				// switch ID (either a dpid or host name for ovs)
-	Espq	*gizmos.Spq			// a collection of swtich, port, queue information (might replace spq and swid)
+	Espq	*gizmos.Spq			// a collection of switch, port, queue information (might replace spq and swid)
 	Single_switch bool			// indicates that only one switch is involved (dscp handling is different)
 
 	Match	*Fq_parms			// things to match on
@@ -285,15 +309,14 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 	def_log_dir := "."
 	log_dir := &empty_str
 
-	nw_ch = nwch;		
+	nw_ch = nwch
 	rmgr_ch = rmch
 	osif_ch = osifch
 	fq_ch = fqch
 	am_ch = amch
-	
 
 	if ver != nil {
-		version = *ver;
+		version = *ver
 	}
 
 	tegu_sheep = bleater.Mk_bleater( 1, os.Stderr )		// the main (parent) bleater used by libraries and as master 'volume' control

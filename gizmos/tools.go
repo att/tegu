@@ -21,14 +21,14 @@
 /*
 
 	Mnemonic:	tools
-	Abstract:	General functions that probably don't warrent promotion to the forge
+	Abstract:	General functions that probably don't warrant promotion to the forge
 				gopkgs library.
 
 	Date:		10 March 2014
 	Author:		E. Scott Daniels
 
 	Mods:		13 May 2014 -- Added toks2map function.
-				29 Sep 2014 -  The toks2map() funciton now stops parsing when the
+				29 Sep 2014 -  The toks2map() function now stops parsing when the
 					first token that does not match a key=value pair in order to
 					prevent issues with the huge openstack tokens that are base64
 					encoded and thus may contain tailing equal signs and look like
@@ -40,6 +40,7 @@
 				29 Apr 2015 - Correct bug in split port causing stack dump if nil host pointer
 					passed in.
 				27 May 2015 - Added Split_hpv().
+				26 Aug 2015 - Added IsMAC(), IsUUID(), IsIPv4()
 */
 
 package gizmos
@@ -53,6 +54,7 @@ import (
 	//"html"
 	//"net/http"
 	//"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -133,7 +135,7 @@ func Toks2map( toks []string ) ( m map[string]*string ) {
 
 	for i := range toks {
 		t := strings.SplitN( toks[i], "=", 2 )
-		
+
 		if len( t ) == 2 {
 			m[t[0]] = &t[1]
 		} else {
@@ -180,7 +182,7 @@ func Split_port( host *string ) ( name *string, port *string ) {
 			p := trail_toks[1][1:]
 			port = &p
 		}
-		
+
 		return
 	}
 
@@ -190,7 +192,7 @@ func Split_port( host *string ) ( name *string, port *string ) {
 		name = &tokens[0]
 		port = &tokens[1]
 		return
-	}	
+	}
 
 	// nothing matched, then it's ip6 and no port; default case works
 	return
@@ -219,9 +221,9 @@ func Split_hpv( host *string ) ( name *string, port *string, vlan *string ) {
 	} else {
 		name, port = Split_port( &tokens[0] )			// split out the stuff from the host portion
 		v := strings.TrimRight( tokens[1], "}" )		// ditch the trailing ch assumed to be closing }
-		vlan = &v	
+		vlan = &v
 	}
-	
+
 	return
 }
 
@@ -317,7 +319,7 @@ func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
 				v, isthere := m[tokens[i]]
 				if !isthere || v == "" {
 					state = false
-					missing += tokens[i] + " "		
+					missing += tokens[i] + " "
 				}
 			}
 
@@ -327,7 +329,7 @@ func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
 				v, isthere := m[tokens[i]]
 				if !isthere || *v == "" {
 					state = false
-					missing += tokens[i] + " "		
+					missing += tokens[i] + " "
 				}
 			}
 
@@ -337,7 +339,7 @@ func Map_has_all( mi interface{}, list  string ) ( bool, string ) {
 				_, isthere := m[tokens[i]]
 				if !isthere {							// assume a value of zero is acceptable, so false only if missing completely
 					state = false
-					missing += tokens[i] + " "		
+					missing += tokens[i] + " "
 				}
 			}
 
@@ -360,7 +362,7 @@ func Strings_equal( s1 *string, s2 *string ) ( bool ) {
 		return false
 	}
 
-	return *s1 == *s2	
+	return *s1 == *s2
 }
 
 /*
@@ -428,7 +430,7 @@ func Map_has_any(  ui interface{}, ki interface{} ) (bool) {
 			keys = ki.( []string )
 
 		default:
-			return false						// unsported key list type
+			return false						// unsupported key list type
 	}
 
 	switch m := ui.( type ) {
@@ -476,4 +478,30 @@ func Map_has_any(  ui interface{}, ki interface{} ) (bool) {
 	}
 
 	return false
+}
+
+var mac_re  = regexp.MustCompile(`^([0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2}$`)				// RE to match a MAC address
+var uuid_re = regexp.MustCompile(`^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$`)	// RE to match a UUID
+var ipv4_re = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}$`)							// RE to match an IPv4 addr
+
+/*
+	Checks if a string is a valid MAC address.
+ */
+func IsMAC(s string) bool {
+	return mac_re.MatchString(s)
+}
+
+/*
+	Checks if a string is a valid UUID.
+ */
+func IsUUID(s string) bool {
+	return uuid_re.MatchString(s)
+}
+
+/*
+	Checks if a string is a valid IPv4 address.
+	Note: this regex is not entirely accurate, but is "good enough".
+ */
+func IsIPv4(s string) bool {
+	return ipv4_re.MatchString(s)
 }

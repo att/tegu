@@ -25,12 +25,12 @@
 				Now that a pledge has been converted to an interface, this needs to be
 
 	Date:		17 Feb 2015
-	Author:		Bob Eby
+	Author:		Robert Eby
 
-	Mods:		
-				17 Feb 2015 - Added mirroring
+	Mods:		17 Feb 2015 - Added mirroring
 				26 May 2015 - Broken out of main pledge to allow for pledge to become an interface.
-				01 Jun 2015 - Addded equal() support
+				01 Jun 2015 - Added equal() support
+				16 Aug 2015 - Move common code into Pledge_base
 */
 
 package gizmos
@@ -43,22 +43,18 @@ import (
 
 // needs rework to rename fields that make sense to mirroring
 type Pledge_mirror struct {
+				Pledge_base	// common fields
 	host1		*string		// list of ports to mirror
 	host2		*string		// destination of mirrors
 	//protocol	*string		//
 	tpport1		*string		//
 	tpport2		*string		// these match h1/h2 respectively
-	window		*pledge_window
 	//bandw_in	int64		// bandwidth to reserve inbound to host1
 	//bandw_out	int64		// bandwidth to reserve outbound from host1
-	//dscp		int			// dscp value that should be propigated
+	//dscp		int			// dscp value that should be propagated
 	//dscp_koe	bool		// true if the dscp value should be kept when a packet exits the environment
-	id			*string		// name that the client can use to manage (modify/delete)
 	qid			*string		// physical host
-	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
 	//path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
-	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
-	paused		bool		// set if reservation has been paused
 
 	//mbox_list	[]*Mbox		// list of middleboxes if the pledge is a steering pledge
 	//mbidx		int			// insertion point into mblist
@@ -95,7 +91,6 @@ type Json_pledge struct {
 
 /*
  *	Makes a mirroring pledge.
-	
  */
 func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string, vlan *string ) ( p Pledge, err error ) {
 	err = nil
@@ -113,12 +108,14 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 		t = t + " vlan:" + *vlan
 	}
 	pm := &Pledge_mirror {
+		Pledge_base:Pledge_base{
+			id: id,
+			usrkey: usrkey,			// user "cookie"
+			window: window,
+		},
 		host1:		&t,				// mirror input ports (space sep)
 		host2:		out_port,		// mirror output port
-		id:			id,				// mirror name
 		qid:		phost,			// physical host (overloaded field)
-		usrkey:		usrkey,			// user "cookie"
-		window:		window,
 	}
 
 	if *usrkey == "" {
@@ -135,6 +132,12 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 */
 func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 	newp := &Pledge_mirror {
+		Pledge_base:Pledge_base{
+			id:			p.id,
+			usrkey:		p.usrkey,			// user "cookie"
+			pushed:		p.pushed,
+			paused:		p.paused,
+		},
 		host1:		p.host1,
 		host2:		p.host2,
 		//tpport1: 	p.tpport1,
@@ -142,12 +145,8 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 		//bandw_in:	p.bandw_in,
 		//bandw_out:	p.bandw_out,
 		//dscp:		p.dscp,
-		id:			&name,
-		usrkey:		p.usrkey,
 		qid:		p.qid,
 		//path_list:	p.path_list,
-		pushed:		p.pushed,
-		paused:		p.paused,
 	}
 
 	newp.window = p.window.clone()
@@ -174,7 +173,7 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 	if err != nil {
 		return
 	}
-	
+
 	if jp.Ptype != PT_MIRRORING {
 		err = fmt.Errorf( "json was not for a mirror pledge" )
 		return
@@ -207,40 +206,6 @@ func (p *Pledge_mirror) Set_qid( id *string ) {
 */
 func (p *Pledge_mirror) Set_matchv6( state bool ) {
 	p.match_v6 = state
-}
-
-/*
-	Sets a new expiry value on the pledge.
-*/
-func (p *Pledge_mirror) Set_expiry( v int64 ) {
-	p.window.set_expiry_to( v )
-	p.pushed = false		// force it to be resent to ajust times
-}
-
-// There is NOT a toggle pause on purpose; don't add one :)
-
-/*
-	Puts the pledge into paused state and optionally resets the pushed flag.
-*/
-func (p *Pledge_mirror) Pause( reset bool ) {
-	if p != nil {
-		p.paused = true
-		if reset {
-			p.pushed = false;
-		}
-	}
-}
-
-/*
-	Puts the pledge into an unpaused (normal) state and optionally resets the pushed flag.
-*/
-func (p *Pledge_mirror) Resume( reset bool ) {
-	if p != nil {
-		p.paused = false
-		if reset {
-			p.pushed = false;
-		}
-	}
 }
 
 /*
@@ -306,7 +271,7 @@ func (p *Pledge_mirror) String( ) ( s string ) {
 	the json output.
 */
 func (p *Pledge_mirror) To_json( ) ( json string ) {
-	
+
 	state, _, diff := p.window.state_str( )
 
 	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "ptype": %d }`,
@@ -317,11 +282,11 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 
 /*
 	Build a checkpoint string -- probably json, but it will contain everything including the user key.
-	We still won't use the json package because that means making all of the fileds available to outside
+	We still won't use the json package because that means making all of the fields available to outside
 	users.
 
 	There is no path information saved in the checkpt. If a reload from ckpt is needed, then we assume
-	that the network information was completely reset and the paths will be rebult using the host,
+	that the network information was completely reset and the paths will be rebuilt using the host,
 	commence, expiry and bandwidth information that was saved.
 
 	If the pledge is expired, the string "expired" is returned which seems a bit better than just returning
@@ -329,57 +294,18 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 */
 func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 
-	if p.window.is_expired( ) {			// will show expired if window is nill, so safe without check
+	if p.window.is_expired( ) {			// will show expired if window is nil, so safe without check
 		chkpt = "expired"
 		return
 	}
-	
+
 	c, e := p.window.get_values( )
-	
-	chkpt = fmt.Sprintf( `{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "usrkey": %q, "ptype": %d }`,
-		*p.host1, *p.host2, c, e, *p.id, *p.usrkey, PT_MIRRORING )
+
+	chkpt = fmt.Sprintf(
+		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d }`,
+		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, PT_MIRRORING )
 
 	return
-}
-
-/*
-	Sets the pushed flag to true.
-*/
-func (p *Pledge_mirror) Set_pushed( ) {
-	if p != nil {
-		p.pushed = true
-	}
-}
-
-/*
-	Resets the pushed flag to false.
-*/
-func (p *Pledge_mirror) Reset_pushed( ) {
-	if p != nil {
-		p.pushed = false
-	}
-}
-
-/*
-	Returns true if the pushed flag has been set to true.
-*/
-func (p *Pledge_mirror) Is_pushed( ) (bool) {
-	if p == nil {
-		return false
-	}
-
-	return p.pushed
-}
-
-/*
-	Returns true if the reservation is paused.
-*/
-func (p *Pledge_mirror) Is_paused( ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.paused
 }
 
 /*
@@ -387,97 +313,6 @@ func (p *Pledge_mirror) Is_paused( ) ( bool ) {
 */
 func (p *Pledge_mirror) Is_ptype( kind int ) ( bool ) {
 	return kind == PT_MIRRORING
-}
-
-/*
-	Returns true if the pledge has expired (the current time is greather than
-	the expiry time in the pledge).
-*/
-func (p *Pledge_mirror) Is_expired( ) ( bool ) {
-	if p == nil {
-		return true
-	}
-
-	return p.window.is_expired( )
-}
-
-/*
-	Returns true if the pledge has not become active (the commence time is >= the current time).
-*/
-func (p *Pledge_mirror) Is_pending( ) ( bool ) {
-	if p == nil {
-		return false
-	}
-	return p.window.is_pending( )
-}
-
-/*
-	Returns true if the pledge is currently active (the commence time is <= than the current time
-	and the expiry time is > the current time.
-*/
-func (p *Pledge_mirror) Is_active( ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.is_active()
-}
-
-/*
-	Returns true if pledge is active now, or will be active before elapsed seconds have passed.
-*/
-func (p *Pledge_mirror) Is_active_soon( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.is_active_soon( window )
-}
-
-/*
-	Check the cookie passed in and return true if it matches the cookie on the
-	pledge.
-*/
-func (p *Pledge_mirror) Is_valid_cookie( c *string ) ( bool ) {
-	//fmt.Fprintf( os.Stderr, "pledge:>>>> checking: %s == %s  %v\n", *c, *p.usrkey, bool( *c == *p.usrkey) )
-	return *c == *p.usrkey
-}
-
-/*
-	Returns true if pledge concluded between (now - window) and now-1.
-*/
-func (p *Pledge_mirror) Concluded_recently( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.concluded_recently( window )
-}
-
-/*
-	Returns true if pledge expired long enough ago that it can safely be discarded.
-	The window is the number of seconds that the pledge must have been expired to
-	be considered extinct.
-*/
-func (p *Pledge_mirror) Is_extinct( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.is_extinct( window )
-}
-
-/*
-	Returns true if pledge started recently (between now and now - window seconds) and
-	has not expired yet. If the pledge started within the window, but expired before
-	the call to this function false is returned.
-*/
-func (p *Pledge_mirror) Commenced_recently( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.commenced_recently( window )
 }
 
 /*
@@ -492,17 +327,6 @@ func (p *Pledge_mirror) Get_ptype( ) ( int ) {
 */
 func (p *Pledge_mirror) Get_matchv6() ( bool ) {
 	return p.match_v6
-}
-
-/*
-	Returns a pointer to the ID string of the pledge.
-*/
-func (p *Pledge_mirror) Get_id( ) ( *string ) {
-	if p == nil {
-		return nil
-	}
-
-	return p.id
 }
 
 /*
@@ -547,17 +371,10 @@ func (p *Pledge_mirror) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *
 }
 
 /*
-	Return the commence and expiry times.
-*/
-func (p *Pledge_mirror) Get_window( ) ( int64, int64 ) {
-	return p.window.get_values( )
-}
-
-/*
 	Return true if the pledge passed in duplicates this pledge.
 */
 func (p *Pledge_mirror) Equals( p2 *Pledge ) ( bool ) {
-	
+
 	if p == nil {
 		return false
 	}
