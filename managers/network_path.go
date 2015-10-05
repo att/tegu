@@ -567,7 +567,7 @@ net_sheep.Baa( 1, ">>>> both endpoints on same switch" )
 				net_sheep.Baa( 2,  "find-path: host2-json= %s", h2.To_json( ) )
 			}
 		} else {						// usual case, two named hosts and hosts are on different switches
-			net_sheep.Baa( 1, "path[%d]: searching for path starting from switch: %s", plidx, ssw.To_str( ) )
+			net_sheep.Baa( 1, "path[%d]: searching for path starting from switch %s", plidx, ssw.To_str( ) )
 
 			for sname := range n.switches {					// initialise the network for the walk
 				n.switches[sname].Cost = 2147483647			// this should be large enough and allows cost to be int32

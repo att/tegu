@@ -344,7 +344,7 @@ func ( ep *Endpt ) Get_mac( ) ( mac *string ) {
 		return nil
 	}
 
-	macs := ep.meta["mac"]
+	macs := ep.meta["mac"]				// force copy
 	return &macs
 }
 
@@ -372,9 +372,9 @@ func (ep *Endpt) String( ) ( s string ) {
 	s += " ]"
 
 	if ep.conn_pt != nil {
-		s += fmt.Sprintf( " sw=%s port=%d",  ep.conn_pt.Get_id(), ep.port )
+		s += fmt.Sprintf( " sw=%s port=%d",  *(ep.conn_pt.Get_id()), ep.port )
 	} else {
-		s += fmt.Sprintf( " sw=none" )
+		s += " sw=none"
 	}
 
 	s += fmt.Sprintf( " rtr=%v", ep.router )

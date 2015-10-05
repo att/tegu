@@ -265,20 +265,45 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	in from skoogi and it was fq-mgr's job to interface with skoogi.)
 */
 func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
-
+	var ok bool
 
 	if data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
 		fq_sheep.Baa( 1, "unable to send bw-fmods request to agent: no switch defined in input data" )
 		return
 	}
 
+
+	rch := make( chan *ipc.Chmsg )
+	req := ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, rch, REQ_EP2MAC, *data.Match.Ip1, nil )
+	req = <-rch
+	mac := ""
+	if mac, ok = req.Response_data.( string ); ! ok {
+		fq_sheep.Baa( 1, "could not map endpoint id (1) to mac: %s", *data.Match.Ip1 )
+		return
+	}
+	data.Match.Smac = &mac
+	//fq_sheep.Baa( 1, ">>>>> src mac address mapped: %s ==> %s", *data.Match.Ip1, mac )
+
+	req = ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, rch, REQ_EP2MAC, *data.Match.Ip2, nil )
+	req = <-rch
+	if mac, ok = req.Response_data.( string ); ! ok {
+		fq_sheep.Baa( 1, "could not map endpoint id (2) to mac: %s", *data.Match.Ip2 )
+		return
+	}
+	data.Match.Dmac = &mac
+	//fq_sheep.Baa( 1, ">>>>> dest mac address mapped: %s ==> %s", *data.Match.Ip2, mac )
+
+
 	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
 	if phost_suffix != nil {										// we need to add the physical host suffix
 		host = add_phost_suffix( host, phost_suffix )
 	}
+	
 
-	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
-	data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
+	//data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	//data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
 
 	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
 	msg.Actions = make( []action, 1 )							// just a single action
@@ -289,14 +314,14 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 
 	json, err := json.Marshal( msg )						// bundle into a json string
 	if err != nil {
-		fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+		fq_sheep.Baa( 0, "unable to build json to set flow mod: %s", err )
 	} else {
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 	}
 
-	fq_sheep.Baa( 2, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
-	
+	// FIXME -- baa below should be 2
+	fq_sheep.Baa( 1, ">>>>>>   bandwidth endpoint flow-mod request sent to agent manager: %s", json )
 }
 
 /*

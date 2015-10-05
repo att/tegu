@@ -115,6 +115,7 @@ const (
 	REQ_IP2VMID					// xlate map IP address to VM-ID
 	REQ_VMID2PHOST				// xlate map VM-ID to physical host name
 	REQ_IP2MAC					// xlate map IP address to mac
+	REQ_EP2MAC					// xlate endpoint name to MAC address (net)
 	REQ_GEN_EPQMAP				// generate queue map for end points only (no intermediate queues are generated)
 	REQ_SENDALL					// send message to all
 	REQ_SENDSHORT				// send a long running request to a single agent (uses only one agent to handle all long running requests

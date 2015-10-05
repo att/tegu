@@ -157,27 +157,60 @@ func ( i *Inventory ) res2json( ) (json string, err error) {
 }
 
 /*
+	Given a proj/endpt/addr string, return the endpoint or addr.  If the string is 
+	an oldstyle string, we request the ip address from network manager if pull_ep 
+	is false. 
+
 	Given a name, send a request to the network manager to translate it to an IP address.
 	If the name is nil or empty, we return nil. This is legit for steering in the case of
 	L* endpoint specification.
+
+	In the new world of endpoints, the name on a reservation should have the form:
+		proj/endpoint/address
+
+	Assuming we find address, we'll return that, otherwise we'll as the network manager
+	to translate endpoint to an address and likely get something useful though there is 
+	a chance that the 'default' IP address for an endpoint isn't what the user wanted.
 */
-func name2ip( name *string ) ( ip *string ) {
-	ip = nil
+func pull_from_pea_str( name *string, pull_ep bool ) ( s *string ) {
+	s = nil
 
 	if name == nil || *name == "" {
 		return
 	}
 
-	ch := make( chan *ipc.Chmsg )	
-	defer close( ch )									// close it on return
-	msg := ipc.Mk_chmsg( )
-	msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
-	msg = <- ch
-	if msg.State == nil {					// success
-		ip = msg.Response_data.(*string)
+	tokens := strings.Split( *name, "/" )
+	if len( tokens ) > 2 {
+		dup := tokens[1]
+		if !pull_ep {
+			dup = tokens[2]
+		}
+		return &dup
 	}
 
-	return
+	if ! pull_ep {
+		ch := make( chan *ipc.Chmsg )	
+		defer close( ch )									// close it on return
+		msg := ipc.Mk_chmsg( )
+		msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
+		msg = <- ch
+		if msg.State == nil {					// success
+			s = msg.Response_data.( *string )
+		}
+	}
+
+	return s
+}
+
+/*
+	Front-end functions for pull_from_pea
+*/
+func name2ip( pea *string ) ( *string ) {
+	return pull_from_pea_str( pea, false )
+}
+
+func name2ep( pea *string )  ( *string ) {
+	return pull_from_pea_str( pea, true )
 }
 
 /*

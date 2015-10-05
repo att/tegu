@@ -511,7 +511,7 @@ func (p *Pledge_bw) String( ) ( s string ) {
 	v1, v2 := p.bw_vlan2string( )
 
 	//NEVER put the usrkey into the string!
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d%s h2=%s:%d%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=bandwidth koe=%v", state, diff, caption,
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%s%s h2=%s:%s%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=bandwidth koe=%v", state, diff, caption,
 		*p.host1, *p.tpport2, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, commence, expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe )
 	return
 }

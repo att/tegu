@@ -84,13 +84,17 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 	}
 
 	//FIXME -- pledge needs to track ip addresses and return them here.
+	// h1/h2 are the host 'names' given on the reservation:   project/endpoint/address:port{vlan}
+	// this now becomes: proj/epid[:ip-addr]:port; if ip-addr is missing then we assume 'default' ip address
+	// ANSWER:  how do we convert old non-ep reservations to ep reservations?
 	h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, transport (tcp/udp) ports and expiry are all we need
 	v1, v2 := p.Get_vlan( )									// vlan match criteria for one/both endpoints
 
-	ip1 := name2ip( h1 )
-	ip2 := name2ip( h2 )
+	ip1 := name2ep( h1 )
+	ip2 := name2ep( h2 )
 
 	if ip1 != nil  &&  ip2 != nil {				// good ip addresses so we're good to go
+rm_sheep.Baa( 2, ">>>> pushing %s (%s) (%s)", h1, *ip1, *ip2 )
 		plist := p.Get_path_list( )				// each path that is a part of the reservation
 
 		timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
@@ -129,8 +133,10 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 			/// FIXME:  ip addresses need to move to be a part of the bw reservation and pulled earlier when we get host/tp-port values from the pledge
 			//deprecated --- freq.Match.Ip1 = plist[i].Get_h1().Get_address( pref_v6 )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
 			//deprecated --- freq.Match.Ip2 = plist[i].Get_h2().Get_address( pref_v6 )
-			freq.Match.Ip1, _ = plist[i].Get_h1().Get_addresses( )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
-			freq.Match.Ip2, _ = plist[i].Get_h2().Get_addresses( )
+			//freq.Match.Ip1, _ = plist[i].Get_h1().Get_addresses( )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
+			//freq.Match.Ip2, _ = plist[i].Get_h2().Get_addresses( )
+			freq.Match.Ip1 = ip1
+			freq.Match.Ip2 = ip2
 			freq.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
 			if freq.Single_switch {
 				freq.Espq.Queuenum = 1										// same switch always over br-rl queue 1

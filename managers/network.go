@@ -225,7 +225,8 @@ func mk_net_cfg( cfg_data map[string]map[string]*string ) ( nc *net_cfg ) {
 type Network struct {				
 	switches	map[string]*gizmos.Switch	// symtable of switches
 	links		map[string]*gizmos.Link		// table of links allows for update without resetting allotments
-	endpts		map[string]*gizmos.Endpt	// endpoints (formally known as hosts)
+	endpts		map[string]*gizmos.Endpt	// endpoints (used to be known as hosts)
+	ep_cache	map[string]*gizmos.Endpt	// cache if called before we have a topo
 
 	// ---- these are probably all deprecated
 	hosts		map[string]*gizmos.Host		// references to host by either mac, ipv4 or ipv6 'names'
@@ -256,7 +257,7 @@ type Network struct {
 func mk_network( mk_links bool ) ( n *Network ) {
 	n = &Network { }
 	n.switches = make( map[string]*gizmos.Switch, 20 )		// initial sizes aren't limits, but might help save space
-	n.hosts = make( map[string]*gizmos.Host, 2048 )			// REVAMP: deprecated?
+	//deprecated---- n.hosts = make( map[string]*gizmos.Host, 2048 )
 
 	if mk_links {
 		n.links = make( map[string]*gizmos.Link, 2048 )		// must maintain a list of links so when we rebuild we preserve obligations
@@ -612,13 +613,20 @@ func (n *Network) defrock_epname( epname *string ) ( string ) {
 	}
 
 	tokens := strings.Split( *epname, "/" )		// could be project/uuid or just uuid
-	ename := tokens[0]
+	uuid := tokens[0]
 	if len( tokens ) > 1  {
-		ename = tokens[1]
+		uuid = tokens[1]
 	} 
 
-	if n.endpts[ename] != nil {
-		return ename
+	net_sheep.Baa( 2, ">>>> defrocking: %s uuid=%s (%d)", *epname, uuid, len( n.endpts ) )
+	if net_sheep.Would_baa( 3 ) {
+		for _, v := range n.endpts {
+			net_sheep.Baa( 3, ">>>> defrocking: %s", v )
+		}
+	}
+
+	if n.endpts[uuid] != nil {
+		return uuid
 	}
 
 	return ""
@@ -800,18 +808,13 @@ func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 	unclear at this time if we should trust that list to be everything (most concerned
 	about network hosts).
 */
-//deprecated --- func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string ) (n *Network) {
-//max_capacity int64, link_headroom int, link_alarm_thresh int, 
 func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_list *string ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
 		lnk		*gizmos.Link
 
-		//ip4		string
-		//ip6		string
 		links	[]gizmos.FL_link_json			// list of links from floodlight or simulated floodlight source
-		//--- deprecated hlist	[]gizmos.FL_host_json			// list of hosts from floodlight or built from vm maps if not using fl
 		err		error
 		hr_factor	int64 = 1
 		mlag_name	*string = nil
@@ -823,27 +826,19 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 		hr_factor = 100 - int64( cfg.link_headroom )
 	}
 
-
-	// REVAMP:   eliminate the floodlight call openstack interface should be sending us a list of endpoints to use; use them directly
-	/* --- deprecated ---
-	if strings.Index( *flhost, ":" ) >= 0  {
-		links = gizmos.FL_links( flhost )					// request the current set of links from floodlight
-		hlist = gizmos.FL_hosts( flhost )					// get a current host list from floodlight
-	} else {
-	}
-	-----*/
-		// --- deprecated hlist = old_net.build_hlist()				// simulate output from floodlight by building the host list from openstack maps
-		// ---- links, err = gizmos.Read_json_links( *flhost )		// build links from the topo file; if empty/missing, we'll generate a dummy next
+	if phost_list != nil && *phost_list != "" {
 		links, err = gizmos.Read_json_links( cfg.topo_file )		// build links from the topo file; if empty/missing, we'll generate a dummy next
 		if err != nil || len( links ) <= 0 {
-			if eps != nil {
-				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *cfg.topo_file )
-				links = gizmos.Gen_star_topo( *phost_list )		// generate a dummy topo based on the  phys hosts listed in endpoint list
-			} else {
-				net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *cfg.topo_file, err )
-				links = nil										// kicks us out later, but must at least create an empty network first
-			}
+			net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *cfg.topo_file )
+			links = gizmos.Gen_star_topo( *phost_list )		// generate a dummy topo based on the  phys hosts listed in endpoint list
+		} else {
+			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *cfg.topo_file, err )
+			links = nil										// kicks us out later, but must at least create an empty network first
 		}
+	} else {
+		net_sheep.Baa( 0, "no phost_list yet, not parsing topo file" )
+		links = nil
+	}
 
 	n = mk_network( old_net == nil )			// new network, need links and mlags only if it's the first network
 	n.relaxed = cfg.relaxed
@@ -852,6 +847,7 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 	} else {
 		n.links = old_net.links					// might it be wiser to copy this rather than reference and update the 'live' copy?
 		n.endpts = old_net.endpts
+		n.ep_cache = old_net.ep_cache
 
 		n.vlinks = old_net.vlinks
 		n.mlags = old_net.mlags
@@ -859,18 +855,41 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 	}
 
 	if n.endpts == nil {
+		net_sheep.Baa( 1, "making endpoint map in network" );
 		n.endpts = make( map[string]*gizmos.Endpt )
 	}
 
 	if links == nil {
-		return
-	}
-	/*--- deprecated
-	if hlist == nil {
-		return
-	}
-	*/
+		if eps != nil {					// we cannot run the endpoints until we have a valid topo, so cache this list 
+			net_sheep.Baa( 2, "caching endpoint list; no topo yet" )
+			if n.ep_cache == nil {
+				n.ep_cache = eps		// just save it
+			} else {
+				for k, v := range eps {
+					n.ep_cache[k] = v
+				}
+			}
+		}
 
+		return
+	}
+
+	if n.ep_cache != nil {					// if there is a cache, make sure we include it
+		net_sheep.Baa( 2, "endpoint list was cached" )
+		if eps != nil {
+			net_sheep.Baa( 2, "merging %d endpoints from cache", len( n.endpts ) )
+			for k, v := range eps {
+				n.ep_cache[k] = v
+			}
+		}  else {
+			net_sheep.Baa( 2, "cache contains %d elements", len( n.ep_cache ) )
+		}
+
+		eps = n.ep_cache
+		n.ep_cache = nil
+	}
+
+	// FIXME:  if a link drops do we delete it?
 	for i := range links {								// parse all links returned from the controller (build our graph of switches and links)
 		if links[i].Capacity <= 0 {
 			links[i].Capacity = cfg.max_link_cap		// default if it didn't come from the source
@@ -913,28 +932,22 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 			lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
 			lnk.Set_port( 2, links[i].Src_port )		// port on src to dest
 			dsw.Add_link( lnk )
-			net_sheep.Baa( 3, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
-			net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
+			net_sheep.Baa( 4, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
+			net_sheep.Baa( 4, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
 		}
 	}
 
-	//NEW: release if the endpoint map is not empty
-	if len( eps ) > 0 {						// if we build after we have an endpoint list then ok to allow checkpoint to be processed
+	if len( n.endpts ) > 0 {						// if we build after we have an endpoint list then ok to allow checkpoint to be processed
 		n.hupdate = true
 	} else {
 		n.hupdate = false
 	}
 
-	/* ---- deprecated ------
-	if len( old_net.gwmap ) > 0 {			// if we build after gateway map has size, then gateways are in host table and checkpoints can be processed
-		n.hupdate = true
-	} else {
-		n.hupdate = false
+	for k, ep := range eps {										// for each end point, add to the graph
+		n.endpts[k] = ep									// reference only by uuid
 	}
-	*/
 
-	// NEW:  expect hlist to be a list of endpoints which we just need to map to switches and add.
-	for k, ep := range eps {											// for each end point, add to the graph
+	for k, ep := range n.endpts {									// switches are generated each go round, so we must insert endpoint into the new set
 		swname := ep.Get_phost()
 		csw := n.switches[*swname]									// connected switch is switch with the phost
 		if csw != nil {
@@ -942,70 +955,15 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 			ep.Set_switch( csw, port )								// allows us to find a starting switch by endpoint id for path finding
 			csw.Add_endpt( &k, port )								// allows switch to respond to Has_host() call by id or mac
 
-			if net_sheep.Would_baa( 2 ) {
+			if net_sheep.Would_baa( 3 ) {
 				mac, _ := ep.Get_addresses( )
-				net_sheep.Baa( 2, "saving host %s (%s) in switch : %s port: %d", *mac, k, *swname, port )
+				net_sheep.Baa( 3, "saving host %s (%s) in switch : %s port: %d", *mac, k, *swname, port )
 			}
 		} else {
 			net_sheep.Baa( 1, "attachment switch for endpoint %s is missing: %s", k, swname )
 		}
 
-		n.endpts[k] = ep									// reference only by uuid
 	}
-
-/* ---- deprecated -----
-	for i := range hlist {			// parse the unpacked json (host list); structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
-		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
-			ip6 = ""
-			ip4 = ""
-
-			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this doesn't snarf everything
-				if strings.Index( hlist[i].Ipv4[0], ":" ) >= 0 {	// if emulating floodlight, we get both kinds of IP in this field, one per hlist entry (ostack yields unique mac for each ip)
-					ip6 = hlist[i].Ipv4[0];
-				} else {
-					ip4 = hlist[i].Ipv4[0];
-				}
-			}
-			if len( hlist[i].Ipv6 ) > 0 &&  hlist[i].Ipv6[0] != "" {			// if getting from floodlight, then it will be here, and we may have to IPs on the same NIC
-				ip6 = hlist[i].Ipv6[0];
-			}
-
-			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
-			vmid := &empty_str
-			if old_net.ip2vmid != nil {
-				key := ip4
-				if key == "" {
-					key = ip6
-				}
-				
-				if old_net.ip2vmid[key] != nil {
-					vmid = old_net.ip2vmid[key]
-					h.Add_vmid( vmid )
-				}
-			}
-
-			for j := range hlist[i].AttachmentPoint {
-				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
-				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
-				if ssw != nil {																	// it should always be known, but no chances
-					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
-					net_sheep.Baa( 4, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
-				}
-			}
-
-			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 2, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
-			if ip4 != "" {
-				n.hosts[ip4] = h
-			}
-			if ip6 != "" {
-				n.hosts[ip6] = h
-			}
-		} else {
-			net_sheep.Baa( 2, "skipping host in list (i=%d) attachment points=%d", i, len( hlist[i].Mac ) )
-		}
-	}
------*/
 
 	return
 }
@@ -1426,7 +1384,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 			case req = <- nch:
 				req.State = nil				// nil state is OK, no error
 
-				net_sheep.Baa( 3, "processing request %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
+				net_sheep.Baa( 4, "processing request %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
 				switch req.Msg_type {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
@@ -1641,8 +1599,8 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 								}
 							} else {
 								//net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
-								net_sheep.Baa( 0,  "network: unable to map to an enpoint uuid: %s %s",  h1, h2 )
-								req.State = fmt.Errorf( "one of the endpoint uuids is not known: %s %s", h1, h2 )
+								net_sheep.Baa( 0,  "network: unable to map to an enpoint uuid: %s (%s) %s (%s)",  *h1, ep1_name, *h2, ep2_name )
+								req.State = fmt.Errorf( "one of the endpoint uuids is not known: %s %s", *h1, *h2 )
 							}
 						} else {									// pledge wasn't a bw pledge
 							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bw pledge: %s", p )
@@ -1693,11 +1651,38 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 							}
 
 							// deprecated --- new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
-							new_net := build( nil, eps_list, cfg, hlist )
+							new_net := build( nil, nil, cfg, hlist )
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 								act_net = new_net							// and finally use it
 							}
+						}
+
+					case REQ_EP2MAC:										// given an endpoint name return the mac address
+						net_sheep.Baa( 1, ">>>> xlating ep2mac start" )
+						if req.Response_ch != nil {
+							var ep *gizmos.Endpt
+							var ep_uuid string
+
+							switch epid := req.Req_data.( type ) {
+								case string:
+									ep = act_net.endpts[epid]
+									ep_uuid = epid
+
+								case *string:
+									ep = act_net.endpts[*epid]
+									ep_uuid = *epid
+								
+							}
+
+							if ep != nil {
+								req.Response_data = *(ep.Get_mac())
+							} else {
+								net_sheep.Baa( 1, ">>>> ep2mac did not map to a known enpoint: %s", ep_uuid )
+								req.Response_data = ""
+							}
+							net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
+							net_sheep.Baa( 1, ">>>> xlating ep2mac epdump: %s", ep )
 						}
 
 					case REQ_NEW_ENDPT:										// add a new endpoint, or endpoint set to the graph
@@ -1841,7 +1826,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 					case REQ_NETUPDATE:											// build a new network graph
 						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
 						//deprecated----- new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
-						new_net := build( act_net, eps_list, cfg, hlist )
+						new_net := build( act_net, nil, cfg, hlist )
 						if new_net != nil {
 							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
 							act_net = new_net
@@ -1955,7 +1940,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 						net_sheep.Baa( 1,  "unknown request received on channel: %d", req.Msg_type )
 				}
 
-				net_sheep.Baa( 3, "processing request complete %d", req.Msg_type )
+				net_sheep.Baa( 4, "processing request complete %d", req.Msg_type )
 				if req.Response_ch != nil {				// if response needed; send the request (updated) back
 					req.Response_ch <- req
 				}
