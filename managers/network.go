@@ -90,6 +90,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	//"time"
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
@@ -1221,16 +1222,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 	var (
 		act_net *Network
 		req				*ipc.Chmsg
-		//-- in strut now max_link_cap	int64 = 0
-		//-- in strut now refresh			int = 30
-		//-- in strut now find_all_paths	bool = false	// if set, then we will find all paths for a reservation not just shortest
-		//-- in strut now mlag_paths 		bool = true		// can be set to false in config (mlag_paths); overrides find_all_paths
-		//-- in strut now link_headroom 	int = 0			// percentage that each link capacity is reduced by
-		//-- in strut now link_alarm_thresh int = 0			// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence		// user link capacity boundaries
-		//-- in strut now phost_suffix 	*string = nil
-		//-- in strut now discount 		int64 = 0			// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
-		//-- in strut now relaxed			bool = false	// set with relaxed = true in config
 		hlist			*string = &empty_str				// host list we'll give to build should we need to build a dummy star topo
 		eps_list	map[string]*gizmos.Endpt				// list of enpoints as delivered by openstack (we add to with VM/net changes)
 	)
@@ -1269,82 +1261,6 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 		v, _ := f.Get_limits()
 		net_sheep.Baa( 1, "link capacity limits set to: %d%%", v )
 	}
-
-/* ------ deprecated
-	if cfg_data["fqmgr"] != nil {								// we need to know if fqmgr is adding a suffix to physical host names so we can strip
-		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {
-			phost_suffix = p
-			net_sheep.Baa( 1, "will strip suffix from mac2phost map: %s", *phost_suffix )
-		}	
-	}
-
-														// suss out config settings from our section
-	if cfg_data["network"] != nil {
-		if p := cfg_data["network"]["discount"]; p != nil {
-			d := clike.Atoll( *p ); 			
-			if d < 0 {
-				discount = 0
-			} else {
-				discount = d
-			}
-		}
-
-		if p := cfg_data["network"]["relaxed"]; p != nil {
-			relaxed = *p ==  "true" || *p ==  "True" || *p == "TRUE"
-		}
-		if p := cfg_data["network"]["refresh"]; p != nil {
-			refresh = clike.Atoi( *p ); 			
-		}
-		if p := cfg_data["network"]["link_max_cap"]; p != nil {
-			max_link_cap = clike.Atoi64( *p )
-		}
-		if p := cfg_data["network"]["verbose"]; p != nil {
-			net_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
-		}
-
-		if p := cfg_data["network"]["all_paths"]; p != nil {
-			find_all_paths = false
-			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use find_paths = {all|mlag|shortest}" )
-		}
-
-		if p := cfg_data["network"]["find_paths"]; p != nil {
-			switch( *p ) {
-				case "all":	
-					find_all_paths = true
-					mlag_paths = false
-
-				case "mlag":
-					find_all_paths = false
-					mlag_paths = true
-
-				case "shortest":
-					find_all_paths = false
-					mlag_paths = false
-
-				default:
-					net_sheep.Baa( 0, "WRN: invalid setting in config: network:find_paths %s is not valid; must be: all, mlag, or shortest; assuming mlag  [TGUNET010]" )
-					find_all_paths = false
-					mlag_paths = true
-			}
-		}
-
-		if p := cfg_data["network"]["link_headroom"]; p != nil {
-			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacities down by
-		}
-
-		if p := cfg_data["network"]["link_alarm"]; p != nil {
-			link_alarm_thresh = clike.Atoi( *p )						// percentage of total capacity when an alarm is generated
-		}
-
-		if p := cfg_data["network"]["user_link_cap"]; p != nil {
-			s := "default"
-			f := gizmos.Mk_fence( &s, clike.Atoi64( *p ), 0, 0 )			// the default capacity value used if specific user hasn't been added to the hash
-			limits["default"] = f
-			v, _ := f.Get_limits()
-			net_sheep.Baa( 1, "link capacity limits set to: %d%%", v )
-		}
-	}
----- */
 
 	if topo_file != nil && *topo_file != "" {
 		cfg.topo_file = topo_file						// command line override
@@ -1457,7 +1373,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									usr = toks[0]										// the 'user' for queue setting
 								}
 	
-///// fixme
+///// FIXME?
 								ips, err := act_net.name2ip( src )
 								if err == nil {
 									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
@@ -1552,7 +1468,9 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", ep1_name, ep2_name )
 								//pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_meta["uuid"], &ep2_meta["uuid"], commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
 								//pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_meta["uuid"], &ep1_meta["uuid"], commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
+								net_sheep.Baa( 2, "building outbound path(s)" )
 								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_name, &ep2_name, commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
+								net_sheep.Baa( 2, "building inbound path(s)" )
 								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_name, &ep1_name, commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
 
 								if pcount_out > 0  &&  pcount_in > 0  {
@@ -1873,6 +1791,13 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 						
 					case REQ_NETGRAPH:							// dump the current network graph
 						req.Response_data = act_net.to_json()
+						// TESTING -- remove next line before flight
+						eps_list = req_ep_list( nil, true )										// rquest list -- block until we get it
+							new_net := build( nil, nil, cfg, hlist )
+							if new_net != nil {
+								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
+								act_net = new_net							// and finally use it
+							}
 
 					case REQ_LISTHOSTS:							// spew out a json list of hosts with name, ip, switch id and port
 						req.Response_data = act_net.host_list( )

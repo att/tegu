@@ -44,7 +44,7 @@ import (
 
 /*
 	Send a request to openstack interface for a host list. We will _not_ wait on it
-	and will handle the response in the main loop.
+	and the caller is expected to handle the response written to the provided channel.
 */
 func req_hosts(  rch chan *ipc.Chmsg, sheep *bleater.Bleater ) {
 	sheep.Baa( 2, "requesting host list from osif" )
@@ -108,4 +108,60 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 			_ = <- my_ch
 		}
 	}
+}
+
+/*
+	This function accepts a string of the form proj/epid/address or just the endpoint
+	uuid (epid), and returns the address or the endpoint uuid, depending on the 
+	setting of pull_ep.  If pull_ep is true, then the endpoint id is returned 
+	otherwise the ip address is returned.  If the input string is just an endpoint
+	id, then a message is sent to the network thread to pull the first (default) ip 
+	address assocated with the endpoint (if pull_ep is false), otherwise the endpoint 
+	id passed in is returned (caller doesn't need to know that it is or isn't a 
+	pea string.   Confused???  Just use the name2ip() and name2ep() wrapper functions.
+*/
+func pull_from_pea_str( name *string, pull_ep bool ) ( s *string ) {
+	s = nil
+
+	if name == nil || *name == "" {
+		return
+	}
+
+	tokens := strings.Split( *name, "/" )
+	if len( tokens ) > 2 {
+		dup := tokens[1]
+		if !pull_ep {
+			dup = tokens[2]
+		}
+		return &dup
+	}
+
+	if ! pull_ep {
+		ch := make( chan *ipc.Chmsg )	
+		defer close( ch )									// close it on return
+		msg := ipc.Mk_chmsg( )
+		msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
+		msg = <- ch
+		if msg.State == nil {					// success
+			s = msg.Response_data.( *string )
+		}
+	}
+
+	return s
+}
+
+/*
+	Given a pea string or endpoint id string return the associated IP address.
+	For an endpoint string this will be the "default" ip and may not be what 
+	is expected.
+*/
+func name2ip( pea *string ) ( *string ) {
+	return pull_from_pea_str( pea, false )
+}
+
+/*	
+	Given a pea string or endpoint id string return the associated endpoint id.
+*/
+func name2ep( pea *string )  ( *string ) {
+	return pull_from_pea_str( pea, true )
 }

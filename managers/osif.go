@@ -762,12 +762,16 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	// ---------------- end config parsing ----------------------------------------
 
 
+
 	if os_admin != nil {														// only if we are using openstack as a database
 		//tklr.Add_spot( 3, my_chan, REQ_GENCREDS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
 		tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER )
 	}
 
-	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
+	for _, v := range os_refs {
+		osif_sheep.Baa( 1, "cred: %s", v )
+	}
+	osif_sheep.Baa( 1, "osif manager is initialised; now listening on channel (%d cred sets)", len( os_refs ) )
 	for {
 		msg = <- my_chan					// wait for next message from tickler
 		msg.State = nil						// default to all OK

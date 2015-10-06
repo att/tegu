@@ -34,7 +34,7 @@ package managers
 
 import (
 	"fmt"
-	"strings"
+	//"strings"
 
 	//"github.com/att/gopkgs/bleater"
 	//"github.com/att/gopkgs/clike"
@@ -48,7 +48,8 @@ type host_pair struct {
 	usr	*string			// the user/tenant/project/squatter name/ID
 	h1	*string
 	h2	*string	
-	fip	*string			// floating IP address needed for this segment
+	exip	*string		// external IP when across a router
+	//fip	*string			// floating IP address needed for this segment
 }
 
 
@@ -58,7 +59,9 @@ type host_pair struct {
 	Search the list of endpoints looking for a router on the network given
 */
 func (n *Network) find_router( netid *string ) ( epuuid *string ) {
+	net_sheep.Baa( 1, ">>>> searching for router on network: %s", *netid )
 	for u, ep := range n.endpts {
+		//net_sheep.Baa( 1, ">>>> questioning endpoint %s", ep )
 		if ep.Is_router() && *(ep.Get_netid()) == *netid {
 			return &u
 		}
@@ -92,7 +95,8 @@ func (n *Network) find_router( netid *string ) ( epuuid *string ) {
 	the VM doesn't have a floating IP.
 */
 func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list []host_pair, err error ) {
-	ep1 := n.endpts[*epuuid1]
+
+	ep1 := n.endpts[*epuuid1]			// map uuid to actual endpoint
 	ep2 := n.endpts[*epuuid2]
 
 	if ep1 == nil && ep2 == nil {
@@ -108,24 +112,25 @@ func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list
 			pair_list[0].h1 = epuuid1
 			pair_list[0].h2 = epuuid2
 			pair_list[0].usr = ep1.Get_project()
-	net_sheep.Baa( 2, ">>>>> both eps are in same proejct, returning pair list: %d", len(pair_list) )
+			net_sheep.Baa( 2, ">>>>> both eps are in same proejct, returning pair list: %d", len(pair_list) )
 			return
 		}
 	}
 
+	net_sheep.Baa( 2, ">>>>> endpoints are in different proejcts: %s %s", *epuuid1, *epuuid2  )
 	pair_list = make( []host_pair, nalloc )
 
-// VERIFY -- do we need floating ip info in here any more?  I think not
 	plidx := 0
 	if ep1 != nil {											// find router for ep1 and set things up
 		r1 := n.find_router( ep1.Get_netid() )				// find the ep uuid for the router
 		if r1 == nil {
-			return nil, fmt.Errorf( "unable to find a router for ep1 (%s) netid (%s)", *epuuid1, *ep1.Get_netid() )
+			return nil, fmt.Errorf( "unable to find a router for ep1 (%s) netid (%s)", *epuuid1, *(ep1.Get_netid()) )
 		}
 
 		pair_list[plidx].h1 = epuuid1
 		pair_list[plidx].h2 = r1
 		pair_list[plidx].usr = ep1.Get_project()
+		pair_list[plidx].exip = name2ip( epuuid2 )			// get the ip address from the string, or the endpoint
 
 		plidx++
 	}
@@ -133,138 +138,19 @@ func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list
 	if ep2 != nil {											// find router for ep1 and set things up
 		r2 := n.find_router( ep2.Get_netid() )				// find the ep uuid for the router
 		if r2 == nil {
-			return nil, fmt.Errorf( "unable to find a router for ep2 (%s) netid (%s)", epuuid1, ep1.Get_netid() )
+			return nil, fmt.Errorf( "unable to find a router for ep2 (%s) netid (%s)", *epuuid2, *(ep2.Get_netid()) )
 		}
 
-		pair_list[plidx].h1 = epuuid2
-		pair_list[plidx].h2 = r2
+		pair_list[plidx].h2 = epuuid2
+		pair_list[plidx].h1 = r2
 		pair_list[plidx].usr = ep2.Get_project()
+		pair_list[plidx].exip = name2ip( epuuid1 )			// get the ip address from the string, or the endpoint
 	}
 
+	net_sheep.Baa( 1, ">>>> endpoints found: %d", nalloc )
 	return
 }
 
-
-func (n *Network) deprecated_find_endpoints( h1ip *string, h2ip *string ) ( pair_list []host_pair, err error ) {
-	var (
-		h1_auth	bool = true			// initially assume both hosts were validated and we can make a complete connection if in different project
-		h2_auth bool = true
-	)
-
-	err = nil
-
-	if strings.Index( *h1ip, "/" ) < 0 {					// no project id in the name we have to assume in the same realm
-		pair_list = make( []host_pair, 1 )
-		pair_list[0].h1 = h1ip
-		pair_list[0].h2 = h2ip
-		pair_list[0].usr = nil
-net_sheep.Baa( 2, "early>>>>> returning pair list: %d", len(pair_list) )
-		return
-	}
-
-	nalloc := 2												// number to allocate if both validated
-	toks := strings.SplitN( *h1ip, "/", 2 )					// suss out project ids
-	t1 := toks[0]
-	f1 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
-	if t1[0:1] == "!" {										// project wasn't validated, we use as endpoint, but dont create an end to end path
-		h1_auth = false
-		t1 =  t1[1:]										// drop the not authorised indicator for fip lookup later
-		ah1 :=  (*h1ip)[1:]									// must also adjust h1 string for fip translation
-		h1ip = &ah1
-		nalloc--											// need one less in return vector
-	}
-
-	toks = strings.SplitN( *h2ip, "/", 2 )
-	t2 := toks[0]
-	f2 := &toks[1]											// if !//ip given, the IP is the external and won't be in the hash
-	if  t2[0:1] ==  "!" {									// project wasn't validated, we use as endpoint, but dont create an end to end path
-		h2_auth = false
-		t2 =  t2[1:]
-		ah2 :=  (*h2ip)[1:]									// must also adjust h2 string for fip translation
-		h2ip = &ah2
-		nalloc--											// need one less in return vector
-	}
-
-net_sheep.Baa( 2, ">>>>> find endpoints allocating %d", nalloc )
-	if nalloc <= 0 {
-		net_sheep.Baa( 1, "neither endpoint was validated, refusing to build a path for %s-%s", *h1ip, *h2ip )
-		return
-	}
-
-	if t1 == t2 {									// same project, just one pair to deal with and we don't care if one wasn't validated
-		pair_list = make( []host_pair, 1 )
-		pair_list[0].h1 = h1ip
-		pair_list[0].h2 = h2ip
-		pair_list[0].usr = &t1
-		return
-	}
-
-	if !h1_auth && t1 == "" {								// external address as src
-		h1_auth = false										// ensure this
-		f2 = n.ip2fip[*h2ip]								// must assume h2 is the good address, and it must have a fip
-	} else {												// external address as dest
-		if  !h2_auth && t2 == "" {							// external address specified as !//ip-address; we use f2 as captured earlier
-			h2_auth = false									// should be, but take no chances
-			f1 = n.ip2fip[*h1ip]							// must assume f1 is the good address and it musht have a fip
-		} else {											// both are VMs and should have mapped fips; alloc based on previous validitiy check
-			f1 = n.ip2fip[*h1ip]							// dig the floating point IP address for each host (used as dest for flowmods on ingress rules)
-			f2 = n.ip2fip[*h2ip]
-		}
-	}
-
-	zip := "0.0.0.0"										// dummy which allows vm-name,!//ipaddress without requiring vm to have a floating point ip
-	if f1 == nil {
-		f1 = &zip											// possible VM-name without fip -> !//IPaddr
-	}
-
-	if f2 == nil {
-		f2 = &zip											// possible !//IPaddr -> vm-name without fip
-	}
-
-	if f1 == f2 {											// one of the two must have had some kind of external address (floating IP or real IP)
-		net_sheep.Baa( 1, "find_endpoints: neither host had an external or floating IP: %s %s", *h1ip, *h2ip )
-		return
-	}
-
-	//deprecated ---- g1 := n.gateway4tid( t1 )						// map project id to gateway which become the second endpoint
-	//deprecated ---- g2 := n.gateway4tid( t2 )
-	g1 := n.vmip2gw[*h1ip]							// pick up the gateway for each of the VMs
-	g2 := n.vmip2gw[*h2ip]
-
-	h2i := nalloc - 1								// insertion point for h2 into pair list
-	pair_list = make( []host_pair, nalloc )			// build the list based on number of validated
-
-	if h1_auth {
-		pair_list[0].h1 = h1ip
-		pair_list[0].h2 = g1
-		pair_list[0].usr = &t1
-		pair_list[0].fip = f2							// destination fip for h1->h2 (aka fip of h2)
-	} else {
-		if g2 == nil {
-			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation no-g2-router??? <-> %s", *h2ip )
-			err = fmt.Errorf( "unable to create partial pair reservation to %s: no router", *h2ip )
-		} else {
-			net_sheep.Baa( 1, "h1 was not validated, creating partial path reservation %s <-> %s", *g2, *h2ip )
-		}
-	}
-
-	if h2_auth {
-		pair_list[h2i].h2 = h2ip
-		pair_list[h2i].h1 = g2							// order is important to ensure bandwidth in/out limits if different
-		pair_list[h2i].usr = &t2
-		pair_list[h2i].fip = f1							// destination fip for h1<-h2	(aka fip of h1)
-	} else {
-		if g1 == nil {
-			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation no-g1-router???? <-> %s",  *h1ip )
-			err = fmt.Errorf( "unable to create partial pair reservation to %s: no router", *h2ip )
-		} else {
-			net_sheep.Baa( 1, "h2 was not validated (or external), creating partial path reservation %s <-> %s", *g1, *h1ip )
-		}
-	}
-
-net_sheep.Baa( 2, ">>>>> returning pair list: %d", len(pair_list) )
-	return
-}
 
 /*
 	This is a helper function for find_paths and is invoked when we are interested in just the shortest
@@ -292,11 +178,11 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Endpt, h2 *
 		//deprecated --- i41, _ := h1.Get_addresses()
 		//deprecated --- i42, _ := h2.Get_addresses()
 		//deprecated --- /net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *i41, *i42 )
-		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *(h1.Get_meta_value("uuid")), *(h1.Get_meta_value("uuid")) )
+		net_sheep.Baa( 1, "no path generated: user link capacity set to 0: attempt %s -> %s", *h1nm, *h2nm )
 		return
 	}
 
-	ssw.Cost = 0														// seed the cost in the source switch
+	ssw.Cost = 0																		// seed the cost in the source switch
 	tsw, cap_trip := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
 net_sheep.Baa( 2, ">>>>> tsw = %s", *tsw.Get_id() )
@@ -649,7 +535,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 		net_sheep.Baa( 1, "unable to build path: %s", err )
 		return
 	}
-	if pair_list == nil {										// likely no fip for one or the other VMs
+	if pair_list == nil {
 		net_sheep.Baa( 1, "internal mishap: pair list in build_path was nil" )
 		return
 	}
@@ -666,7 +552,8 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 	}
 	for i := range pair_list {
 		net_sheep.Baa( 3, "path building: process pair list %d", i )
-		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
+		//num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
+		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].exip, ext_flag, find_all )	
 net_sheep.Baa( 1, ">>>>> ipath count is %d/%d", num, len( ipaths ) )
 		if num > 0 {
 			total_paths += num
@@ -720,5 +607,6 @@ net_sheep.Baa( 1, ">>>>> ipath count is %d/%d", num, len( ipaths ) )
 		}
 	}
 
+net_sheep.Baa( 1, ">>> build_paths return at end: pcount=%d", pcount )
 	return
 }

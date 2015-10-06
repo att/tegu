@@ -277,23 +277,24 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 	req := ipc.Mk_chmsg( )
 	req.Send_req( nw_ch, rch, REQ_EP2MAC, *data.Match.Ip1, nil )
 	req = <-rch
-	mac := ""
-	if mac, ok = req.Response_data.( string ); ! ok {
+	mac1 := ""
+	if mac1, ok = req.Response_data.( string ); ! ok {
 		fq_sheep.Baa( 1, "could not map endpoint id (1) to mac: %s", *data.Match.Ip1 )
 		return
 	}
-	data.Match.Smac = &mac
-	//fq_sheep.Baa( 1, ">>>>> src mac address mapped: %s ==> %s", *data.Match.Ip1, mac )
+	data.Match.Smac = &mac1
+	fq_sheep.Baa( 1, ">>>>> src mac address mapped: %s ==> %s", *data.Match.Ip1, mac1 )
 
 	req = ipc.Mk_chmsg( )
 	req.Send_req( nw_ch, rch, REQ_EP2MAC, *data.Match.Ip2, nil )
 	req = <-rch
-	if mac, ok = req.Response_data.( string ); ! ok {
+	mac2 := ""
+	if mac2, ok = req.Response_data.( string ); ! ok {
 		fq_sheep.Baa( 1, "could not map endpoint id (2) to mac: %s", *data.Match.Ip2 )
 		return
 	}
-	data.Match.Dmac = &mac
-	//fq_sheep.Baa( 1, ">>>>> dest mac address mapped: %s ==> %s", *data.Match.Ip2, mac )
+	data.Match.Dmac = &mac2
+	fq_sheep.Baa( 1, ">>>>> dest mac address mapped: %s ==> %s", *data.Match.Ip2, mac2 )
 
 
 	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch

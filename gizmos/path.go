@@ -79,8 +79,8 @@ type Path struct {
 	lidx	int
 	switches []*Switch
 	sidx	int
-	//h1		*Host
-	//h2		*Host
+	//deprecated --- h1		*Host
+	//deprecated --- h2		*Host
 	h1		*Endpt
 	h2		*Endpt
 	bw_amt	int64			// amount of bandwidth reserved along this path
@@ -164,6 +164,20 @@ func (p *Path) Set_scramble( state bool ) {
 */
 func (p *Path) Get_bandwidth( ) ( int64 )  {
 	return p.bw_amt
+}
+
+/*
+	Return the uuid of the first endpoint
+*/
+func (p *Path) Get_epid1( ) (*string )  {
+	return p.h1.Get_meta_value( "uuid" )
+}
+
+/*
+	Return the uuid of the second endpoint
+*/
+func (p *Path) Get_epid2( ) ( *string )  {
+	return p.h2.Get_meta_value( "uuid" )
 }
 
 /*
@@ -699,8 +713,15 @@ func (p *Path) String( ) ( s string ) {
 	var (
 		sep string = ""
 	)
+	if p == nil {
+		return "--nil--"
+	}
 
-	s = ""
+	extip := ""
+	if p.extip != nil {
+		extip = *p.extip
+	}
+	s = fmt.Sprintf( "%s,%s e=%s ", *(p.h1.Get_meta_value( "uuid" )), *(p.h2.Get_meta_value( "uuid" )), extip )
 
 	for i := 0; i < p.sidx; i++ {
 		s += fmt.Sprintf( "%s %s ", sep, *(p.switches[i].Get_id()) )
