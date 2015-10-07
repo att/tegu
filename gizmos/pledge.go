@@ -93,12 +93,13 @@ type J2p struct {
 }
 
 /*
-	Given a string that contains valid json, unpack it and examine
-	the ptype. Based on ptype, allocate a specific pledge block and
-	invoke it's function to unpack the string.
+	Given a string that contains valid json, unpack it and examine the ptype.
+	Based on ptype, unserialize into the appropriate object type and return.
+	This used to be called Json2pledge(), but that was not an accurate name, given
+	that we now store non-pledge objects in the checkpoint file.
 */
-func Json2pledge( jstr *string ) ( p *Pledge, err error ) {
-	var pi Pledge
+func UnserializeObject( jstr *string ) ( p *interface{}, err error ) {
+	var pi interface{}
 
 	jp := new( J2p )
 	err = json.Unmarshal( []byte( *jstr ), &jp )
@@ -115,17 +116,37 @@ func Json2pledge( jstr *string ) ( p *Pledge, err error ) {
 					obp.From_json( jstr)
 					pi = Pledge( obp )
 	
-				case PT_MIRRORING:
-					mp := new( Pledge_mirror )
-					mp.From_json( jstr )
-					pi = Pledge( mp )			// convert to interface type
-					
-	
 				case PT_STEERING:
 					mp := new( Pledge_steer )
 					mp.From_json( jstr )
 					pi = Pledge( mp )			// convert to interface type
 	
+				case PT_MIRRORING:
+					mp := new( Pledge_mirror )
+					mp.From_json( jstr )
+					pi = Pledge( mp )			// convert to interface type
+					
+				case PT_CHAIN:
+					cp, e2 := Mk_Chain( []byte( *jstr ) )
+					pi = Pledge( cp )
+					if e2 != nil {
+						err = e2	// stupid go!
+					}
+					
+				case PT_GROUP:
+					cp, e2 := Mk_PortGroup( []byte( *jstr ) )
+					pi = cp
+					if e2 != nil {
+						err = e2	// stupid go!
+					}
+
+				case PT_FC:
+					cp, e2 := Mk_FlowClassifier( []byte( *jstr ) )
+					pi = cp
+					if e2 != nil {
+						err = e2	// stupid go!
+					}
+
 				default:
 					err = fmt.Errorf( "unknown pledge type in json: %d: %s", *jp.Ptype, *jstr )
 					return

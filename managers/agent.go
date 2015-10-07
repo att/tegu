@@ -239,7 +239,11 @@ func ( a *agent ) process_input( buf []byte ) {
 							case "map_mac2phost":
 								msg := ipc.Mk_chmsg( )
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
-			
+
+							case "run_local_cmd":
+								// TODO - handle sfs script results here
+								fallthrough
+
 							default:	
 								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )
 								if am_sheep.Would_baa( 2 ) {
@@ -310,6 +314,31 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
 	} else {
 		am_sheep.Baa( 1, "WRN: unable to bundle mac2phost request into json: %s  [TGUAGT004]", err )
+		am_sheep.Baa( 2, "offending json: %s", jmsg )
+	}
+}
+
+/*
+	Build a request to have the agent fetch the output from "ovs_sp2uuid -a" from all hosts.
+*/
+func (ad *agent_data) send_switchinfo( smgr *connman.Cmgr, hlist *string ) {
+	if hlist == nil || *hlist == "" {
+		am_sheep.Baa( 2, "no host list, cannot request ovs_sp2uuid" )
+		return
+	}
+
+	msg := &agent_cmd{ Ctype: "action_list" }				// create command struct then convert to json
+	msg.Actions = make( []action, 1 )
+	msg.Actions[0] = action {
+		Atype: "ovs_sp2uuid",
+		Hosts: strings.Split( *hlist, " " ),
+	}
+	jmsg, err := json.Marshal( msg )			// bundle into a json string
+	if err == nil {
+		am_sheep.Baa( 3, "sending ovs_sp2uuid request: %s", jmsg )
+		ad.sendbytes2lra( smgr, jmsg )						// send as a long running request
+	} else {
+		am_sheep.Baa( 1, "WRN: unable to bundle ovs_sp2uuid request into json: %s  [TGUAGT004]", err )
 		am_sheep.Baa( 2, "offending json: %s", jmsg )
 	}
 }
@@ -461,6 +490,11 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
 
+					case REQ_SWITCHINFO:
+						req.Response_ch = nil
+						if host_list != "" {
+							adata.send_switchinfo( smgr, &host_list )
+						}
 				}
 
 				am_sheep.Baa( 3, "processing request finished %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help

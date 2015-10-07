@@ -29,6 +29,7 @@
 					bleat id to gizmos.
 				24 Jun 2014 : Added new constants for steering pledges.
 				17 Feb 2015 : Added mirroring
+				30 Aug 2015 : Added chain, group, fc (flow classifier)
 */
 
 package gizmos
@@ -46,13 +47,16 @@ const (
 	PT_STEERING
 	PT_MIRRORING
 	PT_OWBANDWIDTH							// one way bandwidth
+	PT_CHAIN
+	PT_GROUP								// not a "pledge" but this needs to be checkpointed
+	PT_FC									// not a "pledge" but this needs to be checkpointed
 )
 
 var (
 	empty_str	string = ""					// these make &"" possible since that's not legal in go
 	zero_str	string = "0"
 
-	obj_sheep	*bleater.Bleater			// sheep that objeects have reference to when needing to bleat
+	obj_sheep	*bleater.Bleater			// sheep that objects have reference to when needing to bleat
 )
 
 /*

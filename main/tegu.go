@@ -23,7 +23,7 @@
 	Mnemonic:	tegu
 	Abstract:	The middle layer that sits between the cQoS and the openflow controller (Skoogi)
 				providing an API that allows for the establishment and removal of network
-				reserviations.
+				reservations.
 
 				Command line flags:
 					-C config	-- config file that provides openstack credentials and maybe more
@@ -47,18 +47,18 @@
 				13 May 2014 : Changes to support dscp-exit value supplied on reservation.
 				16 May 2014 : Corrected bug with specifying the "exit" dscp value.
 				18 May 2014 : Now supports cross tenant reservations.
-				29 May 2014 : Now supports default openstack value propigation in config file.
+				29 May 2014 : Now supports default openstack value propagation in config file.
 				05 Jun 2014 : Added pause/resume ability.
 				06 Jun 2014 : Added TLS/SSL support.
 				09 Jun 2014 : Added token authorisation support for reservations.
 				11 Jun 2014 : All paths option added-- reservation will be based on capacity over all
 							paths between h1 and h2.
-				16 Jun 2014 : Added abilityt to authorise privledged commands with a token generated using
+				16 Jun 2014 : Added ability to authorise privileged commands with a token generated using
 							the default (admin) user name given in the config file.
 				17 Jun 2014 : Added support for transport ports on reservation host names.
 				25 Jun 2014 : Added user (project, tenant, whatever) level caps on each link (gak).
 				07 Jul 2014 : Added refresh API request.
-				15 Jul 2014 : Added support for parital reservation path when only one endpoint is given a
+				15 Jul 2014 : Added support for partial reservation path when only one endpoint is given a
 							valid token on the reservation request.
 				21 Jul 2014 : Fixed bug -- checkpoint not including user link caps
 				29 Jul 2014 : Added mlag support.
@@ -72,14 +72,14 @@
 				30 Aug 2014 : Pick up bug fix made to ostack library.
 				03 Sep 2014 : Corrected bug in resmgr/fqmgr introduced with 27 Aug changes (transport type ignored).
 				05 Sep 2014 : Tweak to link add late binding port to pick up the lbp when port < 0 rather than 0.
-				08 Sep 2014 : Corrected bugs with tcp oriented proto steering (dest baesd). (steer)
+				08 Sep 2014 : Corrected bugs with tcp oriented proto steering (dest based). (steer)
 				23 Sep 2014 : Support for rate limiting bridge
 				29 Sep 2014 : Nil pointer exception (bug #216) corrected (gizmo change)
 				30 Sep 2014 : Deal with odd hostnames that were being returned by ccp's version of openstack.
 				09 Oct 2014 : Bug fix (228) -- don't checkpoint until all initialised.
 				14 Oct 2014 : Rebuild to pick up library changes that get network 'hosts'
 							as host only where OVS is running and not all network hosts.
-				19 Oct 2014 : Added bidirectional bandwith support (bug 228). (version bump to 3.0.1 because of
+				19 Oct 2014 : Added bidirectional bandwidth support (bug 228). (version bump to 3.0.1 because of
 							extra testing needed.)
 				23 Oct 2014 : Added better diagnostics to the user regarding capacity rejection of reservation (bug 239)
 				29 Oct 2014 : Corrected issue where vlan id was being set when both VMs are on the same switch (bug 242)
@@ -89,17 +89,17 @@
 				10 Nov 2014 : Build to pick up ostack library change (small tokens).
 				11 Nov 2014 : Change to support host name suffix in fqmgr.
 				12 Nov 2014 : Change to strip phys host suffix from phys map.
-				13 Nov 2014 : Correct out of bounds excpetion in fq-manager.
+				13 Nov 2014 : Correct out of bounds exception in fq-manager.
 				17 Nov 2014 : Converted the openstack interface to a lazy update method rather than attempting to
 							prefetch all of the various translation maps and then to keep them up to date.
 				19 Nov 2014 : Correct bug in checkpoint path attachment to reservation.
 				24 Nov 2014 : Floating IP address requirement for cross tenant reservations, and reservations between VM and an
 							 external host has been modified.
-				04 Dec 2014 : Uses enabled host list from ostack inteface.
+				04 Dec 2014 : Uses enabled host list from ostack interface.
 				05 Dec 2014 : Added work round for keystone/privs token investigation issue in AIC once they started using LDAP.
 				07 Dec 2014 : Corrected default tickler time for set intermediate queues.
 				16 Dec 2014 : Corrected bugs in lazy update translation of VM ID to ip.
-				08 Jan 2015 : Corrected a bug that was causing the wrong gateway to be slected as the endpoint for an
+				08 Jan 2015 : Corrected a bug that was causing the wrong gateway to be selected as the endpoint for an
 							external reservation.
 				09 Jan 2015 : Augmented the 1/8 fix to not assume the subnet list is limited by project in the creds.
 							Changes to allow for finding all IP addresses assigned to a VM, not just the first.
@@ -116,7 +116,7 @@
 				24 Feb 2015 : Added mirroring (version => 3.1.3).
 				11 Mar 2015 : Corrected bug in network manager causing coredump when gateway info missing on bleat message.
 				25 Mar 2015 : Added support for IPv6 in bandwidth reservations, and new bandwidth flow-mod script in the agent.
-				31 Mar 2015 : Added abilty to force a load of any specific project's VM data into the graph, or all that are
+				31 Mar 2015 : Added ability to force a load of any specific project's VM data into the graph, or all that are
 							known to Tegu.
 				03 Apr 2015 : Added role verification for graph and listhosts to allow any admin to submit these from afar.
 				10 Apr 2015 : Added ability to delete reservation via post, corrected slice bounds error (tokeniser library fix).
@@ -127,13 +127,14 @@
 				01 Jun 2015 : Added reservation dup checking.
 				04 Jun 2015 : Added authentication to mirror request processing.
 				09 Jun 2015 : Added oneway bandwidth reservations.
-				16 Jun 2015 : Extended oneway bandwitdh reservations to include queues.
+				16 Jun 2015 : Extended oneway bandwidth reservations to include queues.
 				25 Jun 2015 : Corrected bug with mirror expiration and xlation of proj/vm to mac.
 				02 Jul 2015 : Corrected physical host fetch bug in osif.
 				06 Jul 2015 : Version bump
 				29 Jul 2015 : Tracker bug fixes (263,266) version bump.
 				03 Sep 2015 : Correct panic in network.go.
 				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
+				06 Oct 2015 : Added Sfs_manager, changes for scalable flow steering
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -168,7 +169,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.4/19085"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.4/110065"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -181,8 +182,9 @@ func main() {
 		nw_ch	chan *ipc.Chmsg		// network graph manager
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager
 		osif_ch chan *ipc.Chmsg		// openstack interface
-		fq_ch chan *ipc.Chmsg		// flow queue manager
-		am_ch chan *ipc.Chmsg		// agent manager channel
+		fq_ch   chan *ipc.Chmsg		// flow queue manager
+		am_ch   chan *ipc.Chmsg		// agent manager channel
+		sfs_ch  chan *ipc.Chmsg		// SFS manager channel
 
 		wgroup	sync.WaitGroup
 	)
@@ -217,17 +219,19 @@ func main() {
 		super_cookie = &x
 	}
 
-	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
+	nw_ch = make( chan *ipc.Chmsg, 128 )			// create the channels that the threads will listen to
 	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
 	am_ch = make( chan *ipc.Chmsg, 1024 )			// agent manager channel
-	rmgr_ch = make( chan *ipc.Chmsg, 1024 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
+	rmgr_ch = make( chan *ipc.Chmsg, 1024 )			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
 	osif_ch = make( chan *ipc.Chmsg, 1024 )
+	sfs_ch  = make( chan *ipc.Chmsg, 1024 )
 
-	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
+	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch, sfs_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err );
 		os.Exit( 1 )
 	}
+	managers.Log_Restart( version )
 
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// start early so we bind to port quickly, but don't allow requests until late
 	go managers.Res_manager( rmgr_ch, super_cookie ); 				// manage the reservation inventory
@@ -235,6 +239,7 @@ func main() {
 	go managers.Network_mgr( nw_ch, fl_host )						// manage the network graph
 	go managers.Agent_mgr( am_ch )
 	go managers.Fq_mgr( fq_ch, fl_host );
+	go managers.Sfs_manager( sfs_ch )
 
 	my_chan := make( chan *ipc.Chmsg )								// channel and request block to ping net, and then to send all sys up
 	req := ipc.Mk_chmsg( )
@@ -243,7 +248,7 @@ func main() {
 		Block until the network is initialised. We need to do this so that when the checkpoint file is read reservations
 		can be added without missing network pieces.  Even if there is no checkpoint file, or it's empty, blocking
 		prevents reservation rejections because the network graph isn't in working order.  At the moment, with lazy
-		udpating, the block is until we have a physical host map back from the agent world.  This can sometimes take
+		updating, the block is until we have a physical host map back from the agent world.  This can sometimes take
 		a minute or two.
 	*/
 	for {																	// hard block to wait on network readyness
@@ -273,6 +278,7 @@ func main() {
 	}
 
 	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know
+	req.Send_req( sfs_ch, nil, managers.REQ_ALLUP, nil, nil )
 	managers.Set_accept_state( true )								// http doesn't have a control loop like others, so needs this
 
 	wgroup.Add( 1 )					// forces us to block forever since no goroutine gets the group to dec when finished (they dont!)

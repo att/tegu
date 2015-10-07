@@ -724,6 +724,8 @@ func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code 
 func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 	code := http.StatusOK	// response code to return
 	msg  := ""				// data to go in response (assumed to be JSON, if code = StatusOK or StatusCreated)
+	userid := "-"
+//	projid := ""
 
 	authorised := false 				// all mirror commands must have an authentication token
 	if accept_requests  {
@@ -732,8 +734,15 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 
 		if in.Header != nil && in.Header["X-Auth-Tegu"] != nil {
 			auth := in.Header["X-Auth-Tegu"][0]
-			if token_has_osroles( &auth, *mirror_roles ) {	// if token has one of the roles listed in config file
+			uproj := token_has_osroles_with_UserProject( &auth, *mirror_roles )
+			if uproj != "" {	// if token has one of the roles listed in config file
+				parts := strings.Split( uproj, "," )
+				userid = parts[0]
+//				projid = parts[1]
 				authorised = true
+			} else {
+				code = http.StatusUnauthorized
+				msg = "A valid token with a tegu_admin role is required to execute group commands"
 			}
 		}
 	} else {
@@ -779,4 +788,5 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 	}
 	out.WriteHeader(code)
 	out.Write([]byte(msg))
+	httplogger.LogRequest(in, userid, code, len(msg))
 }

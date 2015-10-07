@@ -306,10 +306,10 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 	directly project oriented (e.g. set capacities, graph, etc.), so it is legitimate for
 	a token to be submitted without a leading project/ string.
 */
-func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( has_role bool, err error ) {
+func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( userproj string, err error ) {
 	rtoks := strings.Split( *roles, "," )		// simple tokenising of role list
 
-	has_role = false
+	userproj = ""
 	if strings.Contains( *token, "/" ) {				// assume it's token/project
 		const p int = 1			// order in split tokens (project)
 		const t int = 0			// order in split tokens (actual token)
@@ -317,7 +317,7 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 		toks := strings.Split( *token, "/" )
 		if toks[p] == "" {
 			osif_sheep.Baa( 2, "has_any_role: project/token had empty project" )
-			return false, fmt.Errorf( "project portion of token/project was empty" )
+			return "", fmt.Errorf( "project portion of token/project was empty" )
 		}
 
 		stuff, err := admin.Crack_ptoken( &toks[t], &toks[p], false )			// crack user info based on project and token
@@ -325,14 +325,14 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 			state := gizmos.Map_has_any( stuff.Roles, rtoks )				// true if any from rtoks list matches any in Roles
 			if state {
 				osif_sheep.Baa( 2, "has_any_role: token/project validated for roles: %s", *roles )
-				return true, nil
+				return (stuff.User + "," + stuff.TenantId), nil
 			} else {
 				err = fmt.Errorf( "none matched" );
 			}
 		}
 
 		osif_sheep.Baa( 2, "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
-		return false, fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
+		return "", fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
 	}
 
 	for _, v := range os_refs {
@@ -346,7 +346,8 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 			state := gizmos.Map_has_any( stuff.Roles, rtoks )			// true if any role token matches anything from ostack
 			if state {
 				osif_sheep.Baa( 2, "has_any_role: verified in %s", *pname )
-				return true, nil
+				osif_sheep.Baa( 2, "has_any_role: user=%s, tenant=%s", stuff.User, stuff.TenantId )
+				return (stuff.User + "," + stuff.TenantId), nil
 			}
 		} else {
 			osif_sheep.Baa( 2, "has_any_role: crack failed for project=%s: %s", *pname, err )
@@ -358,7 +359,7 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 	}
 
 	osif_sheep.Baa( 1, "unable to verify role: %s: %s", *roles, err )
-	return false, err
+	return "", err
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
@@ -890,6 +891,22 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					d := msg.Req_data.( *string )
 					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
 					if len( dtoks ) > 1 {
+						// this version returns a boolean
+						t, e := has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
+						msg.Response_data = (t != "")
+						msg.State = e
+					} else {
+						msg.State = fmt.Errorf( "has_any_role: bad input data" )
+						msg.Response_data = false
+					}
+				}
+
+			case REQ_HAS_ANY_ROLE2:							// given a token and list of roles, returns true if any role listed is listed by openstack for the token
+				if msg.Response_ch != nil {
+					d := msg.Req_data.( *string )
+					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
+					if len( dtoks ) > 1 {
+						// this version returns a string
 						msg.Response_data, msg.State = has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
 					} else {
 						msg.State = fmt.Errorf( "has_any_role: bad input data" )
@@ -912,7 +929,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 			case REQ_GET_PHOST_FROM_PORTUUID:                       // try to map a UUID to a phost -- used for mirroring
 				if msg.Response_ch != nil {
 					uuid := msg.Req_data.( *string )
-					for _, v := range os_refs {		
+					for _, v := range os_refs {
 						porthost, err := v.FetchHostInfo( uuid )
 						if err == nil {
 							msg.Response_data = porthost
@@ -920,6 +937,14 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 						} else {
 							msg.State = err
 						}
+					}
+				}
+
+			case REQ_PORTINFO:
+				if msg.Response_ch != nil {
+					outfile := msg.Req_data.( *string )
+					if os_admin != nil {
+						msg.State = os_admin.FetchAllPorts( *outfile )
 					}
 				}
 

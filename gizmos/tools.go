@@ -46,14 +46,7 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
-	//"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
+	"net"
 	"regexp"
 	"strings"
 	"time"
@@ -504,4 +497,11 @@ func IsUUID(s string) bool {
  */
 func IsIPv4(s string) bool {
 	return ipv4_re.MatchString(s)
+}
+
+/*
+	Checks if a string is a valid IPv6 address.
+ */
+func IsIPv6(s string) bool {
+	return net.ParseIP(s) != nil && strings.Index(s, ":") > 0
 }
