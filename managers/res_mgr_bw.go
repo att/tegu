@@ -89,9 +89,6 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 	h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, transport (tcp/udp) ports and expiry are all we need
 	v1, v2 := p.Get_vlan( )									// vlan match criteria for one/both endpoints
 
-	//ip1 := name2ep( h1 )
-	//ip2 := name2ep( h2 )
-
 	plist := p.Get_path_list( )							// each path that is a part of the reservation
 
 	timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
@@ -213,7 +210,6 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 	if ip_src != nil  &&  ip_dest != nil {				// good ip addresses so we're good to go
 		gate := p.Get_gate( )							// get the gate information that is applied for the oneway
 		if gate != nil {								// be parinoid
-			//timestamp := time.Now().Unix() + 16				// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 			freq := Mk_fqreq( rname )						// default flow mod request no match/actions
 
 			freq.Ipv6 = p.Get_matchv6()						// should we force a match on IPv6 rather than IPv4?
@@ -232,9 +228,6 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 				}
 			}
 			freq.Id = rname
-
-			//deprecated ---freq.Match.Ip1 = gate.Get_src().Get_address( pref_v6 )		// should match pledge, but gate is the ultimate authority
-			//fdeprecated ---req.Match.Ip2 = gate.Get_dest().Get_address( pref_v6 )
 
 			freq.Match.Ip1 = gate.Get_src().Get_meta_value( "uuid" )	// fqmgr will convert the uuid to the proper mac
 			freq.Match.Ip2 = gate.Get_dest().Get_meta_value( "uuid" )
