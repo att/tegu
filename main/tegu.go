@@ -190,7 +190,7 @@ func main() {
 	)
 
 	sheep = bleater.Mk_bleater( 1, os.Stderr )
-	sheep.Set_prefix( "main/3.1" )
+	sheep.Set_prefix( "main/4.1" )
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
@@ -245,16 +245,16 @@ func main() {
 	/*
 		Block until the network is initialised. We need to do this so that when the checkpoint file is read reservations
 		can be added without missing network pieces.  Even if there is no checkpoint file, or it's empty, blocking
-		prevents reservation rejections because the network graph isn't in working order.  At the moment, with lazy
-		udpating, the block is until we have a physical host map back from the agent world.  This can sometimes take
-		a minute or two.
+		prevents reservation rejections because the network graph isn't in working order.  With the implmentation of 
+		endpoint uuid the only thing that we wait on now is an initial endpoint list from openstack.  There isn't 
+		a requirement to get information from each physcial host.
 	*/
 	for {																	// hard block to wait on network readyness
 		req.Response_data = 0
 		req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
 		req = <- my_chan													// block until we have a response back
 
-		if req.Response_data.(int) == 2 {									// wait until we have everything that the network needs to build a reservation
+		if req.Response_data.(int) == 1 {									// wait until we have everything that the network needs to build a reservation
 			break
 		}
 

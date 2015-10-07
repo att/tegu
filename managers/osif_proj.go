@@ -798,13 +798,10 @@ func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
 	if *pid == "_all_proj" {
 		for k := range os_refs {
 			if k != "_ref_" {
-				oseps, err := os_refs[k].Map_gw_endpoints( nil )				// get regular VM info
+				oseps, err := os_refs[k].Map_gw_endpoints( nil )				// get router endpoints first
 				if err == nil {
-osif_sheep.Baa( 1, ">>>> fetching endpoints for %s (%d router endponts)", k, len( oseps ) )
-for _, vv := range oseps {
-	osif_sheep.Baa( 1, ">>>> ep gw info for %s  %s", k, vv )
-}
-					oseps, err = os_refs[k].Map_endpoints( oseps )		// get router info, add to previously returned map
+					osif_sheep.Baa( 2, "fetching endpoints for %s (found %d router endponts)", k, len( oseps ) )
+					oseps, err = os_refs[k].Map_endpoints( oseps )				// get regular VM endpoints now
 				}
 				if err == nil {
 					osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", k, len( oseps ) )

@@ -41,8 +41,8 @@ import (
 
 type Gate struct {
 	gsw 	*Switch			// the switch on which the gate is applied (to which src is attached)
-	src		*Host			// source host for flow-mods etc.
-	dest	*Host			// destination host for flow-mods etc. (nil if dest is cross project/external
+	src		*Endpt			// source host for flow-mods etc.
+	dest	*Endpt			// destination host for flow-mods etc. (nil if dest is cross project/external
 	ext_ip	*string			// the external IP address (we won't have dest host if external)
 	bandw	int64			// amount of bandwidth to be used by the gate (if rate limiting)
 	usr		*string			// the project (a.k.a. user) associated so we can manage fences at delete time
@@ -55,7 +55,7 @@ type Gate struct {
 	host to the dest host.  The switch is the switch that the source
 	is attached to and where any gating flow-mods are going to be set.
 */
-func Mk_gate( src *Host, dest *Host, gsw *Switch, bandw int64, usr string ) ( g *Gate ) {
+func Mk_gate( src *Endpt, dest *Endpt, gsw *Switch, bandw int64, usr string ) ( g *Gate ) {
 	g = &Gate {
 		src:		src,
 		dest:		dest,
@@ -145,7 +145,7 @@ func (g *Gate) Dest_is_ext( ) ( bool ) {
 /*
 	Return the source host.
 */
-func (g *Gate) Get_src( ) ( *Host ) {
+func (g *Gate) Get_src( ) ( *Endpt ) {
 	if g != nil {
 		return g.src
 	}
@@ -156,7 +156,7 @@ func (g *Gate) Get_src( ) ( *Host ) {
 /*
 	Return the dest host.
 */
-func (g *Gate) Get_dest( ) ( *Host ) {
+func (g *Gate) Get_dest( ) ( *Endpt ) {
 	if g != nil {
 		return g.dest
 	}
