@@ -165,3 +165,22 @@ func name2ip( pea *string ) ( *string ) {
 func name2ep( pea *string )  ( *string ) {
 	return pull_from_pea_str( pea, true )
 }
+
+
+/*
+	Given an endpoint uuid get network manager to xlate that to a mac address.
+*/
+func epid2mac( epid *string ) ( string ) {
+	var ok bool
+
+	rch := make( chan *ipc.Chmsg )
+	req := ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, rch, REQ_EP2MAC, *epid, nil )
+	req = <-rch
+	mac := ""
+	if mac, ok = req.Response_data.( string ); ok {
+		return mac
+	}
+
+	return ""
+}

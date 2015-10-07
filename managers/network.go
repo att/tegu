@@ -1605,26 +1605,26 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 					case REQ_EP2MAC:										// given an endpoint name return the mac address
 						if req.Response_ch != nil {
 							var ep *gizmos.Endpt
-							//var ep_uuid string
+							var ep_uuid string
 
 							switch epid := req.Req_data.( type ) {
 								case string:
 									ep = act_net.endpts[epid]
-									//ep_uuid = epid
+									ep_uuid = epid
 
 								case *string:
 									ep = act_net.endpts[*epid]
-									//ep_uuid = *epid
+									ep_uuid = *epid
 								
 							}
 
 							if ep != nil {
 								req.Response_data = *(ep.Get_mac())
 							} else {
-								//net_sheep.Baa( 1, ">>>> ep2mac did not map to a known enpoint: %s", ep_uuid )
+								net_sheep.Baa( 2, "ep2mac did not map to a known enpoint: %s", ep_uuid )
 								req.Response_data = ""
 							}
-							//net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
+							net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
 							//net_sheep.Baa( 1, ">>>> xlating ep2mac epdump: %s", ep )
 						}
 
