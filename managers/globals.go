@@ -43,6 +43,7 @@
 				20 Mar 2015 - Added REQ_GET_PHOST_FROM_MAC
 				31 Mar 2015 - Added REQ_GET_PROJ_HOSTS
 				21 Sep 2015 - Added REQ_GET_PHOST_FROM_PORTUUID
+				23 Sep 2015 - Added sfs_ch, sfs_logger, httplogger, REQ_SWITCHINFO
 */
 
 /*
@@ -62,6 +63,8 @@
 
 	Res_manager() - provides the repository for all reservations (Pledges) as well as
 	scheduling of these pledges into the network.
+
+	Sfs_manager() - provide management of the scalable flow steering feature of Tegu.
  */
 package managers
 
@@ -72,6 +75,7 @@ import (
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/config"
+	"github.com/att/gopkgs/http_logger"
 	"github.com/att/gopkgs/ipc"
 
 	"github.com/att/tegu/gizmos"
@@ -148,8 +152,10 @@ const (
 	REQ_GET_PHOST_FROM_PORTUUID // used by mirroring to find the phost that goes with a neutron UUID
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
+	REQ_HAS_ANY_ROLE2			// given token and role list return user,project if token lists any role presented
 	REQ_SETDISC					// set the discount value
 	REQ_DUPCHECK				// check for duplicate (resmgr)
+	REQ_PORTINFO				// request "neutron port-info" from OS manager
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
 )
@@ -209,6 +215,7 @@ var (
 	osif_ch		chan	*ipc.Chmsg		// openstack interface
 	fq_ch		chan	*ipc.Chmsg		// flow and queue manager
 	am_ch		chan	*ipc.Chmsg		// agent manager channel
+	sfs_ch		chan	*ipc.Chmsg		// SFS manager channel
 
 	tklr	*ipc.Tickler				// tickler that will drive periodic things like checkpointing
 
@@ -226,6 +233,9 @@ var (
 	rm_sheep	*bleater.Bleater
 	http_sheep	*bleater.Bleater
 	qm_sheep	*bleater.Bleater
+	sfs_logger	*bleater.Bleater
+
+	httplogger *http_logger.Http_Logger	// access logger for HTTP API requests
 
 	/*
 		http manager needs globals because the http callback doesn't allow private data to be passed
@@ -303,7 +313,7 @@ type Fq_req struct {
 	CAUTION:  this is not implemented as an init() function as we must pass information from the
 			main to here.
 */
-func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
+func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg, sfsch chan *ipc.Chmsg ) (err error)  {
 	err = nil
 
 	def_log_dir := "."
@@ -314,6 +324,7 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 	osif_ch = osifch
 	fq_ch = fqch
 	am_ch = amch
+	sfs_ch = sfsch
 
 	if ver != nil {
 		version = *ver
@@ -356,6 +367,10 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 	}
 
 	return
+}
+
+func Log_Restart( version string ) {
+	tegu_sheep.Baa( 1, "***** Tegu %s restarted. *****", version )
 }
 
 /*

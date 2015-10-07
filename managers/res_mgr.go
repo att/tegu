@@ -58,7 +58,7 @@
 				13 May 2014 (sd) : Changed to support exit dscp value in reservation.
 				18 May 2014 (sd) : Changes to allow cross tenant reservations.
 				19 May 2014 (sd) : Changes to support using destination floating IP address in flow mod.
-				07 Jul 2014 (sd) : Changed to send network manager a delete message when deleteing a reservation
+				07 Jul 2014 (sd) : Changed to send network manager a delete message when deleting a reservation
 						rather than depending on the http manager to do that -- possible timing issues if we wait.
 						Added support for reservation refresh.
 				29 Jul 2014 : Change set user link cap such that 0 is a valid value, and -1 will delete.
@@ -83,20 +83,21 @@
 				01 Feb 2014 : Disables periodic checkpointing as tegu_ha depends on checkpoint files
 						written only when there are updates.
 				09 Feb 2015 : Added timeout-limit to prevent overrun of virtual switch hard timeout value.
-				10 Feb 2015 : Corrected bug -- reporting expired pleges in the get pledge list.
+				10 Feb 2015 : Corrected bug -- reporting expired pledges in the get pledge list.
 				24 Feb 2015 : Added mirroring
 				27 Feb 2015 : Steering changes to work with lazy update.
 				17 Mar 2015 : lite version of resmgr brought more in line with steering.
 				25 Mar 2015 : Reservation pushing only happens after a new queue list is received from netmgr
-						and sent to fq-mgr. The exception is if the hard swtich timeout pops where reservations
+						and sent to fq-mgr. The exception is if the hard switch timeout pops where reservations
 						are pushed straight away (assumption is that queues don't change).
 				20 Apr 2015 : Ensured that reservations are pushed following a cancel request.
 				26 May 2015 : Conversion to support pledge as an interface.
-				01 Jun 2015 : Corrected bug in delete all which was atttempting to delete expired reservations.
+				01 Jun 2015 : Corrected bug in delete all which was attempting to delete expired reservations.
 				15 Jun 2015 : Added oneway support.
 				18 Jun 2015 : Added oneway delete support.
-				25 Jun 2015 : Corrected bug preventing mirror reserations from being deleted (they require an agent
+				25 Jun 2015 : Corrected bug preventing mirror reservations from being deleted (they require an agent
 						command to be run and it wasn't.)
+				30 Aug 2015 : Add checkpoint of groups and flowclassifiers.
 				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
 */
 
@@ -168,7 +169,7 @@ func name2ip( name *string ) ( ip *string ) {
 		return
 	}
 
-	ch := make( chan *ipc.Chmsg )	
+	ch := make( chan *ipc.Chmsg )
 	defer close( ch )									// close it on return
 	msg := ipc.Mk_chmsg( )
 	msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
@@ -186,7 +187,7 @@ func name2ip( name *string ) ( ip *string ) {
 func get_hostinfo( name *string ) ( *string, *string, *string, int ) {
 
 	if name != nil  &&  *name != "" {
-		ch := make( chan *ipc.Chmsg );	
+		ch := make( chan *ipc.Chmsg );
 		req := ipc.Mk_chmsg( )
 		req.Send_req( nw_ch, ch, REQ_HOSTINFO, name, nil )		// get host info string (mac, ip, switch)
 		req = <- ch
@@ -259,7 +260,7 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 
 
 	Push table 9x flow-mods. The flowmods we toss into the 90 range of
-	tables generally serve to mark metadata in a packet since metata
+	tables generally serve to mark metadata in a packet since metadata
 	cannot be marked prior to a resub action (flaw in OVS if you ask me).
 
 	Marking metadata is needed so that when one of our f-mods match we can
@@ -274,7 +275,7 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 func table9x_fmods( rname *string, host string, table int, meta string, cookie int ) {
 		fq_data := Mk_fqreq( rname )							// f-mod request with defaults (output==none)
 		fq_data.Table = table
-		fq_data.Cookie = cookie	
+		fq_data.Cookie = cookie
 		fq_data.Expiry = 0										// never expire
 
 		// CAUTION: fq_mgr generic fmod needs to be changed and when it does these next three lines will need to change too
@@ -283,7 +284,7 @@ func table9x_fmods( rname *string, host string, table int, meta string, cookie i
 		fq_data.Swid = &dup_str
 
 		fq_data.Action.Meta = &meta								// sole purpose is to set metadata
-		
+
 		msg := ipc.Mk_chmsg()
 		msg.Send_req( fq_ch, nil, REQ_GEN_FMOD, fq_data, nil )			// no response right now -- eventually we want an asynch error
 }
@@ -326,6 +327,8 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 	var (
 		bw_push_count	int = 0
 		st_push_count	int = 0
+		mir_push_count	int = 0
+		ch_push_count	int = 0
 		pend_count	int = 0
 		pushed_count int = 0
 	)
@@ -338,6 +341,9 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 					switch (*p).(type) {
 						case *gizmos.Pledge_mirror: 				// mirror requests need to be undone when they become inactive
 							undo_mirror_reservation( p, rname, ch )
+
+						case *gizmos.Chain: 				// chain requests need to be undone when they become inactive
+							undo_sfs_chain_reservation( p, ch )
 					}
 
 					(*p).Reset_pushed()
@@ -352,15 +358,19 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 						case *gizmos.Pledge_bw:
 							bw_push_count++
 							bw_push_res( p, &rname, ch, hto_limit, alt_table, pref_v6 )
-	
+
 						case *gizmos.Pledge_steer:
 							st_push_count++
 							push_st_reservation( p, rname, ch, hto_limit )
-	
-						case *gizmos.Pledge_mirror:
-							push_mirror_reservation( p, rname, ch )
-					}
 
+						case *gizmos.Pledge_mirror:
+							mir_push_count++
+							push_mirror_reservation( p, rname, ch )
+
+						case *gizmos.Chain:
+							ch_push_count++
+							push_sfs_chain_reservation( p, ch )
+					}
 					pushed_count++
 				} else {					// stil pending
 					pend_count++
@@ -369,28 +379,28 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 		}
 	}
 
-	if st_push_count > 0 || bw_push_count > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
-		rm_sheep.Baa( 1, "push_reservations: %d bandwidth, %d steering, %d pending, %d already pushed", bw_push_count, st_push_count, pend_count, pushed_count )
+	if (st_push_count+bw_push_count+mir_push_count+ch_push_count) > 0 || rm_sheep.Would_baa( 3 ) {			// bleat if we pushed something, or if higher level is set in the sheep
+		rm_sheep.Baa( 1, "push_reservations: %d bandwidth, %d steering, %d mirror, %d chains, %d pending, %d already pushed", bw_push_count, st_push_count, mir_push_count, ch_push_count, pend_count, pushed_count )
 	}
 
 	return pushed_count
 }
 
 /*
-	Turn pause mode on for all current reservations and reset their push flag so thta they all get pushed again.
+	Turn pause mode on for all current reservations and reset their push flag so that they all get pushed again.
 */
 func (i *Inventory) pause_on( ) {
 	for _, p := range i.cache {
-		(*p).Pause( true )					// also reset the push flag		
+		(*p).Pause( true )					// also reset the push flag
 	}
 }
 
 /*
-	Turn pause mode off for all current reservations and reset their push flag so thta they all get pushed again.
+	Turn pause mode off for all current reservations and reset their push flag so that they all get pushed again.
 */
 func (i *Inventory) pause_off( ) {
 	for _, p := range i.cache {
-		(*p).Resume( true )					// also reset the push flag		
+		(*p).Resume( true )					// also reset the push flag
 	}
 }
 
@@ -400,7 +410,7 @@ func (i *Inventory) pause_off( ) {
 */
 func (i *Inventory) reset_push() {
 	for _, p := range i.cache {
-		(*p).Reset_pushed( )	
+		(*p).Reset_pushed( )
 	}
 }
 
@@ -410,14 +420,14 @@ func (i *Inventory) reset_push() {
 	seconds).
 
 	Because of timestamp limitations on the file system, it is possible for the start process to select the
-	wrong checkpoint file if more than one checkpoint files were created within a second of each other. To 
-	prevent problems this function will only write a checkpoint if the last one was written more than two 
-	seconds ago (to avoid clock issues and the nano timer). If it hasn't been longe enough, this function 
-	returns true (retry) and the calling function should call again (probably after a tickler pop) to 
-	issue a checkpoint.  There is no need to "queue" anything because if several checkpoint requests are 
-	made in the same second, then all of them will be captured the next time a write is allowed and the 
-	inventory is parsed.  If the checkpoint can be written, then false is returned.  In either case, 
-	the time that the last checkpoint file was written is also returned. 
+	wrong checkpoint file if more than one checkpoint files were created within a second of each other. To
+	prevent problems this function will only write a checkpoint if the last one was written more than two
+	seconds ago (to avoid clock issues and the nano timer). If it hasn't been longe enough, this function
+	returns true (retry) and the calling function should call again (probably after a tickler pop) to
+	issue a checkpoint.  There is no need to "queue" anything because if several checkpoint requests are
+	made in the same second, then all of them will be captured the next time a write is allowed and the
+	inventory is parsed.  If the checkpoint can be written, then false is returned.  In either case,
+	the time that the last checkpoint file was written is also returned.
 */
 func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 
@@ -438,7 +448,7 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 	}
 
 	for key, p := range i.cache {
-		s := (*p).To_chkpt()		
+		s := (*p).To_chkpt()
 		if s != "expired" {
 			fmt.Fprintf( i.chkpt, "%s\n", s ) 					// we'll check the overall error state on close
 		} else {
@@ -447,6 +457,15 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 				delete( i.cache, key )
 			}
 		}
+	}
+	// Write the non-pledge Groups and FlowClassifiers to the checkpoint
+	for _, p := range gizmos.PortGroups {
+		s := (*p).To_chkpt()
+		fmt.Fprintf( i.chkpt, "%s\n", s )
+	}
+	for _, p := range gizmos.Classifiers {
+		s := (*p).To_chkpt()
+		fmt.Fprintf( i.chkpt, "%s\n", s )
 	}
 
 	ckpt_name, err := i.chkpt.Close( )
@@ -460,9 +479,10 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 }
 
 /*
-	Opens the filename passed in and reads the reservation data from it. The assumption is that records in
-	the file were saved via the write_chkpt() function and are json pledges.  We will drop any that
-	expired while 'sitting' in the file.
+	Opens the filename passed in and reads the reservation data from it. The assumption is
+	that records in the file were saved via the write_chkpt() function and are JSON pledges
+	or other serializable objects.  We will drop any pledges that expired while 'sitting'
+	in the file.
 */
 func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	var (
@@ -484,81 +504,88 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	defer f.Close( )
 
 	br := bufio.NewReader( f )
-	for ; err == nil ; {
+	for err == nil {
 		rec, err = br.ReadString( '\n' )
 		if err == nil  {
 			nrecs++
+			if rec[0:5] == "ucap:" {
+				toks := strings.Split( rec, " " )
+				if len( toks ) == 3 {
+					i.add_ulcap( &toks[1], &toks[2] )
+				}
+			} else {
+				ptr, err2 := gizmos.UnserializeObject( &rec )
+				if err2 != nil {
+					rm_sheep.Baa( 0, "CRI: %s", err2 )
+					err = err2
+					return			// quick escape
+				}
+				var ok bool
+				p, ok = (*ptr).(*gizmos.Pledge)
+				if ok && (*p).Is_expired() {
+					rm_sheep.Baa( 1, "resmgr: load_chkpt: ignored expired pledge: %s", (*p).String() )
+				} else {
+					switch sp := (*ptr).(type) {									// work on specific pledge type, but pass the Pledge interface to add()
+						case *gizmos.Pledge_mirror:
+							err = i.Add_res( sp )								// assume we can just add it back in as is
 
-			switch rec[0:5] {
-				case "ucap:":
-					toks := strings.Split( rec, " " )
-					if len( toks ) == 3 {
-						i.add_ulcap( &toks[1], &toks[2] )
-					}
+						case *gizmos.Pledge_steer:
+							rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
 
-				default:
-					p, err = gizmos.Json2pledge( &rec )			// convert any type of json pledge to Pledge
-		
-					if err == nil {
-						if  (*p).Is_expired() {
-							rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", (*p).String() )
-						} else {
-							switch sp := (*p).(type) {									// work on specific pledge type, but pass the Pledge interface to add()
-								case *gizmos.Pledge_mirror:
-									err = i.Add_res( p )								// assume we can just add it back in as is
+						case *gizmos.Pledge_bwow:
+							h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
+							push_block := h2 == nil
+							update_graph( h1, push_block, push_block )			// dig h1 info; push to netmgr if h2 isn't known and block on response
+							if h2 != nil {
+								update_graph( h2, true, true )					// dig h2 data and push to netmgr blocking for a netmgr response
+							}
 
-								case *gizmos.Pledge_steer:
-									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
+							req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
+							req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, sp, nil )
+							req = <- my_ch										// should be OK, but the underlying network could have changed
 
-								case *gizmos.Pledge_bwow:
-									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
-									push_block := h2 == nil
-									update_graph( h1, push_block, push_block )			// dig h1 info; push to netmgr if h2 isn't known and block on response
-									if h2 != nil {
-										update_graph( h2, true, true )					// dig h2 data and push to netmgr blocking for a netmgr response
-									}
-			
-									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
-									req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, sp, nil )
-									req = <- my_ch										// should be OK, but the underlying network could have changed
-					
-									if req.Response_data != nil {
-										gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
-										sp.Set_gate( gate )
-										rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
-										err = i.Add_res( p )
-									} else {
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
-									}
+							if req.Response_data != nil {
+								gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
+								sp.Set_gate( gate )
+								rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
+								err = i.Add_res( p )
+							} else {
+								rm_sheep.Baa( 0, "ERR: resmgr: load_chkpt: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
+							}
 
-								case *gizmos.Pledge_bw:
-									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
-									update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
-									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
-			
-									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-									req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
-									req = <- my_ch										// should be OK, but the underlying network could have changed
-					
-									if req.Response_data != nil {
-										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-										sp.Set_path_list( path_list )
-										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
-										err = i.Add_res( p )
-									} else {
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
-									}
+						case *gizmos.Pledge_bw:
+							h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
+							update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
+							update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
 
-								default:
-									rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )
+							req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
+							req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
+							req = <- my_ch										// should be OK, but the underlying network could have changed
 
-							}						// end switch on specific pledge type
-						}
-					} else {
-						rm_sheep.Baa( 0, "CRI: %s", err )
-						return			// quickk escape
-					}
-			}				// outer switch
+							if req.Response_data != nil {
+								path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+								sp.Set_path_list( path_list )
+								rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
+								err = i.Add_res( p )
+							} else {
+								rm_sheep.Baa( 0, "ERR: resmgr: load_chkpt: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
+							}
+
+						case *gizmos.Chain:
+							err = i.Add_res( sp )								// assume we can just add it back in as is
+							gizmos.Chains[sp.Id] = sp
+
+						case *gizmos.FlowClassifier:
+							gizmos.Classifiers[sp.Id] = sp
+
+						case *gizmos.PortGroup:
+							gizmos.PortGroups[sp.Id] = sp
+
+						default:
+							rm_sheep.Baa( 0, "rmgr/load_chkpt: unrecognised pledge type" )
+					}	// end switch on specific pledge type
+				}
+			}
 		}
 	}
 
@@ -572,7 +599,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 
 /*
 	Given a host name, return all pledges that involve that host as a list.
-	Currently no error is detected and the list may be nill if there are no pledges.
+	Currently no error is detected and the list may be nil if there are no pledges.
 */
 func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error ) {
 
@@ -609,13 +636,13 @@ func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 		inv.ulcap_cache[*name] = val
 
 		req := ipc.Mk_chmsg( )
-		req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the netwok environment
+		req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the network environment
 
 	} else {
 		if val == -1 {
 			delete( inv.ulcap_cache, *name )
 			req := ipc.Mk_chmsg( )
-			req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the netwok environment
+			req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the network environment
 		} else {
 			rm_sheep.Baa( 1, "user link capacity not set %d is out of range (1-100)", val )
 		}
@@ -638,7 +665,7 @@ func Mk_inventory( ) (inv *Inventory) {
 
 /*
 	Stuff the pledge into the cache erroring if the pledge already exists.
-	Expeect either a Pledge, or a pointer to a pledge.
+	Expect either a Pledge, or a pointer to a pledge.
 */
 func (inv *Inventory) Add_res( pi interface{} ) (err error) {
 	var (
@@ -681,7 +708,7 @@ func (inv *Inventory) Add_res( pi interface{} ) (err error) {
 	'root' as you will, which allows access to all reservations.
 */
 func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge, state error) {
-	
+
 	state = nil
 	p = inv.cache[*name]
 	if p == nil {
@@ -744,7 +771,7 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 /*
 	Looks for the named reservation and deletes it if found. The cookie must be either the
 	supper cookie, or the cookie that the user supplied when the reservation was created.
-	Deletion is affected by reetting the expiry time on the pledge to now + a few seconds.
+	Deletion is affected by resetting the expiry time on the pledge to now + a few seconds.
 	This will cause a new set of flow-mods to be sent out with an expiry time that will
 	take them out post haste and without the need to send "delete" flow-mods out.
 
@@ -762,12 +789,22 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 		state = nil
 
 		switch p := (*gp).(type) {
+			case *gizmos.Chain:
+				// !!cannot fallthrough in type switch!!  Another reason I dislike Go
+				if p.Is_expired() {
+					// Expired already, just remove it.
+					delete( inv.cache, *p.Get_id() )
+				} else {
+					p.Set_expiry( time.Now().Unix() )					// expire the chain NOW
+					p.Set_pushed()										// need this to force undo to occur
+				}
+
 			case *gizmos.Pledge_mirror:
 				p.Set_expiry( time.Now().Unix() )					// expire the mirror NOW
 				p.Set_pushed()						// need this to force undo to occur
 
 			case *gizmos.Pledge_bw, *gizmos.Pledge_bwow:			// network handles either type
-				ch := make( chan *ipc.Chmsg )	
+				ch := make( chan *ipc.Chmsg )
 				defer close( ch )									// close it on return
 				req := ipc.Mk_chmsg( )
 				req.Send_req( nw_ch, ch, REQ_DEL, p, nil )			// delete from the network point of view
@@ -795,7 +832,7 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 	)
 
 	ndel = 0
-	
+
 	plist = make( []*string, len( inv.cache ) )			// build a list so we can safely remove from the map
 	for _, pledge := range inv.cache {
 		if ! (*pledge).Is_expired( ) {
@@ -809,7 +846,7 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 		rm_sheep.Baa( 2, "delete all attempt to delete: %s", *pname )
 		err := inv.Del_res( pname,  cookie )
 		if err == nil {
-			ndel++;
+			ndel++
 			rm_sheep.Baa( 1, "delete all deleted reservation %s", *pname )
 		} else {
 			rm_sheep.Baa( 1, "delete all skipped reservation %s", *pname )
@@ -825,7 +862,7 @@ func (inv *Inventory) Del_all_res( cookie *string ) ( ndel int ) {
 	Pulls the reservation from the inventory. Similar to delete, but not quite the same.
 	This will clone the pledge. The clone is expired and left in the inventory to force
 	a reset of flowmods. The network manager is sent a request to delete the queues
-	assocaited with the path and the path is removed from the original pledge. The orginal
+	associated with the path and the path is removed from the original pledge. The original
 	pledge is returned so that it can be used to generate a new set of paths based on the
 	hosts, expiry and bandwidth requirements of the initial reservation.
 
@@ -851,9 +888,9 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 
 				inv.cache[*name] = nil								// yank original from the list
 				delete( inv.cache, *name )
-				pldg.Set_path_list( nil )							// no path list for this pledge 	
+				pldg.Set_path_list( nil )							// no path list for this pledge
 
-				ch := make( chan *ipc.Chmsg )	
+				ch := make( chan *ipc.Chmsg )
 				defer close( ch )									// close it on return
 				req := ipc.Mk_chmsg( )
 				req.Send_req( nw_ch, ch, REQ_DEL, cp, nil )			// delete from the network point of view
@@ -877,7 +914,7 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 //---- res-mgr main goroutine -------------------------------------------------------------------------------
 
 /*
-	Executes as a goroutine to drive the resevration manager portion of tegu.
+	Executes as a goroutine to drive the reservation manager portion of tegu.
 */
 func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
@@ -981,7 +1018,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
 		msg = <- my_chan					// wait for next message
-		
+
 		rm_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
 		switch msg.Msg_type {
 			case REQ_NOOP:			// just ignore
@@ -1039,7 +1076,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				msg.State = inv.load_chkpt( data )
 				msg.Response_data = nil
 				rm_sheep.Baa( 1, "checkpoint file loaded" )
-	
+
 			case REQ_PAUSE:
 				msg.State = nil							// right now this cannot fail in ways we know about
 				msg.Response_data = ""
@@ -1066,7 +1103,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
 					now := time.Now().Unix()
 					if now > res_refresh {
-						rm_sheep.Baa( 2, "refreshing all reservations" )	
+						rm_sheep.Baa( 2, "refreshing all reservations" )
 						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
 						res_refresh = now + int64( rr_rate )		// push everything again in an hour
 
@@ -1074,6 +1111,9 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 					}
 				}
 
+			case REQ_PUSHNOW:							// force unpushed reservations to be pushed now
+				rm_sheep.Baa( 2, "forcibly pushing reservations" )
+				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// force a push of all
 
 			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
 				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
@@ -1104,7 +1144,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 
 				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
-				
+
 			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 				if msg.Response_ch != nil {
 					msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
@@ -1123,7 +1163,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 
 		rm_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )
 		if msg.Response_ch != nil {			// if a response channel was provided
-			msg.Response_ch <- msg			// send our result back to the requestor
+			msg.Response_ch <- msg			// send our result back to the requester
 		}
 	}
 }

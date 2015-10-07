@@ -1,0 +1,190 @@
+.\"
+.\" ---------------------------------------------------------------------------
+.\"   Copyright (c) 2013-2015 AT&T Intellectual Property
+.\"
+.\"   Licensed under the Apache License, Version 2.0 (the "License");
+.\"   you may not use this file except in compliance with the License.
+.\"   You may obtain a copy of the License at:
+.\"
+.\"       http://www.apache.org/licenses/LICENSE-2.0
+.\"
+.\"   Unless required by applicable law or agreed to in writing, software
+.\"   distributed under the License is distributed on an "AS IS" BASIS,
+.\"   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+.\"   See the License for the specific language governing permissions and
+.\"   limitations under the License.
+.\" ---------------------------------------------------------------------------
+.\"
+
+.\"
+.\"		tegu_xapi Manual Page
+.\"
+.\"     Date:		03 Oct 2015
+.\"		Author:		Robert Eby
+.\"
+.\"     Mods:		03 Oct 2015 - Created
+.\"
+.TH TEGU_XAPI 1 "Tegu Manual"
+.CM 4
+.SH NAME
+tegu_xapi \- the Tegu eXtended API command line interface
+.SH SYNOPSIS
+\fBtegu_xapi\fP command [options] [objectid]
+
+.SH DESCRIPTION
+\fItegu_xapi(1)\fR provides a command line interface to the running Tegu system in an
+OpenStack cloud.
+It is specific to the extended API related to scalable flow steering, and is used to
+create, delete, list, show, and update the three types of objects (groups, flow classifiers,
+and chains) used for scalable flow steering.
+It gathers command arguments, does some preliminary validation upon them, and then runs
+the command by sending the command to Tegu's ReST HTTP API.
+\fItegu_xapi\fP will normally be run on the same machine as the running Tegu system,
+however it can be run on a different machine if the \fB-h\fP option is used.
+.P
+Groups are used to define sets of neutron ports that are to be used interchangably (for
+example, as \fImiddleboxes\fP in a flow steering chain.
+Groups are a logical construct, and do not have a presence in the network until a chain
+that uses the group becomes active.
+.P
+Flow classifiers are used to specify what types of traffic should be steered into a chain.
+.P
+Chains combine groups and flow classifiers along with a scheduled execution period, in order to
+define what traffic should be routed through which sets of boxes at what time.
+.P
+For details on the Tegu HTTP API, look at \fItegu(8)\fP.
+
+.SH COMMAND LINE OPTIONS
+\fItegu_xapi\fR interprets the following options:
+.\" ==========
+.TP 8
+.B \-h or \--host host:port
+Specify the host and port to use to contact Tegu, when Tegu is running on a different
+host than localhost:29444
+.TP 8
+.B \-I or \--id
+Print only object ID's from the returned JSON, rather than the full JSON (in create and list operations).
+This is useful if a newly created object must be referenced in a subsequent operation.
+.TP 8
+.B \-t or \--token token
+Provide the keystone token to be passed to Tegu.
+If not provided, the \fIopenstack\fP command will be run to generate the token, which
+means that you must have previously installed the \fIpython-openstackclient\fP package.
+.TP 8
+.B \-v or \--verbose
+Display the \fIcurl\fP commands used to talk to Tegu.
+.TP 8
+.B \--help
+Print a usage message.
+.TP 8
+.B \--name name
+Specify a name for an object in create-* and update-* commands.
+.TP 8
+.B \--description descr
+Specify text to describe an object in create-* and update-* commands.
+.TP 8
+.B \--start-time time
+Specify a start time for a chain-create or chain-update command.  
+.TP 8
+.B \--end-time time
+Specify an end time for a chain-create or chain-update command.
+.TP 8
+.B \--classifiers list
+Specify a list of flow classifier IDs for a chain-create or chain-update command.
+.TP 8
+.B \--groups list
+Specify a list of group IDs for a chain-create or chain-update command.
+.TP 8
+.B \--protocol proto
+Specify the (numeric) IP protocol for an fc-create command.
+.TP 8
+.B \--source-port port
+Specify the (numeric) source port for an fc-create command.
+.TP 8
+.B \--destination-port port
+Specify the (numeric) destination port for an fc-create command.
+.TP 8
+.B \--source-ip-address ip
+Specify the source IP address for an fc-create command.
+.TP 8
+.B \--destination-ip-address ip
+Specify the destination IP address for an fc-create command.
+.TP 8
+.B \--subnet-id subnet
+Specify the subnet ID to use for group-create
+.TP 8
+.B \--port-specs specs
+Specify the port specifications to use for group-create or group-update commands.
+
+.SH COMMANDS
+The command that Tegu should run is one of the following.
+
+.SS Group Commands
+.TP 8
+.B group-create
+TODO fill in
+.TP 8
+.B group-update
+TODO fill in
+.TP 8
+.B group-show
+Show details about the group identified by \fIobjectid\fP.
+The group is displayed in JSON form.
+.TP 8
+.B group-delete
+TODO fill in
+.TP 8
+.B group-list
+TODO fill in
+
+.SS Flow Classifier Commands
+.TP 8
+.B fc-create
+TODO fill in
+.TP 8
+.B fc-update
+TODO fill in
+.TP 8
+.B fc-show
+Show details about the flow classifier identified by \fIobjectid\fP.
+The flow classifier is displayed in JSON form.
+.TP 8
+.B fc-delete
+TODO fill in
+.TP 8
+.B fc-list
+TODO fill in
+
+.SS Chaining Commands
+.TP 8
+.B chain-create
+TODO fill in
+.TP 8
+.B chain-update
+TODO fill in
+.TP 8
+.B chain-show
+Show details about the chain identified by \fIobjectid\fP.
+The chain is displayed in JSON form.
+.TP 8
+.B chain-delete
+TODO fill in
+.TP 8
+.B chain-list
+TODO fill in
+
+.SH ENVIRONMENT
+.TP 15
+OS_TENANT_NAME
+.TP
+OS_USERNAME
+.TP
+OS_PASSWORD
+These OpenStack environment variables specify the tenant, user name, and password to use
+when asking Keystone to generate a token.
+.TP
+OS_AUTH_URL
+This OpenStack environment variables specifies the URL to use when contacting Keystone.
+
+.SH SEE ALSO
+curl(1), rjprt(1), tegu_req(1), tegu.cfg(5), tegu(8)
