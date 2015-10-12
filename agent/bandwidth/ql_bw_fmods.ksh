@@ -70,6 +70,7 @@
 #				28 May 2015 - Added match vlan support (-V)
 #				18 Jun 2015 - Better handling of -q allowing HTB shutoff to be affected completely by
 #								agent scripts (Tegu still thinks it's being set!)
+#				09 Oct 2015 - Added ability to xlate a neutron uuid into a mac/vlan address.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -86,6 +87,17 @@ function usage
 	echo "  -6 forces IPv6 address matching to be set"
 }
 
+# accept either a uuid or mac and returns the associated mac if it's a uuid or the mac passed in
+function uuid2mac 
+{
+	if [[ $1 == *":"* ]]		# we assume that a uuid does not have colons
+	then
+		echo "$1 -1"			# no vlan if mac is passed in
+		return
+	fi
+
+	ql_suss_ovsd | grep $1 | awk '{ print $5, $7 }'
+}
 
 # ----------------------------------------------------------------------------------------------------------
 
@@ -116,7 +128,7 @@ do
 	case $1 in
 		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod (outbound only).
 		-b)		mt_base="$2"; shift;;
-		-d)		rmac="$2"; shift;;
+		-d)		uuid2mac "$2" | read rmac dmvlan; shift;;
 		-D)		ex_local=0;;								# external IP is "associated" with the rmac (-d) address
 		-E)		exip="$2"; shift;;
 		-h)		host="-h $2"; shift;;
@@ -126,7 +138,7 @@ do
 		-p)		pri_base=5; proto="-p $2"; shift;;		# source proto:port priority must increase to match over more generic f-mods
 		-P)		pri_base=5; proto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
 		-q)		queue="-q $2"; shift;;					# soon to change to meter
-		-s)		lmac="$2"; shift;;
+		-s)		uuid2mac "$2" | read lmac smvlan; shift;;
 		-S)		ex_local=1;;								# external IP is "associaetd" with the lmac (-s) address.
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		odscp="-T $2"; shift;;
@@ -146,6 +158,28 @@ do
 
 	shift
 done
+
+set -x
+if (( set_vlan ))
+then
+	if [[ -z $vlan ]]
+	then
+		if (( smvlan > 0 ))
+		then
+			vp_base=5
+			match_vlan="-v $smvlan"
+		else
+			if (( dmvlan > 0 ))
+			then
+				vp_base=5
+				match_vlan="-v $dmvlan"
+			else
+				logit "vlan not captured for either source or dest: $smvlan/$dmvlan"
+			fi
+		fi
+	fi
+fi
+set +x
 
 # CAUTION:  this is confusing, so be careful (see notes in flower box at top)
 if [[ -n $exip ]]						# need to set up matching for external

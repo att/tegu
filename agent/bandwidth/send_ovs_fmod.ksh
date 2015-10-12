@@ -486,7 +486,8 @@ do
 
 				-t)	match+="tun_id=$2 "; shift;;		# id[/mask]
 				-T) match+="nw_tos=$2 "; shift;;
-				-v)	match+="vlan_tci=${2} "; shift;; 			# vlan[/mask]
+				-v)	match+-"dl_vlan=$2"; shift;;
+					#match+="vlan_tci=${2} "; shift;; 			# tci_vlan[/mask]
 
 				*)	echo "unrecognised match option: $1  [FAIL]"
 					exit 1

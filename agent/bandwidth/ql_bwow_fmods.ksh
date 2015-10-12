@@ -51,6 +51,7 @@
 # 	Author: 	E. Scott Daniels
 #
 #	Mods:		17 Jun 2015 - Corrected handling of queue value when 0.
+#				09 Oct 2015 - Added ability to accept a neutron uuid for translation to mac.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -65,6 +66,18 @@ function usage
 	echo "usage: $argv0 [-X] # delete all"
 	echo ""
 	echo "  -6 forces IPv6 address matching to be set"
+}
+
+# accept either a uuid or mac and returns the associated mac if it's a uuid or the mac passed in
+function uuid2mac 
+{
+	if [[ $1 == *":"* ]]		# we assume that a uuid does not have colons
+	then
+		echo "$1 -1"			# no vlan if mac is passed in
+		return
+	fi
+
+	ql_suss_ovsd | grep $1 | awk '{ print $5, $7 }'
 }
 
 
@@ -93,14 +106,16 @@ while [[ $1 == -* ]]
 do
 	case $1 in
 		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod
-		-d)		dmac="-d $2"; shift;;					# dest (remote) mac address (could be missing)
+		#-d)		dmac="-d $2"; shift;;					# dest (remote) mac address (could be missing)
+		-d)		uuid2mac "$2" | read dmac mvlan; shift;;
 		-E)		exip="$2"; shift;;
 		-h)		host="-h $2"; shift;;
 		-n)		forreal="-n";;
 		-p)		pri_base=5; sproto="-p $2"; shift;;		# source proto:port priority must increase to match over more generic f-mods
 		-P)		pri_base=5; dproto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
 		-q)		queue="$2"; shift;;						# ignored until HTB replacedment is found
-		-s)		smac="$2"; shift;;						# source (local) mac address
+		#-s)		smac="$2"; shift;;						# source (local) mac address
+		-s)		uuid2mac "$2" | read smac mvlan; shift;;
 		-S)		sip="-S $2"; shift;;					# local IP needed if local port (-p) is given
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		odscp="-T $2"; shift;;
@@ -124,6 +139,14 @@ if [[ -z $smac ]]
 then
 	logit "must have source mac address in order to generate oneway flow-mods   [FAIL]"
 	exit 1
+fi
+
+if [[ -n $mvlan && -z "$vlan"]]			# a vlan was generated (maybe) for src or dest mac, and no -V to override
+then
+	if (( mvlan > 0 ))
+	then
+		match_vlan="-v $mvlan"
+	fi
 fi
 
 if [[ -n $exip ]]
