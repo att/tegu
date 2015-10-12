@@ -272,13 +272,6 @@ func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 	}
 
 /*
-	rch := make( chan *ipc.Chmsg )
-	req := ipc.Mk_chmsg( )
-	req.Send_req( nw_ch, rch, REQ_EP2MAC, *data.Match.Ip1, nil )
-	req = <-rch
-	mac1 := ""
-	if mac1, ok = req.Response_data.( string ); ! ok {
-*/
 	mac1 := epid2mac( data.Match.Ip1 )
 	if mac1 == "" {
 		fq_sheep.Baa( 1, "could not map endpoint id (1) to mac: %s", *data.Match.Ip1 )
@@ -286,14 +279,11 @@ func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 	}
 	data.Match.Smac = &mac1
 	fq_sheep.Baa( 2, "src mac address mapped: %s ==> %s", *data.Match.Ip1, mac1 )
-
-/*
-	req = ipc.Mk_chmsg( )
-	req.Send_req( nw_ch, rch, REQ_EP2MAC, *data.Match.Ip2, nil )
-	req = <-rch
-	if mac2, ok = req.Response_data.( string ); ! ok {
 */
-	mac2 := epid2mac( data.Match.Ip2 )
+	data.Match.Smac = data.Match.Ip1				// we send the source endpoint uuid to let agent convert and find vlan
+	fq_sheep.Baa( 2, "src endpoing: %s", *data.Match.Smac )
+
+	mac2 := epid2mac( data.Match.Ip2 )				// must convert the 'remote' endpoint to a real mac as agent on phost won't have uuid knowledge
 	if mac2 == "" {
 		fq_sheep.Baa( 1, "could not map endpoint id (2) to mac: %s", *data.Match.Ip2 )
 		return
@@ -307,7 +297,7 @@ func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 	}
 	
 
-	//FIXME:  must add a way to pass IP addresses on match
+	//FIXME:  do we? must add a way to pass IP addresses on match
 
 	//data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
 	//data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
