@@ -90,6 +90,7 @@
 #				28 May 2015 - Added support for inline meta setting and learn actions.
 #				16 Jun 2015 - Allows udp4, udp6, tcp4 and tcp6 to avoid both -P|p and -4|6 options
 #								(steering where there is no IP address to suss type from).
+#				13 Oct 2015 - Change vlan to straight dl_vlan not tci.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -135,7 +136,7 @@ function help
 		-S network-layer-src                (ip)
 		-t tunnel-id[/mask]
 		-T type-of-service-value            (diffserv)
-		-v vlan-tci
+		-v vlan
 		
 	Action Options:    (causes these fields to be changed where values are involved)
 		-b output packet on the receipt port (bounce back)
@@ -156,7 +157,7 @@ function help
 		-S network-layer-src                (ip)
 		-t tunnel-id
 		-T n                                (diffserv/type of service)
-		-v vlan-tci
+		-v vlan
 		-V [mac]                            (strip vlan, if mac given, then strips only if mac is not a trunk
 											if mac not given, then it does a hard strip; user beware)
 	
@@ -486,7 +487,8 @@ do
 
 				-t)	match+="tun_id=$2 "; shift;;		# id[/mask]
 				-T) match+="nw_tos=$2 "; shift;;
-				-v)	match+-"dl_vlan=$2"; shift;;
+				-v)	
+					match+="dl_vlan=${2} "; shift;; 			# tci_vlan[/mask]
 					#match+="vlan_tci=${2} "; shift;; 			# tci_vlan[/mask]
 
 				*)	echo "unrecognised match option: $1  [FAIL]"
