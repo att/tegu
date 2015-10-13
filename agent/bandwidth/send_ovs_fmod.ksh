@@ -90,6 +90,8 @@
 #				28 May 2015 - Added support for inline meta setting and learn actions.
 #				16 Jun 2015 - Allows udp4, udp6, tcp4 and tcp6 to avoid both -P|p and -4|6 options
 #								(steering where there is no IP address to suss type from).
+#				12 Oct 2015 - No longer test for br-rl presensnce since it has (at least temporarily)
+#								been removed as HTB queues were causing damage.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -368,7 +370,7 @@ type=""						# no specific type to match (unless -S or -D given) -4, -6 or -a ca
 mode="options"
 output="normal"
 match=""
-ignore_irl=0				# -I will set to 1 and we'll not require br-rl and veth to set fmods on br-int
+ignore_irl=1				# -I will set to 0 and we'll require br-rl and veth to set fmods on br-int
 rhost=""					# parm for commands like ovs_sp2uuid that need to know; default to this host
 thost="$(hostname)"
 priority=200

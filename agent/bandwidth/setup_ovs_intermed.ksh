@@ -127,6 +127,7 @@
 #				28 Aug 2015 - Added timeouts to ovs-vsctl commands since they seem to wedge on occasion.
 #				31 Aug 2015 - Prevent setting iptables rules in name spaces other than routers.
 #				02 Sep 2015 - Extracted the iptables setup (now in ql_setup_ipt) and replaed with a call.
+#				12 Oct 2015 - Explicitly delete the br-rl setup if -I is not given.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -218,7 +219,7 @@ verbose=0
 forreal=""
 allow_iptables=1		# -T turns this off
 allow_reset=1			# -D sets to 0 to prevent writing the dscp reset flowmods
-allow_irl=1				# -I turns off irl configuration
+allow_irl=0				# -I turns on irl configuration
 allow_irl_meta=0		# -M turns on (not needed once VLAN trunking, bw_fmods, are in use)
 delete_data=0
 						# both host values set when -h given on the command line
@@ -251,7 +252,7 @@ do
 			fi
 			;;
 
-		-I)	allow_irl=0;;
+		-I)	allow_irl=1;;
 
 		-l)  log_file=$2; shift;;
 		-m)	min=$( expand $2 ); shift;;
@@ -309,7 +310,8 @@ then
 	# errors are written  to stderr by ql_setup, and return status is ignored as failure to set up
 	# the rl bridge is not harmful to, and should not prevent, the remainder of the chores.
 else
-	logit "-I given; ingress rate limiting setup was skipped  [OK]"
+	logit "-I given; ingress rate limiting setup was deleted  [OK]"
+	ql_setup_irl $noexec -D $rhost
 fi
 
 fmod_data=/tmp/PID$$.fdata
