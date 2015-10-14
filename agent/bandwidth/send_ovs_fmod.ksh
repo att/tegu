@@ -159,6 +159,8 @@ function help
 		-T n                                (diffserv/type of service)
 		-v vlan
 		-V [mac]                            (strip vlan, if mac given, then strips only if mac is not a trunk
+		-X 									(drop packet)
+
 											if mac not given, then it does a hard strip; user beware)
 	
 
