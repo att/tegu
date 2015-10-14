@@ -135,6 +135,8 @@
 				03 Sep 2015 : Correct panic in network.go.
 				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
 				28 Sep 2015 : Major revsion to network management functions; endpoint support.
+				08 Oct 2015 : Correct bug causing all reservations to be pushed when reservation change state happenes.
+				09 Oct 2015 : Use 'admin' project for defaut phys host list.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu

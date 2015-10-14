@@ -99,6 +99,7 @@
 						command to be run and it wasn't.)
 				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
 				06 Oct 2015 : Network revamp (endpoint) changes.  Corrected not checking pushed flag.
+				08 Oct 2015 : Added !pushed check back to active reservation pushes.
 */
 
 package managers
@@ -320,27 +321,23 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 					(*p).Reset_pushed()
 				}
 			} else {
-				if !(*p).Is_pushed() {
-					if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
-						switch (*p).(type) {
-							case *gizmos.Pledge_bwow:
-								bwow_push_res( p, &rname, ch, hto_limit, pref_v6 )
-								bw_push_count++
-								(*p).Set_pushed( )
 
-							case *gizmos.Pledge_bw:
-								bw_push_count++
-								bw_push_res( p, &rname, ch, hto_limit, alt_table, pref_v6 )
-		
-							case *gizmos.Pledge_steer:
-								st_push_count++
-								push_st_reservation( p, rname, ch, hto_limit )
-		
-							case *gizmos.Pledge_mirror:
-								push_mirror_reservation( p, rname, ch )
-						}
-					} else {					// stil pending
-						pend_count++
+				if ! (*p).Is_pushed() && ((*p).Is_active() || (*p).Is_active_soon( 15 )) {			// not pushed, and became active while we napped, or will activate in the next 15 seconds
+					switch (*p).(type) {
+						case *gizmos.Pledge_bwow:
+							bwow_push_res( p, &rname, ch, hto_limit, pref_v6 )
+							(*p).Set_pushed( )
+
+						case *gizmos.Pledge_bw:
+							bw_push_count++
+							bw_push_res( p, &rname, ch, hto_limit, alt_table, pref_v6 )
+	
+						case *gizmos.Pledge_steer:
+							st_push_count++
+							push_st_reservation( p, rname, ch, hto_limit )
+	
+						case *gizmos.Pledge_mirror:
+							push_mirror_reservation( p, rname, ch )
 					}
 				} else {
 					pushed_count++
