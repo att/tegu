@@ -264,23 +264,13 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	info is local to fq-mgr b/c in the original Tegu it came straight
 	in from skoogi and it was fq-mgr's job to interface with skoogi.)
 */
-//func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
 func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 	if data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
 		fq_sheep.Baa( 1, "unable to send bw-fmods request to agent: no switch defined in input data" )
 		return
 	}
 
-/*
-	mac1 := epid2mac( data.Match.Ip1 )
-	if mac1 == "" {
-		fq_sheep.Baa( 1, "could not map endpoint id (1) to mac: %s", *data.Match.Ip1 )
-		return
-	}
-	data.Match.Smac = &mac1
-	fq_sheep.Baa( 2, "src mac address mapped: %s ==> %s", *data.Match.Ip1, mac1 )
-*/
-	data.Match.Smac = data.Match.Ip1				// we send the source endpoint uuid to let agent convert and find vlan
+	data.Match.Smac = data.Match.Ip1				// we send the source endpoint uuid to let agent convert and find vlan and ofport
 	fq_sheep.Baa( 2, "src endpoing: %s", *data.Match.Smac )
 
 	mac2 := epid2mac( data.Match.Ip2 )				// must convert the 'remote' endpoint to a real mac as agent on phost won't have uuid knowledge
@@ -346,19 +336,22 @@ func send_bwow_fmods( data *Fq_req, phost_suffix *string ) {
 		host = add_phost_suffix( host, phost_suffix )
 	}
 
+	/*
 	mac1 := epid2mac( data.Match.Ip1 )
 	if mac1 == "" {
 		fq_sheep.Baa( 1, "oneway: unable to map endpoint (1) uuid (%s) to mac address", *data.Match.Ip1 )
 		return
 	}
 	data.Match.Smac = &mac1
+	*/
+	data.Match.Smac = data.Match.Ip1							// we pass the endpoint uuid and let agent convert to mac/vlan/ofport tuple
+	
 
-	//---deprecated data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
 	mac2 := ""
-	if data.Match.Ip2 != nil {													// if ep2 is external, then it's ok to be nil
+	if data.Match.Ip2 != nil {														// if ep2 is external, then it's ok to be nil
 		//--deprecated data.Match.Dmac = ip2mac[*data.Match.Ip2]					// this may come up nil and that's ok
-		mac2 = epid2mac( data.Match.Ip2 )
-		if mac1 == "" {																// but if it comes in, it better xlate
+		mac2 = epid2mac( data.Match.Ip2 )											// dest must be converted to mac as agent won't have remote phost info
+		if mac2 == "" {																// but if it comes in, it better xlate
 			fq_sheep.Baa( 1, "oneway: unable to map endpoint (2) uuid (%s) to mac address", *data.Match.Ip1 )
 			return
 		}

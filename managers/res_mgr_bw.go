@@ -204,8 +204,8 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 	src, dest, src_tpport, dest_tpport, _, expiry  := p.Get_values( )		// hosts, transport ports, and expiry time
 	vlan := p.Get_vlan( )													// vlan match criteria for source
 
-	ip_src := name2ip( src )
-	ip_dest := name2ip( dest )
+	ip_src := addr_from_pea( src )						// get the address portion of the p/e/a strings
+	ip_dest := addr_from_pea( dest )
 
 	if ip_src != nil  &&  ip_dest != nil {				// good ip addresses so we're good to go
 		gate := p.Get_gate( )							// get the gate information that is applied for the oneway
@@ -229,7 +229,7 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 			}
 			freq.Id = rname
 
-			freq.Match.Ip1 = gate.Get_src().Get_meta_value( "uuid" )	// fqmgr will convert the uuid to the proper mac
+			freq.Match.Ip1 = gate.Get_src().Get_meta_value( "uuid" )	// we wing round endpoint IDs now
 			freq.Match.Ip2 = gate.Get_dest().Get_meta_value( "uuid" )
 			freq.Espq = gate.Get_spq( rname, now + 16 )					// switch port queue
 			freq.Extip = gate.Get_extip( )								// returns nil if not an external and that's what we need

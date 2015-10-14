@@ -130,7 +130,7 @@ func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list
 		pair_list[plidx].h1 = epuuid1
 		pair_list[plidx].h2 = r1
 		pair_list[plidx].usr = ep1.Get_project()
-		pair_list[plidx].exip = name2ip( epuuid2 )			// get the ip address from the string, or the endpoint
+		pair_list[plidx].exip = addr_from_pea( epuuid2 )	// get the ip address from the string, or the endpoint
 
 		plidx++
 	}
@@ -144,7 +144,7 @@ func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list
 		pair_list[plidx].h2 = epuuid2
 		pair_list[plidx].h1 = r2
 		pair_list[plidx].usr = ep2.Get_project()
-		pair_list[plidx].exip = name2ip( epuuid1 )			// get the ip address from the string, or the endpoint
+		pair_list[plidx].exip = addr_from_pea( epuuid1 )	// get the ip address from the string, or the endpoint
 	}
 
 	net_sheep.Baa( 1, ">>>> endpoints found: %d", nalloc )

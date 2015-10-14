@@ -1378,8 +1378,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 						}
 
 					case REQ_BWOW_RESERVE:								// one way bandwidth reservation, nothing really to vet, return a gate block
-						// host names are expected to have been vetted (if needed) and translated to project-id/IPaddr if IDs are enabled
-						// NEW:  host names are expected to have been vetted (if needed) and translated to project/uuid/address:port
+						// host names are expected to have been vetted (if needed) and translated to project/uuid/address:port
 
 						req.Response_data = nil
 						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
@@ -1406,18 +1405,6 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									depid = toks[1]
 								}
 	
-								/*---- deprecated 
-								ips, err := act_net.name2ip( src )
-								if err == nil {
-									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
-								}
-
-								sh := act_net.hosts[*ips]
-								if ipd != nil {
-									dh = act_net.hosts[*ipd]						// this will be nil for an external IP
-								}
-								------*/
-
 								sh := act_net.endpts[sepid]							// suss out endpoints, dest can be nil and that's ok
 								dh := act_net.endpts[depid]
 								if sh != nil {
@@ -1425,9 +1412,16 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
 									if (*dest)[0:1] == "!" || dh == nil {								// indicate that dest IP cannot be converted to a MAC address
 										gate.Set_extip( dest )
+									} else {										// must check for port, and if there must set external address
+										a := addr_from_pea( dest )					// suss pointer to the address portion of p/e/a string
+										name, port := gizmos.Split_port( a )		// accept ip4, ip4:port, ip6, [ip6]:port and return name, port; port is 0 if missing
+net_sheep.Baa( 1, "internal one way name/port= %s/%s", *name, *port )
+										if *port != "0" {
+											gate.Set_extip( name )
+										}
 									}
 	
-									c, e := p.Get_window( )														// commence/expiry times
+									c, e := p.Get_window( )												// commence/expiry times
 									fence := act_net.get_fence( &usr )
 									max := int64( -1 )
 									if fence != nil {
@@ -1624,8 +1618,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 								net_sheep.Baa( 2, "ep2mac did not map to a known enpoint: %s", ep_uuid )
 								req.Response_data = ""
 							}
-							net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
-							//net_sheep.Baa( 1, ">>>> xlating ep2mac epdump: %s", ep )
+							//net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
 						}
 
 					case REQ_EP2PROJ:										// given an endpoint name return the mac address
