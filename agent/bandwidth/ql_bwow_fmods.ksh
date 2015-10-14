@@ -52,6 +52,8 @@
 #				09 Oct 2015 - Added ability to accept a neutron uuid for translation to mac/port.
 # ---------------------------------------------------------------------------------------------------------
 
+# via broker on qos102: PATH=/tmp/daniels_b:$PATH ql_bwow_fmods -s 9458f3be-0a84-4b29-8e33-073ceab8d6e4 -d fa:16:3e:ed:cc:e5 -p udp: -q 2 -t 59 -T 184 -V 2 
+
 function logit
 {
 	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $argv0: $@" >&2
@@ -105,6 +107,8 @@ timout="-t $to_value"	# timeout parm given on command
 operation="add"			# -X sets delete action
 ip_type="-4"			# default to forcing an IP type match for outbound fmods; inbound fmods do NOT use this
 
+exec 2>/tmp/daniels.tx
+set -x
 while [[ $1 == -* ]]
 do
 	case $1 in
@@ -143,7 +147,7 @@ then
 	exit 1
 fi
 
-match_ofport=""
+match_port=""
 if (( sofport > 0 ))			# must specifically match a port as mac may not be unique
 then
 	match_port="-i $sofport"
@@ -182,11 +186,26 @@ else
 	queue=""
 fi
 
-# CAUTION: action options to send_ovs_fmods are probably order dependent, so be careful.
-set -x
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $match_port $ip_type -m 0x0/0x7 $sip $exip -s $smac $dmac $dproto $sproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
-(( rc =  rc + $? ))
-set +x
+# CAUTION: action options on send_ovs_fmods commands are probably order dependent, so be careful.
+
+
+if [[ -n $match_port ]]				# if we were able to determine a port, then we need to drop the src mac address as it's redundant and we cannot support trunking VM with it
+then
+	set -x
+	send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $match_vlan $match_port $ip_type -m 0x0/0x7 $sip $exip $dmac $dproto $sproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+	(( rc =  rc + $? ))
+	set +x
+else
+	if [[ -n $match_vlan ]]			# if no src port _and_ hard vlan id is set (implying a trunking VM), and we don't have an inbound port, then error
+	then
+		echo "input port unknown: cannot generate oneway flow-mod on a trunking VM port unless we can determine the input port.    [FAIL]"
+	else
+		set -x
+		send_ovs_fmod $forreal $host $timeout -p $(( 400 + pri_base )) --match $match_port $ip_type -m 0x0/0x7 $sip $exip -s $smac $dmac $dproto $sproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+		(( rc =  rc + $? ))
+		set +x
+	fi
+fi
 
 rm -f /tmp/PID$$.*
 if (( rc ))

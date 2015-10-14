@@ -239,8 +239,18 @@ else
 fi
 
 #outbound
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $proto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
-(( rc = rc + $? ))
+if [[ -n $match_port ]]			# if we have an inbound port, we can drop the source mac match
+then
+	set -x
+	send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip -d $rmac $proto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+	(( rc = rc + $? ))
+	set +x
+else
+	set -x
+	send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $proto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+	(( rc = rc + $? ))
+	set +x
+fi
 
 rm -f /tmp/PID$$.*
 if (( rc ))
