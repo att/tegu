@@ -551,6 +551,7 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 	req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, res, nil )	// validate and approve from a network perspective
 	req = <- my_ch											// get response from the network thread
 
+
 	if req.Response_data != nil {
 		gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
 		res.Set_gate( gate )

@@ -630,10 +630,10 @@ func (n *Network) defrock_epname( epname *string ) ( string ) {
 		uuid = tokens[1]
 	} 
 
-	net_sheep.Baa( 2, ">>>> defrocking: %s uuid=%s (%d)", *epname, uuid, len( n.endpts ) )
+	net_sheep.Baa( 2, "defrocking: %s uuid=%s (%d)", *epname, uuid, len( n.endpts ) )
 	if net_sheep.Would_baa( 3 ) {
 		for _, v := range n.endpts {
-			net_sheep.Baa( 3, ">>>> defrocking: %s", v )
+			net_sheep.Baa( 3, "defrocking: %s", v )
 		}
 	}
 
@@ -1383,7 +1383,8 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 						req.Response_data = nil
 						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
 						if ok {
-							src, dest := p.Get_hosts( )									// we assume project/epuuid/ip:port
+							//src, dest := p.Get_hosts( )									// we assume project/epuuid/ip:port
+							src, dest, _, dport, _, _ := p.Get_values( )					// we assume project/epuuid/ip:port for src,dest and need a dest port
 
 							if src != nil && dest != nil {
 								net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
@@ -1412,15 +1413,12 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
 									if (*dest)[0:1] == "!" || dh == nil {								// indicate that dest IP cannot be converted to a MAC address
 										gate.Set_extip( dest )
-									} else {										// must check for port, and if there must set external address
-										a := addr_from_pea( dest )					// suss pointer to the address portion of p/e/a string
-										name, port := gizmos.Split_port( a )		// accept ip4, ip4:port, ip6, [ip6]:port and return name, port; port is 0 if missing
-net_sheep.Baa( 1, "internal one way name/port= %s/%s", *name, *port )
-										if *port != "0" {
-											gate.Set_extip( name )
+									} else {									
+										if *dport != "0" {							// must check for port, and if there must set external address
+											gate.Set_extip( dest )
 										}
 									}
-	
+
 									c, e := p.Get_window( )												// commence/expiry times
 									fence := act_net.get_fence( &usr )
 									max := int64( -1 )
