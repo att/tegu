@@ -32,17 +32,19 @@ import sys
 import os
 
 
-def map_ifaces( ):
+def map_ifaces( limit=None ):
     '''
         Builds a map with keys that are mac addresses, ipaddresses and
         (maybe) VM names, all translating to the endpoint (port) uuid.
     '''
     with client.Client( "2", os.getenv( "OS_USERNAME" ), os.getenv( "OS_PASSWORD" ), os.getenv( "OS_TENANT_NAME" ), os.getenv( "OS_AUTH_URL" ) ) as ostack:
-        vms = ostack.servers.list()                 # complete list of all VMs
-        #print( dir( vms[9].interface_list()[0] ) )
+        vms = ostack.servers.list( )                 # complete list of all VMs
 
         map = {}                                    # a hash that will map mac/ipaddr/name to endpoint uuid
         for vm in vms:
+            if limit != None and limit != vm.name:
+                continue
+
             ifs = vm.interface_list()               # get this VMs interface list
             vmname = vm.name
             for iface in ifs:
@@ -69,12 +71,16 @@ def map_ifaces( ):
 argc = len( sys.argv ) 
 verbose = False
 argi = 1
+limit = None
 
 while argi < argc and sys.argv[argi][0] == "-":
-    if sys.argv[argi] == "-v":
+    if sys.argv[argi] == "-l":
+        argi += 1
+        limit = sys.argv[argi]
+    elif sys.argv[argi] == "-v":
         verbose = True
     else:
-        print( "unrecognised option: %s" % sys.argv[argvi] )
+        print( "unrecognised option: %s" % sys.argv[argi] )
         exit( 1 )
     #end
 
@@ -92,7 +98,7 @@ if sys.argv[argi] == "epid":
     #end
 
     argi += 1
-    map = map_ifaces( )
+    map = map_ifaces( limit )
     rc = 0
     for i in range( argi, argc ):
         if sys.argv[i] in map:             # key is known
