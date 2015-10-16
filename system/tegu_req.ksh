@@ -264,6 +264,7 @@ function name2epid
 			*)	 this_lookup="$name ";;
 		esac
 
+		this_lookup="${this_lookup%%\{*}"		# ditch any vlan specification that might trail the address
 
 		if [[ $prefix == "!"* ]]
 		then
@@ -601,7 +602,7 @@ region=${OS_REGION:=any}	# if not supplied, default to first region (any)
 bandwidth="tegu/bandwidth"		# http api collections
 steering="tegu/api"				# eventually this should become steering
 default="tegu/api"
-force_endpoints=0				# for backwards compatability -e will set/clear based on this default
+force_endpoints=1				# for backwards compatability -e will set/clear based on this default
 
 while [[ $1 == -* ]]
 do
