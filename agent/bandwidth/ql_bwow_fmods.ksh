@@ -156,6 +156,12 @@ fi
 
 if [[ -n $exip ]]
 then
+	if [[ $exip == "["*"]" ]]
+	then
+		ip_type="-6"					# force ip type to v6
+		exip="${exip#*\[}"
+		exip="${exip%\]*}"
+	fi
 	exip="-D $exip"
 fi
 
