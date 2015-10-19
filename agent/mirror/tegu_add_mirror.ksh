@@ -53,6 +53,8 @@
 #                  25 Jun 2015 - Corrected PATH.
 #                  15 Sep 2015 - Remove extra copyright
 #                  17 Sep 2015 - Add ability to use neutron UUID for ports
+#                  19 Oct 2015 - Add options:in_key to GRE ports to allow multiple GRE ports.
+#                                Allow mirrors on bridges other than br-int
 #
 
 function valid_ip4
@@ -105,6 +107,13 @@ function translateuuid
 	ovs_sp2uuid -a | awk -v uuid=$1 '/^port/ && ($2 == uuid || $6 == uuid) { print $2 }'
 }
 
+function findbridge
+{
+	ovs_sp2uuid -a | awk -v uuid=$1 '
+		/^switch/ { br = $4 }
+		/^port/ && $2 == uuid { print br }'
+}
+
 # Preliminaries
 PATH=$PATH:/sbin:/usr/bin:/bin		# must pick up agent augmented path
 echo=:
@@ -124,7 +133,7 @@ then
 	exit 2
 fi
 
-bridgename=br-int		# bridge will always be br-int for now
+bridgename=br-int		# bridge will usually be br-int, but can be changed below
 mirrorname=$1
 ports=$2
 output=$3
@@ -134,14 +143,13 @@ sudo=sudo
 id=`uuidgen -t`
 
 # Check port list
-$echo $sudo ovs-vsctl --columns=ports list bridge $bridgename
-tmp=`$sudo ovs-vsctl --columns=ports list bridge $bridgename 2>/dev/null`
+$echo $sudo ovs-vsctl --columns=ports list bridge
+brports=`$sudo ovs-vsctl --columns=ports list bridge 2>/dev/null | sed 's/.*://' | tr -d '[] ' | tr , '\012'`
 if [ $? -ne 0 ]
 then
-	echo "tegu_add_mirror: $bridgename is missing on openvswitch." >&2
+	echo "tegu_add_mirror: cannot list ports on openvswitch." >&2
 	exit 2
 fi
-brports=`echo $tmp | sed 's/.*://' | tr -d '[] ' | tr , ' '`
 
 realports=""
 for p in `echo $ports | tr , ' '`
@@ -153,8 +161,9 @@ do
 		if valid_port "$uuid"
 		then
 			realports="$realports,$uuid"
+			bridgename=$(findbridge $uuid)
 		else
-			echo "tegu_add_mirror: there is no port with UUID=$p on $bridgename." >&2
+			echo "tegu_add_mirror: there is no port with UUID=$p on this machine." >&2
 			exit 2
 		fi
 		;;
@@ -165,8 +174,9 @@ do
 		if valid_port "$uuid"
 		then
 			realports="$realports,$uuid"
+			bridgename=$(findbridge $uuid)
 		else
-			echo "tegu_add_mirror: there is no port with MAC=$p on $bridgename." >&2
+			echo "tegu_add_mirror: there is no port with MAC=$p on this machine." >&2
 			exit 2
 		fi
 		;;
@@ -203,7 +213,7 @@ vlan:[0-9]+)
 	then
 		outputtype=port
 	else
-		echo "tegu_add_mirror: there is no port with UUID=$output on $bridgename." >&2
+		echo "tegu_add_mirror: there is no port with UUID=$output on this machine." >&2
 		exit 2
 	fi
 	;;
@@ -219,7 +229,7 @@ vlan:[0-9]+)
 			outputtype=port
 			output="$uuid"
 		else
-			echo "tegu_add_mirror: there is no port with MAC=$output on $bridgename." >&2
+			echo "tegu_add_mirror: there is no port with MAC=$output on this machine." >&2
 			exit 2
 		fi
 	else
@@ -257,15 +267,17 @@ mirrorargs="select_src_port=$realports select_dst_port=$realports"
 case "$outputtype" in
 gre)
 	greportname=gre-$mirrorname
+	key=$(echo $mirrorname | sed -e 's/mir-//' -e 's/_.$//')
+	key=$((16#$key))
 	$echo $sudo ovs-vsctl \
 		add-port $bridgename $greportname \
-		-- set interface $greportname type=gre options:remote_ip=$remoteip \
+		-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key \
 		-- --id=@p get port $greportname \
 		-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
 		-- add bridge $bridgename mirrors @m
 	$sudo ovs-vsctl \
 		add-port $bridgename $greportname \
-		-- set interface $greportname type=gre options:remote_ip=$remoteip \
+		-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key \
 		-- --id=@p get port $greportname \
 		-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
 		-- add bridge $bridgename mirrors @m
@@ -292,5 +304,5 @@ port)
 	;;
 esac
 
-echo Mirror $mirrorname created.
+echo Mirror $mirrorname created on bridge $bridgename.
 exit 0
