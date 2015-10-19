@@ -123,6 +123,25 @@ func ( ep *Endpt ) Add_addr( ip string ) {
 }
 
 /*
+	Given a test value (string, pointer to string, int or int64), 
+	and a meta key, return true if the value in the
+	hash  for the key matches string. If there is no entry false is 
+	returned.
+*/
+func ( ep *Endpt ) Equals_meta( key string, test interface{} ) ( bool ) {
+	if v := ep.meta[key]; v != "" {
+		switch t := test.(type) {
+			case string: 	return v == t
+			case *string:	return v == *t
+			case int:		return v == string( t )
+			case int64:		return v == string( t )
+		}
+	}
+
+	return false
+}
+
+/*
 	Return any meta value.
 */
 func ( ep *Endpt ) Get_meta_value( key string ) ( *string ) {
