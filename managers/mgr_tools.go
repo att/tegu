@@ -113,14 +113,14 @@ func update_graph( hname *string, update_fqmgr bool, block bool ) {
 /*
 	This function accepts a string of the form proj/epid/address or just the endpoint
 	uuid (epid), and returns the address or the endpoint uuid, depending on the 
-	setting of pull_ep.  If pull_ep is true, then the endpoint id is returned 
-	otherwise the ip address is returned.  If the input string is just an endpoint
+	setting of pull_addr.  If pull_addr is true, then the address is returned 
+	otherwise the ep uuid is returned.  If the input string is just an endpoint
 	id, then a message is sent to the network thread to pull the first (default) ip 
-	address assocated with the endpoint (if pull_ep is false), otherwise the endpoint 
+	address assocated with the endpoint (if pull_addr is true), otherwise the endpoint 
 	id passed in is returned (caller doesn't need to know that it is or isn't a 
 	pea string.   Confused???  Just use the addr_from_pea() and ep_from_pea() wrapper functions.
 */
-func pull_from_pea_str( name *string, pull_ep bool ) ( s *string ) {
+func pull_from_pea_str( name *string, pull_addr bool ) ( s *string ) {
 	s = nil
 
 	if name == nil || *name == "" {
@@ -130,15 +130,14 @@ func pull_from_pea_str( name *string, pull_ep bool ) ( s *string ) {
 	tokens := strings.Split( *name, "/" )
 	if len( tokens ) > 2 {
 		dup := tokens[1]
-		if !pull_ep {
+		if pull_addr {
 			dup = tokens[2]
 		}
 		return &dup
 	}
 
-	if ! pull_ep {
+	if pull_addr {
 		ch := make( chan *ipc.Chmsg )	
-		defer close( ch )									// close it on return
 		msg := ipc.Mk_chmsg( )
 		msg.Send_req( nw_ch, ch, REQ_GETIP, name, nil )
 		msg = <- ch
@@ -157,14 +156,14 @@ func pull_from_pea_str( name *string, pull_ep bool ) ( s *string ) {
 	is expected. For a pea string this will be the address part of p/e/a.
 */
 func addr_from_pea( pea *string ) ( *string ) {
-	return pull_from_pea_str( pea, false )
+	return pull_from_pea_str( pea, true )
 }
 
 /*	
 	Given a pea string or endpoint id string return the associated endpoint id.
 */
 func ep_from_pea( pea *string )  ( *string ) {
-	return pull_from_pea_str( pea, true )
+	return pull_from_pea_str( pea, false )
 }
 
 
