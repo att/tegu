@@ -100,6 +100,8 @@
 				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
 				06 Oct 2015 : Network revamp (endpoint) changes.  Corrected not checking pushed flag.
 				08 Oct 2015 : Added !pushed check back to active reservation pushes.
+				15 Oct 2015 : Removed table 9x flow-mod generation. Tegu should _not_ add/manipulate flow-mods directly
+						as that is the agent's responsibility.
 */
 
 package managers
@@ -230,67 +232,6 @@ func (i *Inventory) any_commencing( past int64, future int64 ) ( bool ) {
 
 	return false
 }
-
-/*
-	Deprecated -- these should no longer be set by tegu and if really needed should
-		be set by the ql_bw*fmods and other agent scripts.
-
-
-	Push table 9x flow-mods. The flowmods we toss into the 90 range of
-	tables generally serve to mark metadata in a packet since metata
-	cannot be marked prior to a resub action (flaw in OVS if you ask me).
-
-	Marking metadata is needed so that when one of our f-mods match we can
-	resubmit into table 0 without triggering a loop, or a match of any
-	of our other rules.
-
-	Table is the table number (we assume 9x, but it could be anything)
-	Meta is a string supplying the value/mask that is used on the action (e.g. 0x02/0x02)
-	to set the 00000010 bit as an and operation.
-	Cookie is the cookie value used on the f-mod.
-*/
-func table9x_fmods( rname *string, host string, table int, meta string, cookie int ) {
-		fq_data := Mk_fqreq( rname )							// f-mod request with defaults (output==none)
-		fq_data.Table = table
-		fq_data.Cookie = cookie	
-		fq_data.Expiry = 0										// never expire
-
-		// CAUTION: fq_mgr generic fmod needs to be changed and when it does these next three lines will need to change too
-		fq_data.Espq = gizmos.Mk_spq( host, -1, -1 )			// send to specific host
-		dup_str := "br-int"										// these go to br-int only
-		fq_data.Swid = &dup_str
-
-		fq_data.Action.Meta = &meta								// sole purpose is to set metadata
-		
-		msg := ipc.Mk_chmsg()
-		msg.Send_req( fq_ch, nil, REQ_GEN_FMOD, fq_data, nil )			// no response right now -- eventually we want an asynch error
-}
-
-
-/*
-	Causes all alternate table flow-mods to be sent for the hosts in the given queue list
-	It can be expensive (1-2 seconds/flow mod), so we assume this is being driven only
-	when there are queue changes. Phsuffix is the host suffix that is added to any host
-	name (e.g. -ops).
-*/
-func send_meta_fmods( qlist []string, alt_table int ) {
-	target_hosts := make( map[string]bool )							// hosts that are actually affected by the queue list
-
-	for i := range qlist {											// make a list of hosts we need to send fmods to
-		toks := strings.SplitN( qlist[i], "/", 2 )					// split host from front
-		if len( toks ) == 2 {										// should always be, but don't choke if not
-			target_hosts[toks[0]] = true							// fq-mgr will add suffix if needed
-		}
-	}
-
-	for h := range target_hosts {
-		rm_sheep.Baa( 2, "sending metadata flow-mods to %s alt-table base %d", h, alt_table )
-		id := "meta_" + h
-		table9x_fmods( &id, h, alt_table, "0x01/0x01", 0xe5d )
-		table9x_fmods( &id, h, alt_table+1, "0x02/0x02", 0xe5d )
-	}
-}
-
 
 /*
 	Runs the list of reservations in the cache and pushes out any that are about to become active (in the
@@ -1071,8 +1012,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_GEN_EPQMAP:
 				rm_sheep.Baa( 1, "received queue map from network manager" )
 
-				qlist := msg.Response_data.( []string )							// get the qulist map for our use first
-				send_meta_fmods( qlist, alt_table )								// push meta rules
+				//--- deprecated qlist := msg.Response_data.( []string )							// get the qulist map for our use first
+				// -- deprecated -- -send_meta_fmods( qlist, alt_table )								// push meta rules
 
 				msg.Response_ch = nil											// immediately disable to prevent loop
 				fq_data := make( []interface{}, 1 )
