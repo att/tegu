@@ -785,6 +785,13 @@ case $1 in
 		fi
 		#rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/$bandwidth"
 		#rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry $(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) $4 $5" -t "$proto$host/$bandwidth"
+
+		if [[ $3 == *"{"*"}"* ]]				# vlan id not supported on regular bandwidth reservations
+		then
+			echo "vlan specification ({id}) not permitted on bandwidth reservations   [FAIL]"
+			exit 1
+		fi
+
 		if (( force_endpoints ))
 		then
 			hosts=$(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) 			# expand token/project bugs
