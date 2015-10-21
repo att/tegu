@@ -83,6 +83,9 @@
 #								agent scripts (Tegu still thinks it's being set!)
 #				09 Oct 2015 - Added ability to xlate a neutron uuid into a mac/vlan/ofport tuple.
 #				16 Oct 2015 - Tweaked protocol args on the send_ovs_fmod commands.
+#				20 Oct 2015 - Correct bug that was not marking the protocol correctly (was putting on all src
+#								or all dest on both inbound and outbound fmods rather than src for one and
+#								dest for the other.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -266,7 +269,7 @@ else
 fi
 
 #outbound
-if [[ -n $match_port ]]			# if we have an inbound port, we can drop the source mac match
+if [[ -n $match_port ]]			# if we have an input port, we can drop the source mac match
 then
 	set -x
 	send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip -d $rmac $ob_lproto $ob_rproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
@@ -274,7 +277,7 @@ then
 	set +x
 else
 	set -x
-	send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $proto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+	send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $ob_lproto $ob_rproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
 	(( rc = rc + $? ))
 	set +x
 fi
