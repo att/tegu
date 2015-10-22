@@ -425,7 +425,7 @@ func (ep *Endpt) To_json( ) ( s string ) {
 	s += " ], "
 
 	if ep.conn_pt != nil {
-		s += fmt.Sprintf( ` "sw"=%q, "port"=%d`,  ep.conn_pt.Get_id(), ep.port )
+		s += fmt.Sprintf( ` "sw"=%q, "port"=%d`,  *(ep.conn_pt.Get_id()), ep.port )
 	} else {
 		s += fmt.Sprintf( ` "sw"=%q, "port"=%d`,  "", -1 )
 	}
