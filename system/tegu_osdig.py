@@ -171,6 +171,11 @@ if sys.argv[argi] == "epid":
     #end
     exit( rc )
 
+if sys.argv[argi] == "dumpvm":
+    map, all4vm, port2ip = map_ifaces( )
+    for k in map:
+        print( k, map[k] )
+
 else:
     print( "usage: os_digger %s is not a recognised command" % sys.argv[argi] )
     usage()
