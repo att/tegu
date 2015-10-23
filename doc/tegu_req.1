@@ -334,10 +334,9 @@ Tegu will attempt to determine which physical machine the bridge is on and set u
 .B output
 Specifies where the mirror should be directed to.
 This may either be another port, or a GRE tunnel.
-If specified as an IP address (IPv4 or IPv6) or DNS name, then a new GRE endpoint is constructed
-on the \fBbr-int\fP bridge (with the specified IP address), and the mirror is connected to this endpoint.
-If specified as a port (using the same syntax as for ports above), then the mirror is
-connected to the pre-existing port.
+If specified as an IP address (IPv4 or IPv6) or DNS name, then a new GRE endpoint is constructed,
+with the specified IP address, on the same bridge as the port being mirrored, and the mirror is connected to this endpoint.
+If specified as a port (using the same syntax as for ports above), then the mirror is connected to the pre-existing port.
 Note: initially, only local ports on \fBbr-int\fP will be supported, that is sending mirroring
 output to a port on a different host from the mirrored ports will not be initially
 supported, as it requires flow steering.

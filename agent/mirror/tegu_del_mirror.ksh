@@ -29,11 +29,19 @@
 #                  11 Feb 2015 - remove temp file
 #                  25 Jun 2015 - Corrected PATH.
 #                  15 Sep 2015 - Remove extra copyright
+#                  19 Oct 2015 - Allow delete of mirrors from bridges other than br-int
 #
 
 function logit
 {
 	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $argv0: $@" >&2
+}
+
+function findbridge
+{
+	ovs_sp2uuid -a | awk -v uuid=$1 '
+		/^switch/ { br = $4 }
+		/^port/ && $2 == uuid { print br }'
 }
 
 PATH=$PATH:/sbin:/usr/bin:/bin 		# must pick up agent augmented path
@@ -55,16 +63,17 @@ then
 	exit 2
 fi
 
-bridgename=br-int		# bridge will always be br-int for now
 sudo=sudo
 [ "`id -u`" == 0 ] && sudo=
 
 mirrorname=$1
 
-$echo $sudo ovs-vsctl list mirror "$mirrorname"
-$sudo ovs-vsctl list mirror "$mirrorname" > /tmp/m$$ && {
+$echo $sudo ovs-vsctl get mirror "$mirrorname" output_port
+$sudo ovs-vsctl get mirror "$mirrorname" output_port > /tmp/m$$ && {
 	# get output_port UUID
-	uuid=`grep output_port /tmp/m$$ | sed 's/.*: //'`
+	uuid=`cat /tmp/m$$`
+	bridgename=$(findbridge $uuid)
+
 	# get name from uuid
 	$echo $sudo ovs-vsctl list port $uuid
 	pname=`$sudo ovs-vsctl list port $uuid | grep name | tr -d '" ' | cut -d: -f2`
@@ -82,7 +91,7 @@ $sudo ovs-vsctl list mirror "$mirrorname" > /tmp/m$$ && {
 	$sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
 	rm -f /tmp/m$$
 
-	echo Mirror $mirrorname removed.
+	echo Mirror $mirrorname removed from bridge $bridgename.
 	exit 0
 }
 

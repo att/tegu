@@ -148,6 +148,12 @@ ib_lproto=""
 ob_rproto=""			# out/inbound remote proto set sith -p
 ib_rproto=""
 
+ob_lproto=""            # out/inbound local protocol Set with -P
+ib_lproto=""
+ob_rproto=""            # out/inbound remote proto set sith -p
+ib_rproto=""
+
+
 while [[ $1 == -* ]]
 do
 	case $1 in
