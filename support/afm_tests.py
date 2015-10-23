@@ -89,7 +89,7 @@ class Test_info:
         Constant info that will span multiple tests so it can be passed as a single unit
         without overloading global variables
     '''
-    def __init__( self, vm1, vm2, ip1, ip2, mac1, mac2, phost1, phost2, rtr_mac, res_time, vcmd ):
+    def __init__( self, vm1, vm2, ip1, ip2, mac1, mac2, phost1, phost2, rtr_mac, res_time, vcmd, oldtegu ):
         self.vm1 = vm1                  # vm names
         self.vm2 = vm2
         self.ip1 = ip1                  # vm ip addresses
@@ -101,6 +101,7 @@ class Test_info:
         self.phost2 = phost2
         self.res_time = res_time        # reservation time
         self.vcmd = vcmd                # verification command
+        self.oldtegu = oldtegu
 
 
 # ------- support functions ----------------------------------------------------------
@@ -123,19 +124,21 @@ def send_reservation( res_time, vm1, ip1, vm2, ip2, dtype, exip=None, oneway=Fal
         send off a reservation to tegu, and print results if in verbose mode
     '''
 
+    if ip1 != "" and ip1[0:1] != ":":               # v4.x tegu now accepts a limting ip address which makes tegu_req faster
+        ip1 = "@" + ip1                             # add it if ip1 appears to be an ip address (not empty, not :port)
+    if ip2 != "" and ip2[0:1] != ":":
+        ip2 = "@" + ip2
+
     if oneway:
-        if exip == None:
-            cmd = "%s -T   owreserve 3M +%d %%t/%%p/%s@%s,!//%s cookie %s" % (tr, res_time, vm1, ip1, exip, dtype)
+        if exip != None:
+            cmd = "%s -T   owreserve 3M +%d %%t/%%p/%s%s,!//%s cookie %s" % (tr, res_time, vm1, ip1, exip, dtype)
         else:
-            print( "ERROR: internal mishap: oneway reservation without external IP address" )
-            exit( 1 )
-        #end
+            cmd = "%s -T   owreserve 3M +%d %%t/%%p/%s%s,%%t/%%p/%s%s cookie %s" % (tr, res_time, vm1, ip1, vm2, ip2, dtype)
     else:
         if exip == None:
-            cmd = "%s -T   reserve 3M +%d %%t/%%p/%s@%s,%%t/%%p/%s@%s cookie %s" % (tr, res_time, vm1, ip1, vm2, ip2, dtype)
+            cmd = "%s -T   reserve 3M +%d %%t/%%p/%s%s,%%t/%%p/%s%s cookie %s" % (tr, res_time, vm1, ip1, vm2, ip2, dtype)
         else:
-            cmd = "%s -T   reserve 3M +%d %%t/%%p/%s@%s,!//%s cookie %s" % (tr, res_time, vm1, ip1, exip, dtype)
-        #end
+            cmd = "%s -T   reserve 3M +%d %%t/%%p/%s%s,!//%s cookie %s" % (tr, res_time, vm1, ip1, exip, dtype)
     #end
 
     bleat( "%s" % cmd )
@@ -151,7 +154,7 @@ def send_reservation( res_time, vm1, ip1, vm2, ip2, dtype, exip=None, oneway=Fal
         print( stdout )
 #end
 
-def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=None, vlan=None, keep=False, vcmd="fmod_ver.ksh" ):
+def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=None, vlan=None, keep=False, oneway=False, oldtegu=False, vcmd="fmod_ver.ksh" ):
     '''
         Run the command on the remote physical host to verify flowmods
     '''
@@ -170,6 +173,12 @@ def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=No
 
     if rport != None:
         opts += " -pr %s" % rport
+
+    if oneway:
+        opts += " -o -c 0xf00d"             # oneway need speecial flag and use a different cookie
+
+    if oldtegu:
+        opts += " -O"                       # some vlan and in-port settings aren't there in v3x flow-mods
 
     opts += " -l %s -r %s" % (lmac, rmac)
     opts += " -m %s" % dscp_value
@@ -193,7 +202,8 @@ def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=No
 
 def run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=False ):
     '''
-        Run a single test and then verify
+        Run a single test (submit the reservation) and then verify that the flow
+        mods look correct based on the parameters of the reservation.
     '''
     if dtype[0:7] == "global_":
         keep = True
@@ -205,7 +215,10 @@ def run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=Fa
     else:
         pip1 = tinfo.ip1
 
+    exipp = exip                            # exip will need port if port2 supplied, default to none
     if port2 != None:
+        if exip != None:
+            exipp = "%s:%d" % (exip, port2) # external for reservation must cary port
         pip2 = "%s:%d" % (tinfo.ip2, port2)
     else:
         pip2 = tinfo.ip2
@@ -214,35 +227,35 @@ def run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=Fa
         pip1 = "%s{%d}" % vlan1
 
     print( "running test: %s" % desc )
-    send_reservation( tinfo.res_time, tinfo.vm1, pip1, tinfo.vm2, pip2, dtype, exip, oneway )                 # it hard aborts if not accepted, so return is always good
+    send_reservation( tinfo.res_time, tinfo.vm1, pip1, tinfo.vm2, pip2, dtype, exipp, oneway )                 # it hard aborts if not accepted, so return is always good
     print( "reservation accepted; waiting 5 seconds before verifying" )
     time.sleep( 5 )
 
     if exip == None:
-        verify_fmods( tinfo.phost1, dvalue, tinfo.mac2, tinfo.mac1, exip=exip, lport=port1, rport=port2, vlan=vlan, keep=keep, vcmd=tinfo.vcmd )    # verify on h1's host
+        verify_fmods( tinfo.phost1, dvalue, tinfo.mac2, tinfo.mac1, exip, port1, port2, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd )    # verify on h1's host
     else:
-        verify_fmods( tinfo.phost1, dvalue, tinfo.rtr_mac, tinfo.mac1, exip=exip, lport=port1, rport=port2, vlan=vlan, keep=keep, vcmd=tinfo.vcmd ) # for external, remote is router mac
+        verify_fmods( tinfo.phost1, dvalue, tinfo.rtr_mac, tinfo.mac1, exip, port1, port2, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd ) # for external, remote is router mac
 
     if not (oneway or exip != None):
-        verify_fmods( tinfo.phost2, dvalue, tinfo.mac1, tinfo.mac2, exip=exip, lport=port2, rport=port1, vlan=vlan, keep=keep, vcmd=tinfo.vcmd )    # verify on h2's host only if not external/oneway
+        verify_fmods( tinfo.phost2, dvalue, tinfo.mac1, tinfo.mac2, exip, port2, port1, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd )    # verify on h2's host only if not external/oneway
 
     pause( tinfo.res_time + 5 )
     if show_results:
         print( "" )
-    #end
 #end
 
-def map_phosts( ):
+def map_phosts():
     '''
         send a req to tegu (I hate that tegu is nothing more than a database now)
         to find the physical location of each endpoint. Returns a map keyed on 
         endpoint id.
     '''
 
-    stdout = subprocess.getoutput( "%s -T listhosts" % (tr) )
     phost = None
     epid = None
     map = {}
+
+    stdout = subprocess.getoutput( "%s -T listhosts" % (tr) )
     stdout = stdout[:-1]                          # ditch trailing newline
     for rec in stdout.split( "\n" ):
         rec = rec.strip()                       # ditch lead/trail blanks since split doesn't ignore them
@@ -259,6 +272,19 @@ def map_phosts( ):
                     map[tokens[-1]] = phost
                     phost = None
                     epid = None
+
+            elif tokens[0] == "name":               # old tegu uses names not endpoint ids
+                nmtok = tokens[-1].split( "/" )     # and they might be project/name; want only name
+                if len( nmtok ) > 1:
+                    epid = nmtok[1]
+                else:
+                    epid = nmtok[0]
+
+                if phost != None:
+                    map[epid] = phost
+                    phost = None
+                    epid = None
+
             elif tokens[0] == "switch":
                 if epid == None:
                     phost = tokens[-1]
@@ -278,7 +304,8 @@ def pause( ptime ):
         if ptime < 15:
             nap = 1
 
-        print( "paused for %4d more seconds" % ptime,  end="\r" )
+        if interactive:
+            print( "paused for %4d more seconds" % ptime,  end="\r" )
 
         time.sleep( nap )
         ptime -= nap
@@ -291,13 +318,14 @@ def pause( ptime ):
 
 def usage( argv0 ):
     print( '''
-    usage: %s  [-h tegu-host:port] [-p verifcation-path] [-t res-time] [-V] [-v] vmname1 vmname2 external-ip
+    usage: %s  [-h tegu-host:port] [-i] [-p verifcation-path] [-t res-time] [-s] [-V] [-v] vmname1 vmname2 external-ip
            %s  {-?|--help}
 ''' % (argv0, argv0) ) 
 
 
 
 verbose = False
+short_round = False             # -s sets this and it just does one loop
 argi = 1
 argc = len( sys.argv )
 argv0 = sys.argv[0]
@@ -306,20 +334,40 @@ tegu_host = "-h localhost"      # tegu instance (-h overrides)
 vscript_path = "/tmp"           # where we expect the verification script (-p overrieds)
 path="/tmp/tegu_b"              # where we expect tegu agent scripts on each phost
 show_results = False            # -V disables supression of some of the results 
+rtr_mac = None                  # -r needed when banging against an older version of Tegu
+interactive = False             # -i sets to show countdown during pause
+vscript_name = "fmod_ver.ksh"   # script on physical hosts used to verify flow-mods
+tegu_req = "/usr/bin/tegu_req"  # default tegu_req command (use -r to override for new/old version)
+tegu_req = "../system/tegu_req.ksh" # default tegu request command (-r overrides for testing new)
 
 while argi < argc and sys.argv[argi][0] == "-":
     if sys.argv[argi] == "-h":
         argi += 1
         tegu_host = "-h " + sys.argv[argi]
 
+    elif sys.argv[argi] == "-i":
+        argi += 1
+        interactive = True
+
     elif sys.argv[argi] == "-p":
         argi += 1
         vscript_path = sys.argv[argi]
+
+    elif sys.argv[argi] == "-r":
+        argi += 1
+        tegu_req = sys.argv[argi]
 
     elif sys.argv[argi] == "-t":
         argi += 1
         res_time = int( sys.argv[argi] )
 
+    elif sys.argv[argi] == "-s":
+        short_round = True
+
+    elif sys.argv[argi] == "-S":
+        argi += 1
+        vscript_name = sys.argv[argi]
+        
     elif sys.argv[argi] == "-v":
         verbose = True
         
@@ -338,14 +386,14 @@ while argi < argc and sys.argv[argi][0] == "-":
     argi += 1
 #end
 
-tr="ksh  ../system/tegu_req.ksh %s" % tegu_host		# tegu req command
+tr="%s %s" % (tegu_req, tegu_host)		# tegu req command
 
 if argc - argi < 3:                     # 3 positional parms required
     print( "missing positional parameters" )
     usage( argv0 )
     exit( 1 )
 
-if res_time < 30:
+if res_time < 15:
     print( "-t option sets reservation time unacceptably small: %d" % res_time )
     exit( 1 )
     
@@ -372,20 +420,37 @@ for rec in stdout.split( "\n" ):
         
 epid1, mac1, ip1 = vms[vm1].Get_endpt()          # get one of the ipv4 endpoints from each vm
 epid2, mac2, ip2 = vms[vm2].Get_endpt()
-phost1 = ep2phost[epid1]
-phost2 = ep2phost[epid2]
+phost1 = ep2phost.get( epid1 )
+phost2 = ep2phost.get( epid2 )
 
-print( "getting router mac address" )
+print( "getting router mac address" )           # must get with endpoint id even if we are using old tegu and reset endpoints later
 rtr_mac = dig_router( epid1 )
+
+oldtegu = False
+if phost1 == None or phost2 == None:
+    print( "unable to find one or both endpoints in tegu's list of endpoints; assuming older Tegu version" )
+    epid1 = vm1
+    epid2 = vm2
+    ip1 = ip2 = ""
+    phost1 = ep2phost.get( epid1 )
+    phost2 = ep2phost.get( epid2 )
+    oldtegu = True
+
+if phost1 == None or phost2 == None:
+    print( "unable to map one/both VMs to physical hosts" )
+    exit( 1 )
 
 bleat( "vm1: %s  %s  %s  %s  %s" % (vm1, epid1, mac1, ip1, phost1) )
 bleat( "vm2: %s  %s  %s  %s  %s" % (vm2, epid2, mac2, ip2, phost2) )
 bleat( "router: %s" % rtr_mac )
 
-verify_cmd = vscript_path + "/fmod_ver.ksh"
-dscp_values = { "voice": 184, "control": 104, "data": 72, "global_voice": 184, "global_control": 104, "global_data": 72 }
+verify_cmd = vscript_path + "/" + vscript_name
+if short_round:
+    dscp_values = { "global_voice": 184 }           # loop only once with a known dscp value
+else:
+    dscp_values = { "voice": 184, "control": 104, "data": 72, "global_voice": 184, "global_control": 104, "global_data": 72 }
 
-tinfo = Test_info( vm1, vm2, ip1, ip2, mac1, mac2, phost1, phost2, rtr_mac, res_time, verify_cmd )
+tinfo = Test_info( vm1, vm2, ip1, ip2, mac1, mac2, phost1, phost2, rtr_mac, res_time, verify_cmd, oldtegu )
 
 for dtype in dscp_values:                       # loop through each dscp type running all tests for each
     dvalue = dscp_values[dtype]
@@ -399,8 +464,26 @@ for dtype in dscp_values:                       # loop through each dscp type ru
     desc = "vm -> vm:port   dscp=%s" % dtype 
     run_one_test( tinfo, port2=1982, port1=None, exip=None, vlan=None, oneway=False )
 
+    desc = "vm:port -> vm:port   dscp=%s" % dtype 
+    run_one_test( tinfo, port2=1982, port1=2020, exip=None, vlan=None, oneway=False )
+
+    # --- external -----
     desc = "vm -> external   dscp=%s" % dtype 
     run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=None, oneway=False )
+
+    desc = "vm -> external:port   dscp=%s" % dtype 
+    run_one_test( tinfo, port1=None, port2=1982, exip=exip, vlan=None, oneway=False )
+
+
+    # --- one way ------
+    desc = "vm -> vm   oneway dscp=%s" % dtype 
+    run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=True )
+
+    desc = "vm -> external   oneway dscp=%s" % dtype 
+    run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=None, oneway=True )
+
+    desc = "vm -> external:port   oneway dscp=%s" % dtype 
+    run_one_test( tinfo, port1=None, port2=1982, exip=exip, vlan=None, oneway=True )
 
 #end
 
