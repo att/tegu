@@ -154,7 +154,7 @@ def send_reservation( res_time, vm1, ip1, vm2, ip2, dtype, exip=None, oneway=Fal
         print( stdout )
 #end
 
-def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=None, vlan=None, keep=False, oneway=False, oldtegu=False, vcmd="verify_fmods.ksh" ):
+def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=None, vlan=None, keep=False, oneway=False, oldtegu=False, vcmd="verify_bw_fmods.ksh" ):
     '''
         Run the command on the remote physical host to verify flowmods. Returns number of errors (1 or 0)
         if the test doesn't pass it will be 1 regardless of the number of 'fails' listed in the output.
@@ -334,7 +334,7 @@ def usage( argv0 ):
 
         -i  - interactive mode (better pause messages)
         -s  - short test (only global_voce dscp tested across all other tests)
-        -S  - supplies the verification script (with path if needed) if the script is not /tmp/verify_fmods.ksh
+        -S  - supplies the verification script (with path if needed) if the script is not /tmp/verify_bw_fmods.ksh
         -V  - Show output from tegu_req and verification commnands
         -v  - verbose mode
 
@@ -358,7 +358,7 @@ path="/tmp/tegu_b"                      # where we expect tegu agent scripts on 
 show_results = False                    # -V disables supression of some of the results 
 rtr_mac = None                          # -r needed when banging against an older version of Tegu
 interactive = False                     # -i sets to show countdown during pause
-verify_cmd = "/tmp/verify_fmods.ksh"
+verify_cmd = "/tmp/verify_bw_fmods.ksh"
 tegu_req = "/usr/bin/tegu_req"          # default tegu_req command (use -r to override for new/old version)
 
 while argi < argc and sys.argv[argi][0] == "-":
