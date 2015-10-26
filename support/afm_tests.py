@@ -154,16 +154,20 @@ def send_reservation( res_time, vm1, ip1, vm2, ip2, dtype, exip=None, oneway=Fal
         print( stdout )
 #end
 
-def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=None, vlan=None, keep=False, oneway=False, oldtegu=False, vcmd="fmod_ver.ksh" ):
+def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=None, vlan=None, keep=False, oneway=False, oldtegu=False, vcmd="verify_fmods.ksh" ):
     '''
-        Run the command on the remote physical host to verify flowmods
+        Run the command on the remote physical host to verify flowmods. Returns number of errors (1 or 0)
+        if the test doesn't pass it will be 1 regardless of the number of 'fails' listed in the output.
+        The value allows the caller to collect error count without a lot of if statements.
     '''
+    errors = 0                                # errors (should ever only return 1, but makes life easier for caller)
+
     opts = ""
     if exip != None:
         opts += " -e %s" % exip
         
     if vlan != None:
-        opts += " -v %s" % vlan
+        opts += " -V %s" % vlan
     
     if keep:
         opts += " -k"
@@ -188,7 +192,8 @@ def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=No
     cmd = "ssh tegu@%s PATH=%s:'$PATH' %s %s" % ( phost, path, vcmd, opts)
     bleat( "running: %s" % cmd )
     stdout = subprocess.getoutput( cmd )
-    if not stdout.find( "PASS" ) >= 0:
+    if not stdout.find( "PASS" ) >= 0:      # didn't pass, dump the output regardless
+        errors += 1
         print( stdout )
     else:
         if show_results:
@@ -198,12 +203,15 @@ def verify_fmods( phost, dscp_value, rmac, lmac, exip=None, lport=None, rport=No
             print( "PASS: flow_mods verified on %s" % phost )
         #end
     #end
+
+    return errors
 #end
 
 def run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=False ):
     '''
         Run a single test (submit the reservation) and then verify that the flow
         mods look correct based on the parameters of the reservation.
+        Returns the number of errors.
     '''
     if dtype[0:7] == "global_":
         keep = True
@@ -224,24 +232,27 @@ def run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=Fa
         pip2 = tinfo.ip2
 
     if vlan != None:                       # add vlan if supplied
-        pip1 = "%s{%d}" % vlan1
+        pip1 = "%s{%d}" % (pip1, vlan)
 
     print( "running test: %s" % desc )
     send_reservation( tinfo.res_time, tinfo.vm1, pip1, tinfo.vm2, pip2, dtype, exipp, oneway )                 # it hard aborts if not accepted, so return is always good
     print( "reservation accepted; waiting 5 seconds before verifying" )
     time.sleep( 5 )
 
+    vfm_errors = 0
     if exip == None:
-        verify_fmods( tinfo.phost1, dvalue, tinfo.mac2, tinfo.mac1, exip, port1, port2, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd )    # verify on h1's host
+        vfm_errors += verify_fmods( tinfo.phost1, dvalue, tinfo.mac2, tinfo.mac1, exip, port1, port2, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd )    # verify on h1's host
     else:
-        verify_fmods( tinfo.phost1, dvalue, tinfo.rtr_mac, tinfo.mac1, exip, port1, port2, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd ) # for external, remote is router mac
+        vfm_errors += verify_fmods( tinfo.phost1, dvalue, tinfo.rtr_mac, tinfo.mac1, exip, port1, port2, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd ) # for external, remote is router mac
 
     if not (oneway or exip != None):
-        verify_fmods( tinfo.phost2, dvalue, tinfo.mac1, tinfo.mac2, exip, port2, port1, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd )    # verify on h2's host only if not external/oneway
+        vfm_errors += verify_fmods( tinfo.phost2, dvalue, tinfo.mac1, tinfo.mac2, exip, port2, port1, vlan, keep, oneway, tinfo.oldtegu, tinfo.vcmd )    # verify on h2's host only if not external/oneway
 
-    pause( tinfo.res_time + 5 )
+    pause( tinfo.res_time + 5 )         # wait for reervation to expire
     if show_results:
         print( "" )
+
+    return vfm_errors
 #end
 
 def map_phosts():
@@ -318,27 +329,37 @@ def pause( ptime ):
 
 def usage( argv0 ):
     print( '''
-    usage: %s  [-h tegu-host:port] [-i] [-p verifcation-path] [-t res-time] [-s] [-V] [-v] vmname1 vmname2 external-ip
+    usage: %s  [-h tegu-host:port] [-i] [-t res-time] [-r tegu-req command] [-S verify-script] [-s] [-V] [-v] vmname1 vmname2 external-ip
            %s  {-?|--help}
+
+        -i  - interactive mode (better pause messages)
+        -s  - short test (only global_voce dscp tested across all other tests)
+        -S  - supplies the verification script (with path if needed) if the script is not /tmp/verify_fmods.ksh
+        -V  - Show output from tegu_req and verification commnands
+        -v  - verbose mode
+
+        vm1 and vm2 are expected to be in the same project as defined by OS_TENANT_NAME in the environment.
+        Other openstack variables (username and password) are also expected to be set in the environment.
+        This script depends on tegu_osdig and tegu_os2dig to be installed somewhere in the PATH. Tegu_req
+        must be in the PATH unless given with -r option on the command line (allowing for testing of new
+        and/or differnt versions of tegu req).
 ''' % (argv0, argv0) ) 
 
 
 
 verbose = False
-short_round = False             # -s sets this and it just does one loop
+short_round = False                     # -s sets this and it just does one loop
 argi = 1
 argc = len( sys.argv )
 argv0 = sys.argv[0]
-res_time = 30                   # minimal (default) reservation time
-tegu_host = "-h localhost"      # tegu instance (-h overrides)
-vscript_path = "/tmp"           # where we expect the verification script (-p overrieds)
-path="/tmp/tegu_b"              # where we expect tegu agent scripts on each phost
-show_results = False            # -V disables supression of some of the results 
-rtr_mac = None                  # -r needed when banging against an older version of Tegu
-interactive = False             # -i sets to show countdown during pause
-vscript_name = "fmod_ver.ksh"   # script on physical hosts used to verify flow-mods
-tegu_req = "/usr/bin/tegu_req"  # default tegu_req command (use -r to override for new/old version)
-tegu_req = "../system/tegu_req.ksh" # default tegu request command (-r overrides for testing new)
+res_time = 30                           # minimal (default) reservation time
+tegu_host = "-h localhost"              # tegu instance (-h overrides)
+path="/tmp/tegu_b"                      # where we expect tegu agent scripts on each phost
+show_results = False                    # -V disables supression of some of the results 
+rtr_mac = None                          # -r needed when banging against an older version of Tegu
+interactive = False                     # -i sets to show countdown during pause
+verify_cmd = "/tmp/verify_fmods.ksh"
+tegu_req = "/usr/bin/tegu_req"          # default tegu_req command (use -r to override for new/old version)
 
 while argi < argc and sys.argv[argi][0] == "-":
     if sys.argv[argi] == "-h":
@@ -346,12 +367,7 @@ while argi < argc and sys.argv[argi][0] == "-":
         tegu_host = "-h " + sys.argv[argi]
 
     elif sys.argv[argi] == "-i":
-        argi += 1
         interactive = True
-
-    elif sys.argv[argi] == "-p":
-        argi += 1
-        vscript_path = sys.argv[argi]
 
     elif sys.argv[argi] == "-r":
         argi += 1
@@ -366,7 +382,7 @@ while argi < argc and sys.argv[argi][0] == "-":
 
     elif sys.argv[argi] == "-S":
         argi += 1
-        vscript_name = sys.argv[argi]
+        verify_cmd = sys.argv[argi]
         
     elif sys.argv[argi] == "-v":
         verbose = True
@@ -403,20 +419,29 @@ exip = sys.argv[argi+2]
 
 print( "getting physical host locations from Tegu" )
 ep2phost = map_phosts()                         # map to find phys host based on endpoint
+if len( ep2phost ) <= 0:
+    print( "ERROR: physical host locations from tegu is empty" )
+    exit( 1 )
 
 print( "getting endpoint information from openstack: %s %s" % (vm1, vm2) )
 vms = {}
+
 stdout = subprocess.getoutput( "tegu_osdig -v -a epid %s %s" % (vm1, vm2) ) # dig out info on vms given
+stdout = stdout[:-1]                              # ditch trailing newline
 for rec in stdout.split( "\n" ):
-    rec = rec[:-1]                              # ditch trailing newline
+    rec = rec.strip()                           # ditch lead/trail whitespace
     tokens = rec.split( " " )                   # split into vnmane then tuples of epid,mac,ip
-    vm = Vm( tokens[0][:-1] )                   # chop trailing colon from name
+    vm = Vm( tokens[0][:-1] )                   # chop trailing colon from name and crate a vm object
     vms[vm.name] = vm
 
     for i in range( 1, len( tokens ) ):
         vm.Add_endpt( tokens[i] )
     #end
 #end
+
+if len( vms ) <= 0:
+    print( "ERROR: unable to get any VM information from openstack" )
+    exit( 1 )
         
 epid1, mac1, ip1 = vms[vm1].Get_endpt()          # get one of the ipv4 endpoints from each vm
 epid2, mac2, ip2 = vms[vm2].Get_endpt()
@@ -437,6 +462,9 @@ if phost1 == None or phost2 == None:
     oldtegu = True
 
 if phost1 == None or phost2 == None:
+    for h in ep2phost:
+        print( ep2phost[h] )
+
     print( "unable to map one/both VMs to physical hosts" )
     exit( 1 )
 
@@ -444,7 +472,6 @@ bleat( "vm1: %s  %s  %s  %s  %s" % (vm1, epid1, mac1, ip1, phost1) )
 bleat( "vm2: %s  %s  %s  %s  %s" % (vm2, epid2, mac2, ip2, phost2) )
 bleat( "router: %s" % rtr_mac )
 
-verify_cmd = vscript_path + "/" + vscript_name
 if short_round:
     dscp_values = { "global_voice": 184 }           # loop only once with a known dscp value
 else:
@@ -452,40 +479,49 @@ else:
 
 tinfo = Test_info( vm1, vm2, ip1, ip2, mac1, mac2, phost1, phost2, rtr_mac, res_time, verify_cmd, oldtegu )
 
+total_errors = 0
 for dtype in dscp_values:                       # loop through each dscp type running all tests for each
     dvalue = dscp_values[dtype]
 
     desc = "vm -> vm   dscp=%s" % dtype 
-    run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=False )
+    total_errors += run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=False )
 
     desc = "vm:port -> vm   dscp=%s" % dtype 
-    run_one_test( tinfo, port1=1982, port2=None, exip=None, vlan=None, oneway=False )
+    total_errors += run_one_test( tinfo, port1=1982, port2=None, exip=None, vlan=None, oneway=False )
 
     desc = "vm -> vm:port   dscp=%s" % dtype 
-    run_one_test( tinfo, port2=1982, port1=None, exip=None, vlan=None, oneway=False )
+    total_errors += run_one_test( tinfo, port2=1982, port1=None, exip=None, vlan=None, oneway=False )
 
     desc = "vm:port -> vm:port   dscp=%s" % dtype 
-    run_one_test( tinfo, port2=1982, port1=2020, exip=None, vlan=None, oneway=False )
+    total_errors += run_one_test( tinfo, port2=1982, port1=2020, exip=None, vlan=None, oneway=False )
 
     # --- external -----
     desc = "vm -> external   dscp=%s" % dtype 
-    run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=None, oneway=False )
+    total_errors += run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=None, oneway=False )
 
     desc = "vm -> external:port   dscp=%s" % dtype 
-    run_one_test( tinfo, port1=None, port2=1982, exip=exip, vlan=None, oneway=False )
+    total_errors += run_one_test( tinfo, port1=None, port2=1982, exip=exip, vlan=None, oneway=False )
+
+    desc = "vm:port -> external   dscp=%s" % dtype 
+    total_errors += run_one_test( tinfo, port2=None, port1=1982, exip=exip, vlan=None, oneway=False )
 
 
     # --- one way ------
     desc = "vm -> vm   oneway dscp=%s" % dtype 
-    run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=True )
+    total_errors += run_one_test( tinfo, port1=None, port2=None, exip=None, vlan=None, oneway=True )
 
     desc = "vm -> external   oneway dscp=%s" % dtype 
-    run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=None, oneway=True )
+    total_errors += run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=None, oneway=True )
 
     desc = "vm -> external:port   oneway dscp=%s" % dtype 
-    run_one_test( tinfo, port1=None, port2=1982, exip=exip, vlan=None, oneway=True )
+    total_errors += run_one_test( tinfo, port1=None, port2=1982, exip=exip, vlan=None, oneway=True )
 
+    desc = "vm{vlan} -> external   oneway dscp=%s" % dtype 
+    total_errors += run_one_test( tinfo, port1=None, port2=None, exip=exip, vlan=22, oneway=True )
 #end
+
+print( "===============================================" )
+print( "%d errors" % total_errors )
 
 exit( 0 )
 
