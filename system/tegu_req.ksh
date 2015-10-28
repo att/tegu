@@ -70,6 +70,8 @@
 #				22 Sep 2015 - Added support to suss out our URL from the keystaone catalogue 
 #					and use that if it's there. Corrected dscp value check (was numeric).
 #					Added ability to use %p in endpoint name for project (pulls from OS_ var).
+#				28 Oct 2015 - X-Auth-Tegu token now has /project appended in order to make
+#					verification quicker. 
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -562,7 +564,7 @@ then
 fi
 
 
-opts+=$( set_xauth $raw_token )
+opts+=$( set_xauth $raw_token/$OS_TENANT_NAME )         # tokens must have a project to be authenticated against
 case $1 in
 	ping)
 		rjprt  $opts -m POST -t "$proto$host/$default" -D "$token ping"
