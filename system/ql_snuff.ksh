@@ -28,7 +28,7 @@
 #	Date:		12 Feb 2014
 #	Author:		E. Scott Daniels
 #
-#	Mod:
+#	Mod:		29 Oct 2015 - added 0xb0ff cookie to the list of flow-mods to the list.
 # --------------------------------------------------------------------------------------------------
 
 trap "rm -f /tmp/PID$$.*" 1 2 3 15 EXIT
@@ -215,7 +215,7 @@ do
 
 		for b in $blist
 		do
-			for cookie in 0xbeef 0xdead 0xe5d 0xdeaf 0xfeed 0xface
+			for cookie in 0xbeef 0xdead 0xe5d 0xdeaf 0xfeed 0xface 0xb0ff
 			do
 				tty_rewrite "$h remove fmods: $b $cookie"
 				send_ovs_fmod $really -h ${h:-nohost} -t 2 --match --action del $cookie $b >>$log 2>&1
