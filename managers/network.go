@@ -91,14 +91,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	//"time"
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/ipc"
+	"github.com/att/gopkgs/ipc/msgrtr"
 
 	"github.com/att/tegu/gizmos"
-	
 )
 
 // -- configuration management -----------------------------------------------------------
@@ -576,7 +575,6 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 }
 
 /*
-	REVAMP:	This needs to work based on endpoint information
 	Given an endpoint's uuid, returns the desired metadata (map) for an endpoint. 
 	This accepts either uuid or project/uuid. If the epname is an external (!/) specification
 	then no map is returned.
@@ -977,7 +975,11 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 	}
 
 	for k, ep := range eps {										// for each end point, add to the graph
-		n.endpts[k] = ep									// reference only by uuid
+		if *(ep.Get_meta_value( "phost" )) == "" {
+			delete( n.endpts, k ) 
+		} else {
+			n.endpts[k] = ep											// reference only by uuid
+		}
 	}
 
 	for k, ep := range n.endpts {									// switches are generated each go round, so we must insert endpoint into the new set
@@ -1002,11 +1004,30 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 }
 
 /*
+	Accept a list of endpoints and use them to add to or update the current net.
+	Returns the new net if opdated and a bool flag to indiceate whether or not 
+	the attempt was successful (if not, caller might need to retry later).
+*/
+func update_net( act_net *Network, epmap map[string]*gizmos.Endpt, cfg *net_cfg, hlist *string ) ( new_net *Network, cached bool ) {
+
+	net_sheep.Baa( 1, "updating network with new eplist (%d elements)", len( epmap ) )
+	new_net = build( act_net, epmap, cfg, hlist )				// use map to rebuild the network
+
+	if new_net != nil {
+		new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
+		net_sheep.Baa( 1, "new network successfully built" )
+	} else {
+		return act_net, true
+	}
+
+	return new_net, false
+}
+
+
+/*
 	REVAMP: DEPRECATED
 	Given a project id, find the associated gateway.  Returns the whole project/ip string.
 
-	TODO: return list if multiple gateways
-	TODO: improve performance by maintaining a tid->gw map
 func (n *Network) gateway4tid( tid string ) ( *string ) {
 	for _, ip := range n.gwmap {				// mac to ip, so we have to look at each value
 		toks := strings.SplitN( *ip, "/", 2 )
@@ -1315,9 +1336,30 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 							// tickle once, very soon after starting, to get a host list
 	tklr.Add_spot( int64( cfg.refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER ) // get a host list from openstack now and again
 	tklr.Add_spot( int64( cfg.refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network
+
+														// set up message listeners for bus events etc
+	event_ch := make( chan *msgrtr.Envelope, 1024 )		// channel for message events
+	ev_data := &event_handler_data {
+		req_chan: nch,
+	}
+	msgrtr.Register( "endpt", event_ch, ev_data )			// listen for all network and endpoint messages
+	msgrtr.Register( "network", event_ch , ev_data )		// these arrive as msgrtr.Events in the main select below.
 	
 	for {
-		select {					// assume we might have multiple channels in future
+		select {							// receive data from any channel; ensure serialisation
+			case env := <- event_ch:		// message event received 
+				event := env.Event
+				tokens := strings.Split( event.Event_type, "." )
+				switch tokens[0] {
+					case "network":
+						netev_net( event, env.Ldata )
+
+					case "endpt":
+						netev_endpt( event, env.Ldata )
+
+					default: net_sheep.Baa( 1, "ignored: unknown/unrecognised event received: %s", event.Event_type )
+				}
+
 			case req = <- nch:
 				req.State = nil				// nil state is OK, no error
 
@@ -1625,7 +1667,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 							//net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
 						}
 
-					case REQ_EP2PROJ:										// given an endpoint name return the mac address
+					case REQ_EP2PROJ:										// given an endpoint name return the project id
 						if req.Response_ch != nil {
 							var ep *gizmos.Endpt
 
@@ -1645,23 +1687,25 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 						}
 
 					case REQ_NEW_ENDPT:										// add a new endpoint, or endpoint set to the graph
+						req.Response_ch = nil								// ensure we don't try to write back on this
+						if req == nil || req.Req_data == nil {
+							net_sheep.Baa( 1, "no data on new endpoint reqeust" )
+						} else {
+							if m, ok := req.Req_data.( map[string]*gizmos.Endpt ); ok {		// pick up the map if it is the expected type
+								act_net, _ = update_net( act_net, m, cfg, hlist )
+							} else {
+								net_sheep.Baa( 1, "new endpoint reqeust contained bad data" )
+							}
+						}
 
 					case REQ_GET_ENDPTS:									// response back from osif if we had to make additional requests (os down?)
 						req.Response_ch = nil								// ensure we don't try to write back on this
 						req_again := true									// assume we'll need to request it again
 						if req == nil || req.Response_data == nil {
-							net_sheep.Baa( 1, "no data from osif on endpoint response" )
+							net_sheep.Baa( 1, "no data on endpoint response" )
 						} else {
-							m, ok :=  req.Response_data.( map[string]*gizmos.Endpt )		// pick up the map if it is the expected type
-							if ok {
-								net_sheep.Baa( 1, "endpoint data received from openstack, rebuilding network" )
-								new_net := build( act_net, m, cfg, hlist )			// use to rebuild the network
-								if new_net != nil {
-									new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
-									act_net = new_net									// and finally use it
-									req_again = false									// all good, no need for another
-									net_sheep.Baa( 1, "new network successfully built" )
-								}
+							if m, ok := req.Response_data.( map[string]*gizmos.Endpt ); ok {		// pick up the map if it is the expected type
+								act_net, req_again = update_net( act_net, m, cfg, hlist )
 							} else {
 								net_sheep.Baa( 1, "response from ostack endpoint request was not expected map type" )
 							}
