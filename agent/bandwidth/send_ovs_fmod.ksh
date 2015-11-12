@@ -93,6 +93,7 @@
 #				13 Oct 2015 - Change vlan to straight dl_vlan not tci.
 #				12 Oct 2015 - No longer test for br-rl presensnce since it has (at least temporarily)
 #								been removed as HTB queues were causing damage.
+#				30 Oct 2015 - Ensure that IP type is set when protocol is specified.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -471,6 +472,11 @@ do
 					then
 						match+="tp_src=${2##*:} "
 					fi
+				
+					if [[ -z $type ]]
+					then
+						type="$ip4_type,"
+					fi
 					shift
 					;;
 
@@ -478,6 +484,10 @@ do
 					if [[ ${2##*:} != "0"  && ${2##*:} != "" ]]			# assume proto:  is same as proto:0
 					then
 						match+="tp_dst=${2##*:} "
+					fi
+					if [[ -z $type ]]
+					then
+						type="$ip4_type,"
 					fi
 					shift
 					;;
