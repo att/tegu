@@ -797,7 +797,7 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 /*
 	Executes as a goroutine to drive the resevration manager portion of tegu.
 */
-func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
+func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 	var (
 		inv	*Inventory
@@ -815,7 +815,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		favour_v6 bool = true			// favour ipv6 addresses if a host has both defined.
 	)
 
-	super_cookie = cookie				// global for all methods
+	cookie := "20030217"				// default; should be changed in config file				
+	super_cookie = &cookie
 
 	rm_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
 	rm_sheep.Set_prefix( "res_mgr" )

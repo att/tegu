@@ -172,13 +172,13 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.1.0/19285"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v4.1.0/1b115"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
 		needs_help 	*bool
 		fl_host		*string
-		super_cookie *string
+		//super_cookie *string
 		chkpt_file	*string
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
@@ -200,7 +200,7 @@ func main() {
 	cfg_file = flag.String( "C", "", "configuration-file" )
 	//fl_host = flag.String( "f", "", "floodlight_host:port" )
 	api_port = flag.String( "p", "29444", "api_port" )
-	super_cookie = flag.String( "s", "", "admin-cookie" )
+	//super_cookie = flag.String( "s", "", "admin-cookie" )			// deprecated -- security issue
 	topo_file := flag.String( "t", "", "topo_file" )
 	verbose = flag.Bool( "v", false, "verbose" )
 
@@ -217,10 +217,12 @@ func main() {
 	sheep.Baa( 1, "tegu %s started", version )
 	sheep.Baa( 1, "http api is listening on: %s", *api_port )
 
+	/*
 	if *super_cookie == "" {							// must have something and if not supplied this is probably not guessable without the code
 		x := "20030217"
 		super_cookie = &x
 	}
+	*/
 
 	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
 	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
@@ -234,8 +236,10 @@ func main() {
 		os.Exit( 1 )
 	}
 
+	managers.Message_mgr()											// right now just a funciton to start, but could be a thread at somepoint, so invoke here
+
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// start early so we bind to port quickly, but don't allow requests until late
-	go managers.Res_manager( rmgr_ch, super_cookie ); 				// manage the reservation inventory
+	go managers.Res_manager( rmgr_ch )								// manage the reservation inventory
 	go managers.Osif_mgr( osif_ch )									// openstack interface; early so we get a list of stuff before we start network
 	go managers.Network_mgr( nw_ch, topo_file )						// manage the network graph
 	go managers.Agent_mgr( am_ch )
