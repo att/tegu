@@ -82,6 +82,7 @@
 				18 Jun 2015 - Added oneway rate limiting and delete support.
  				02 Jul 2015 - Extended the physical host refresh rate.
 				03 Sep 2015 - Correct nil pointer core dump cause.
+				06 Oct 2015 - Revammp to use endpoints (uuid based) rather than hosts (IP addresses).
 */
 
 package managers
@@ -94,10 +95,126 @@ import (
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/ipc"
-	//"github.com/att/tegu"
+	"github.com/att/gopkgs/ipc/msgrtr"
+
 	"github.com/att/tegu/gizmos"
-	
 )
+
+// -- configuration management -----------------------------------------------------------
+/*
+	All needed config information pulled from the config file.
+*/
+
+type net_cfg struct {
+	discount		int64		// discount applied to all bw reservations
+	relaxed			bool		// run in relaxed mode
+	refresh			int			// refresh rate for network topp
+	max_link_cap	int64		// ???
+	bleat_level		int			// how chatty network will be
+	mlag_paths		bool		// use mlag paths when building bw reservations?
+	find_all_paths	bool		// find all paths to a destination
+	link_headroom	int			// percentage we do not use on any link
+	link_alarm_thresh	int		// percentage threshold
+	def_ul_cap		int64		// user link capacity default value
+	phost_suffix	*string		// if fqmgr is adding a suffix we need to strip in some cases
+	topo_file		*string
+}
+
+/*
+	Suss out things we need from the config data and build a new struct.
+*/
+func mk_net_cfg( cfg_data map[string]map[string]*string ) ( nc *net_cfg ) {
+
+	net_sheep.Baa( 1, "reloading configuration file information" )
+	nc = &net_cfg {
+		discount:	0,
+		relaxed:	false,
+		refresh:	30,
+		max_link_cap: 0,
+		bleat_level:	1,
+		mlag_paths:		true,
+		find_all_paths:	false,
+		link_headroom:	0,
+		link_alarm_thresh: 0,
+		def_ul_cap:		-1,
+		phost_suffix:	nil,
+	}
+
+	if cfg_data["default"] != nil {								// things we pull from the default section
+			nc.topo_file = cfg_data["default"]["static_phys_graph"]
+	}
+
+	if cfg_data["fqmgr"] != nil {								// we need to know if fqmgr is adding a suffix to physical host names so we can strip
+		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {
+			nc.phost_suffix = p
+			net_sheep.Baa( 1, "will strip suffix from mac2phost map: %s", *nc.phost_suffix )
+		}	
+	}
+
+	if cfg_data["network"] != nil {
+		if p := cfg_data["network"]["discount"]; p != nil {
+			d := clike.Atoll( *p ); 			
+			if d < 0 {
+				nc.discount = 0
+			} else {
+				nc.discount = d
+			}
+		}
+
+		if p := cfg_data["network"]["relaxed"]; p != nil {
+			nc.relaxed = *p ==  "true" || *p ==  "True" || *p == "TRUE"
+		}
+		if p := cfg_data["network"]["refresh"]; p != nil {
+			nc.refresh = clike.Atoi( *p ); 			
+		}
+		if p := cfg_data["network"]["link_max_cap"]; p != nil {
+			nc.max_link_cap = clike.Atoi64( *p )
+		}
+		if p := cfg_data["network"]["verbose"]; p != nil {
+			net_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
+		}
+
+		if p := cfg_data["network"]["all_paths"]; p != nil {
+			nc.find_all_paths = false
+			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use find_paths = {all|mlag|shortest}" )
+		}
+
+		if p := cfg_data["network"]["find_paths"]; p != nil {
+			switch( *p ) {
+				case "all":	
+					nc.find_all_paths = true
+					nc.mlag_paths = false
+
+				case "mlag":
+					nc.find_all_paths = false
+					nc.mlag_paths = true
+
+				case "shortest":
+					nc.find_all_paths = false
+					nc.mlag_paths = false
+
+				default:
+					net_sheep.Baa( 0, "WRN: invalid setting in config: network:find_paths %s is not valid; must be: all, mlag, or shortest; assuming mlag  [TGUNET010]", *p )
+					nc.find_all_paths = false
+					nc.mlag_paths = true
+			}
+		}
+
+		if p := cfg_data["network"]["link_headroom"]; p != nil {
+			nc.link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacities down by
+		}
+
+		if p := cfg_data["network"]["link_alarm"]; p != nil {
+			nc.link_alarm_thresh = clike.Atoi( *p )						// percentage of total capacity when an alarm is generated
+		}
+
+		if p := cfg_data["network"]["user_link_cap"]; p != nil {
+			nc.def_ul_cap = clike.Atoi64( *p )
+		}
+	}
+
+	return
+}
 
 // --------------------------------------------------------------------------------------
 
@@ -108,13 +225,20 @@ import (
 */
 type Network struct {				
 	switches	map[string]*gizmos.Switch	// symtable of switches
-	hosts		map[string]*gizmos.Host		// references to host by either mac, ipv4 or ipv6 'names'
 	links		map[string]*gizmos.Link		// table of links allows for update without resetting allotments
 	vlinks		map[string]*gizmos.Link		// table of virtual links (links between ports on the same switch)
+	endpts		map[string]*gizmos.Endpt	// endpoints (used to be known as hosts)
+	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
+	mlags		map[string]*gizmos.Mlag		// reference to each mlag link group by name
+	relaxed		bool						// if true, we're in relaxed mode which means we don't path find or do admission control.
+	ep_cache	map[string]*gizmos.Endpt	// cache if called before we have a topo
+	ep_good		bool						// set true when we have processed a valid endpoint list
+
+	// ---- these are probably all deprecated
+/*
+	hosts		map[string]*gizmos.Host		// references to host by either mac, ipv4 or ipv6 'names'
 	vm2ip		map[string]*string			// maps vm names and vm IDs to IP addresses (generated by ostack and sent on channel)
-	ip2vm		map[string]*string			// reverse -- makes generating complete host listings faster
 	ip2mac		map[string]*string			// IP to mac	Tegu-lite
-	ip2vmid		map[string]*string			// ip to vm-id translation	Tegu-lite
 	vmid2phost	map[string]*string			// vmid to physical host name	Tegu-lite
 	vmip2gw		map[string]*string			// vmid to it's gateway
 	vmid2ip		map[string]*string			// vmid to ip address	Tegu-lite
@@ -122,10 +246,10 @@ type Network struct {
 	gwmap		map[string]*string			// mac to ip map for the gateways	(needed to include gateways in graph)
 	ip2fip		map[string]*string			// projects/ip to floating ip address translation
 	fip2ip		map[string]*string			// floating ip address to projects/ip translation
-	limits		map[string]*gizmos.Fence	// user boundary defaults for per link caps
-	mlags		map[string]*gizmos.Mlag		// reference to each mlag link group by name
-	hupdate		bool						// set to true only if hosts is updated after gwmap has size (chkpt reload timing)
-	relaxed		bool						// if true, we're in relaxed mode which means we don't path find or do admission control.
+*/
+
+	//ip2vm		map[string]*string			// reverse -- makes generating complete host listings faster
+	//ip2vmid		map[string]*string			// ip to vm-id translation	Tegu-lite
 }
 
 
@@ -137,7 +261,7 @@ type Network struct {
 func mk_network( mk_links bool ) ( n *Network ) {
 	n = &Network { }
 	n.switches = make( map[string]*gizmos.Switch, 20 )		// initial sizes aren't limits, but might help save space
-	n.hosts = make( map[string]*gizmos.Host, 2048 )
+	//deprecated---- n.hosts = make( map[string]*gizmos.Host, 2048 )
 
 	if mk_links {
 		n.links = make( map[string]*gizmos.Link, 2048 )		// must maintain a list of links so when we rebuild we preserve obligations
@@ -159,8 +283,10 @@ func (n *Network) Set_relaxed( state bool ) {
 }
 
 /*
+	REVAMP:  this should be deprecated with the revamp
 	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
 */
+/* ---- deprecated
 func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 	i := 0
@@ -214,12 +340,18 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 	return
 }
+*/
 
 /*
+	REVAMP: this should be replaced with an update endpoint or insert endpoint function
 	Using a net_vm struct update the various maps. Allows for lazy discovery of
 	VM information rather than needing to request everything all at the same time.
 */
 func (net *Network) insert_vm( vm *Net_vm ) {
+	net_sheep.Baa( 1, "#### insert_vm called and is depreacated -- ignored" )
+	return
+
+/*
 	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
 	if vname == nil || *vname == "" || *vname == "unknown" {								// shouldn't happen, but be safe
 		//return
@@ -293,12 +425,13 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 			net.gwmap[k] = v
 		}	
 	}
+*/
 }
 
 
 /*
 	Given a user name find a fence in the table, or copy the defaults and
-	return those.
+	return those.  (User name generic which could be openstack project id etc.)
 */
 func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
 	var (
@@ -329,10 +462,13 @@ func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
 }
 
 /*
+	REVAMP:  this is deprecated with revamp as mac2phost is needed only to build hlist
 	Takes a set of strings of the form <hostname><space><mac> and adds them to the mac2phost table
 	This is needed to map gateway hosts to physical hosts since openstack does not return the gateways
 	with the same info as it does VMs
 */
+/*
+deprecated -----
 func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 	if n.mac2phost == nil {
 		n.mac2phost = make( map[string]*string )
@@ -350,14 +486,15 @@ func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 
 	net_sheep.Baa( 2, "mac2phost map updated; has %d elements (list had %d elements)", len( n.mac2phost ), len( list ) )
 }
+*/
 
 /*
+	REVAMP: this should be deprecated with the use of endpoints
 	Build the ip2vm map from the vm2ip map which is a map of IP addresses to what we hope is the VM
 	name.  The vm2ip map contains both VM IDs and the names the user assigned to the VM. We'll guess
 	at getting the name from the map.
 
 	TODO: we need to change vm2ip to be struct with two maps rather than putting IDs and names into the same map
-*/
 func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 
 	i2v = make( map[string]*string )
@@ -375,6 +512,7 @@ func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 	net_sheep.Baa( 2, "built ip2vm map: %d entries", len( i2v ) )
 	return
 }
+*/
 
 
 /*
@@ -437,6 +575,79 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 }
 
 /*
+	Given an endpoint's uuid, returns the desired metadata (map) for an endpoint. 
+	This accepts either uuid or project/uuid. If the epname is an external (!/) specification
+	then no map is returned.
+*/
+func (n *Network) uuid2ep_meta( epname *string ) ( md map[string]string, err error) {
+	err = nil
+
+	if *epname == "" {
+		net_sheep.Baa( 1, "internal mishap: bad name passed to ep2meta_data: empty" )
+		err = fmt.Errorf( "endpoint unknown: empty name passed to network manager" )
+		return nil, err
+	}
+
+	if (*epname)[0:2] == "!/" {					// special external name (no project string following !)
+		md = make( map[string]string, 1 )
+		md["uuid"] = *epname					// dummy map with the !/address as the uuid 
+		return	
+	}
+
+	tokens := strings.Split( *epname, "/" )		// could be project/uuid or just uuid
+	uuid := tokens[0]
+	if len( tokens ) > 1  {
+		uuid = tokens[1]
+	} 
+
+	ep := n.endpts[uuid]
+	if ep == nil {
+		net_sheep.Baa( 2, "endpoint not found: %s", *epname )
+		err = fmt.Errorf( "endpoint unknown: %s", *epname )
+		return
+	}
+
+	return ep.Get_meta_copy(), nil		// returns a map of nearly all the data (the switch pointer is not included)
+}
+
+/*
+	Defrock the epname and verifiy that we have that name in the list.  Returns the name if 
+	it is in the list, or if it's !/junk. If the name isn't in the list, an empty string
+	is returned.
+*/
+func (n *Network) defrock_epname( epname *string ) ( string ) {
+	if *epname == "" {
+		net_sheep.Baa( 1, "internal mishap: bad name passed to ep2meta_data: empty" )
+		return ""
+	}
+
+	if (*epname)[0:2] == "!/" {					// special external name (no project string following !)
+		return	*epname
+	}
+
+	tokens := strings.Split( *epname, "/" )		// could be project/uuid or just uuid
+	uuid := tokens[0]
+	if len( tokens ) > 1  {
+		uuid = tokens[1]
+	} 
+
+	net_sheep.Baa( 2, "defrocking: %s uuid=%s (%d)", *epname, uuid, len( n.endpts ) )
+	if net_sheep.Would_baa( 3 ) {
+		for _, v := range n.endpts {
+			net_sheep.Baa( 3, "defrocking: %s", v )
+		}
+	}
+
+	if n.endpts[uuid] != nil {
+		return uuid
+	}
+
+	return ""
+}
+	
+
+/*
+	DEPRECATED
 	Returns the ip address associated with the name. The name may indeed be
 	an IP address which we'll look up in the hosts table to verify first.
 	If it's not an ip, then we'll search the vm2ip table for it.
@@ -447,7 +658,6 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 
 	The special case !/ip-address is used to designate an external address. It won't
 	exist in our map, and we return it as is.
-*/
 func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 	ip = nil
 	err = nil
@@ -491,6 +701,25 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 			err = fmt.Errorf( "host unknown: %s could not be mapped to an IP address", *hname )
 		}
 	}
+
+	return
+}
+*/
+
+/*
+	Given an endpoint address, suss out the 'default' IP  address. Probalby not what is wanted, but 
+	in cases where we have nothing to go on, it might work.
+*/
+func (n *Network) epid2ip( epid *string ) (ip *string, err error) {
+	ip = nil
+	err = nil
+
+	ep := n.endpts[ *epid ]
+	if ep == nil {
+		return nil, fmt.Errorf( "cannot map endpoint ID to IP address" )
+	}
+
+	ip, _ = ep.Get_addresses( )
 
 	return
 }
@@ -604,17 +833,19 @@ func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 	Tegu-lite:  sdnhost might be a file which contains a static graph, in json form,
 	describing the physical network. The string is assumed to be a filename if it
 	does _not_ contain a ':'.
-	
+
+	Host list is a list of physical (compute/net) hosts that we need if building a 
+	default star topo.  We _might_ be able to pull this list from eps, but it is 
+	unclear at this time if we should trust that list to be everything (most concerned
+	about network hosts).
 */
-func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string ) (n *Network) {
+func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_list *string ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
 		lnk		*gizmos.Link
-		ip4		string
-		ip6		string
+
 		links	[]gizmos.FL_link_json			// list of links from floodlight or simulated floodlight source
-		hlist	[]gizmos.FL_host_json			// list of hosts from floodlight or built from vm maps if not using fl
 		err		error
 		hr_factor	int64 = 1
 		mlag_name	*string = nil
@@ -622,54 +853,82 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 
 	n = nil
 
-	if link_headroom > 0 && link_headroom < 100 {
-		hr_factor = 100 - int64( link_headroom )
+	if cfg.link_headroom > 0 && cfg.link_headroom < 100 {
+		hr_factor = 100 - int64( cfg.link_headroom )
 	}
 
-
-	// REVAMP:   eliminate the floodlight call openstack interface should be sending us a list of endpoints to use; use them directly
-	if strings.Index( *flhost, ":" ) >= 0  {
-		links = gizmos.FL_links( flhost )					// request the current set of links from floodlight
-		hlist = gizmos.FL_hosts( flhost )					// get a current host list from floodlight
-	} else {
-		hlist = old_net.build_hlist()						// simulate output from floodlight by building the host list from openstack maps
-		links, err = gizmos.Read_json_links( *flhost )		// build links from the topo file; if empty/missing, we'll generate a dummy next
+	if phost_list != nil && *phost_list != "" {
+		links, err = gizmos.Read_json_links( cfg.topo_file )		// build links from the topo file; if empty/missing, we'll generate a dummy next
 		if err != nil || len( links ) <= 0 {
-			if host_list != nil {
-				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *flhost )
-				links = gizmos.Gen_star_topo( *host_list )				// generate a dummy topo based on the host list
-			} else {
-				net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *flhost, err )
-				links = nil										// kicks us out later, but must at least create an empty network first
-			}
+			net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *cfg.topo_file )
+			links = gizmos.Gen_star_topo( *phost_list )		// generate a dummy topo based on the  phys hosts listed in endpoint list
+		} else {
+			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *cfg.topo_file, err )
+			links = nil										// kicks us out later, but must at least create an empty network first
 		}
+	} else {
+		net_sheep.Baa( 0, "no phost_list yet, not parsing topo file" )
+		links = nil
 	}
 
 	n = mk_network( old_net == nil )			// new network, need links and mlags only if it's the first network
+	n.relaxed = cfg.relaxed
 	if old_net == nil {
 		old_net = n								// prevents an if around every try to find an existing link.
 	} else {
 		n.links = old_net.links					// might it be wiser to copy this rather than reference and update the 'live' copy?
+		n.endpts = old_net.endpts
+		n.ep_cache = old_net.ep_cache
+
 		n.vlinks = old_net.vlinks
 		n.mlags = old_net.mlags
 		n.relaxed = old_net.relaxed
 	}
 
-	if links == nil {
-		return
+	if n.endpts == nil {
+		net_sheep.Baa( 1, "making endpoint map in network" );
+		n.endpts = make( map[string]*gizmos.Endpt )
 	}
-	if hlist == nil {
+
+	if links == nil {
+		if eps != nil {					// we cannot run the endpoints until we have a valid topo, so cache this list 
+			net_sheep.Baa( 2, "caching endpoint list; no topo yet" )
+			if n.ep_cache == nil {
+				n.ep_cache = eps		// just save it
+			} else {
+				for k, v := range eps {
+					n.ep_cache[k] = v
+				}
+			}
+		}
+
 		return
 	}
 
+	if n.ep_cache != nil {					// if there is a cache, make sure we include it
+		net_sheep.Baa( 2, "endpoint list was cached" )
+		if eps != nil {
+			net_sheep.Baa( 2, "merging %d endpoints from cache", len( n.endpts ) )
+			for k, v := range eps {
+				n.ep_cache[k] = v
+			}
+		}  else {
+			net_sheep.Baa( 2, "cache contains %d elements", len( n.ep_cache ) )
+		}
+
+		eps = n.ep_cache
+		n.ep_cache = nil
+	}
+
+	// FIXME:  if a link drops do we delete it?
 	for i := range links {								// parse all links returned from the controller (build our graph of switches and links)
 		if links[i].Capacity <= 0 {
-			links[i].Capacity = max_capacity			// default if it didn't come from the source
+			links[i].Capacity = cfg.max_link_cap		// default if it didn't come from the source
 		}
 
 		tokens := strings.SplitN( links[i].Src_switch, "@", 2 )	// if the 'id' is host@interface we need to drop interface so all are added to same switch
 		sswid := tokens[0]								
-		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 )
+		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 ) 
 		dswid := tokens[0]
 
 		ssw = n.switches[sswid]
@@ -685,7 +944,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		}
 
 		// omitting the link (last parm) causes reuse of the link if it existed so that obligations are kept; links _are_ created with the interface name
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )		
+		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, cfg.link_alarm_thresh, links[i].Mlag )		
 		lnk.Set_forward( dsw )
 		lnk.Set_backward( ssw )
 		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
@@ -698,86 +957,77 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 				mln := *links[i].Mlag + ".REV"				// differentiate the reverse links so we can adjust them with amount_in more easily
 				mlag_name = &mln
 			}
-			lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, mlag_name )
+			lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, cfg.link_alarm_thresh, mlag_name )
 			lnk.Set_forward( ssw )
 			lnk.Set_backward( dsw )
 			lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
 			lnk.Set_port( 2, links[i].Src_port )		// port on src to dest
 			dsw.Add_link( lnk )
-			net_sheep.Baa( 3, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
-			net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
+			net_sheep.Baa( 4, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
+			net_sheep.Baa( 4, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
 		}
 	}
 
-	if len( old_net.gwmap ) > 0 {			// if we build after gateway map has size, then gateways are in host table and checkpoints can be processed
-		n.hupdate = true
+	if len( n.endpts ) > 0 {						// if we build after we have an endpoint list then ok to allow checkpoint to be processed
+		n.ep_good = true
 	} else {
-		n.hupdate = false
+		n.ep_good = false
 	}
 
-	// REVAMP:  expect hlist to be a list of endpoints which we just need to map to switches and add.
-	for i := range hlist {			// parse the unpacked json (host list); structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
-		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
-			ip6 = ""
-			ip4 = ""
+	for k, ep := range eps {										// for each end point, add to the graph
+		if *(ep.Get_meta_value( "phost" )) == "" {
+			delete( n.endpts, k ) 
+		} else {
+			n.endpts[k] = ep											// reference only by uuid
+		}
+	}
 
-			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this doesn't snarf everything
-				if strings.Index( hlist[i].Ipv4[0], ":" ) >= 0 {	// if emulating floodlight, we get both kinds of IP in this field, one per hlist entry (ostack yields unique mac for each ip)
-					ip6 = hlist[i].Ipv4[0];
-				} else {
-					ip4 = hlist[i].Ipv4[0];
-				}
-			}
-			if len( hlist[i].Ipv6 ) > 0 &&  hlist[i].Ipv6[0] != "" {			// if getting from floodlight, then it will be here, and we may have to IPs on the same NIC
-				ip6 = hlist[i].Ipv6[0];
-			}
+	for k, ep := range n.endpts {									// switches are generated each go round, so we must insert endpoint into the new set
+		swname := ep.Get_phost()
+		csw := n.switches[*swname]									// connected switch is switch with the phost
+		if csw != nil {
+			_, port := ep.Get_switch_port()
+			ep.Set_switch( csw, port )								// allows us to find a starting switch by endpoint id for path finding
+			csw.Add_endpt( &k, port )								// allows switch to respond to Has_host() call by id or mac
 
-			h := gizmos.Mk_host( hlist[i].Mac[0], ip4, ip6 )
-			vmid := &empty_str
-			if old_net.ip2vmid != nil {
-				key := ip4
-				if key == "" {
-					key = ip6
-				}
-				
-				if old_net.ip2vmid[key] != nil {
-					vmid = old_net.ip2vmid[key]
-					h.Add_vmid( vmid )
-				}
-			}
-
-			for j := range hlist[i].AttachmentPoint {
-				h.Add_switch( n.switches[hlist[i].AttachmentPoint[j].SwitchDPID], hlist[i].AttachmentPoint[j].Port )
-				ssw = n.switches[hlist[i].AttachmentPoint[j].SwitchDPID]
-				if ssw != nil {																	// it should always be known, but no chances
-					ssw.Add_host( &hlist[i].Mac[0], vmid, hlist[i].AttachmentPoint[j].Port )	// allows switch to provide has_host() method
-					net_sheep.Baa( 4, "saving host %s in switch : %s port: %d", hlist[i].Mac[0], hlist[i].AttachmentPoint[j].SwitchDPID, hlist[i].AttachmentPoint[j].Port )
-				}
-			}
-
-			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 2, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
-			if ip4 != "" {
-				n.hosts[ip4] = h
-			}
-			if ip6 != "" {
-				n.hosts[ip6] = h
+			if net_sheep.Would_baa( 3 ) {
+				mac, _ := ep.Get_addresses( )
+				net_sheep.Baa( 3, "saving host %s (%s) in switch : %s port: %d", *mac, k, *swname, port )
 			}
 		} else {
-			net_sheep.Baa( 2, "skipping host in list (i=%d) attachment points=%d", i, len( hlist[i].Mac ) )
+			net_sheep.Baa( 1, "attachment switch for endpoint %s is missing: %s", k, swname )
 		}
+
 	}
 
 	return
 }
 
 /*
-	DEPRECATED
+	Accept a list of endpoints and use them to add to or update the current net.
+	Returns the new net if opdated and a bool flag to indiceate whether or not 
+	the attempt was successful (if not, caller might need to retry later).
+*/
+func update_net( act_net *Network, epmap map[string]*gizmos.Endpt, cfg *net_cfg, hlist *string ) ( new_net *Network, cached bool ) {
+
+	net_sheep.Baa( 1, "updating network with new eplist (%d elements)", len( epmap ) )
+	new_net = build( act_net, epmap, cfg, hlist )				// use map to rebuild the network
+
+	if new_net != nil {
+		new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
+		net_sheep.Baa( 1, "new network successfully built" )
+	} else {
+		return act_net, true
+	}
+
+	return new_net, false
+}
+
+
+/*
+	REVAMP: DEPRECATED
 	Given a project id, find the associated gateway.  Returns the whole project/ip string.
 
-	TODO: return list if multiple gateways
-	TODO: improve performance by maintaining a tid->gw map
-*/
 func (n *Network) gateway4tid( tid string ) ( *string ) {
 	for _, ip := range n.gwmap {				// mac to ip, so we have to look at each value
 		toks := strings.SplitN( *ip, "/", 2 )
@@ -788,46 +1038,33 @@ func (n *Network) gateway4tid( tid string ) ( *string ) {
 
 	return nil
 }
+*/
 
 /*
 	Given a host name, generate various bits of information like mac address, switch and switch port.
 	Error is set if we cannot find the box.
 */
-func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *string, swport int, err error ) {
-	var (
-		h	*gizmos.Host
-		ok 	bool
-	)
-
+func (n *Network) host_info( epid *string ) ( ip *string, mac *string, swid *string, swport int, err error ) {
 	mac = nil
 
-	if name == nil {
+	if epid == nil {
 		err = fmt.Errorf( "cannot translate nil name" )
 		return
 	}
 
-	if ip, ok = n.vm2ip[*name]; !ok {		// assume that IP was given instead of name (gateway)	
-		//err = fmt.Errorf( "cannot translate vm to an IP address: %s", *name )
-		//return
-		ip = name
+	ep := n.endpts[*epid]
+	if ep == nil {
+		return nil, nil, nil, -1, fmt.Errorf( "unable to find endpoint ID: %s", *epid )
 	}
 
-	mac = n.ip2mac[*ip]
-	if mac != nil {
-		if h, ok = n.hosts[*mac]; !ok {
-			err = fmt.Errorf( "cannot find host (representation) for host %s based on IP and MAC: %s %s", *name, *ip, *mac )
-			return
-		}
-	} else {
-		err = fmt.Errorf( "cannot translate IP to MAC: %s", *ip )
-		return
-	}
+	mac, ip = ep.Get_addresses()
 
-	sw, swport := h.Get_switch_port( 0 )			// we'll blindly assume it's not a split network
+
+	sw, swport := ep.Get_switch_port( )
 	if sw != nil {
 		swid = sw.Get_id()
 	} else {
-		err = fmt.Errorf( "cannot generate switch/port for %s", *name )
+		err = fmt.Errorf( "cannot generate switch/port for %s", *epid )
 		return
 	}
 
@@ -837,23 +1074,62 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 // --------------------  info exchange/debugging  -----------------------------------------------------------------------------------------
 
 /*
+	Request a list of endpoints from openstack.  
+	If blocking is requested, then a map of gizmos endpoints is returned, otherwise nil.
+*/
+func req_ep_list( rch chan *ipc.Chmsg, block bool ) ( map[string]*gizmos.Endpt ) {
+	net_sheep.Baa( 2, "requesting ep list from osif" )
+
+	if rch == nil {
+		rch = make(  chan *ipc.Chmsg )
+	}
+
+	req := ipc.Mk_chmsg( )
+	req_str := "_all_proj"
+	req.Send_req( osif_ch, rch, REQ_GET_ENDPTS, &req_str, nil )
+
+	if ! block {
+		return nil
+	}
+
+	req = <- rch							// wait for the response
+	if req == nil || req.Response_data == nil {
+		net_sheep.Baa( 1, "no data from osif on endpoint request" )
+	}
+	
+	m, ok :=  req.Response_data.( map[string]*gizmos.Endpt )
+	if ! ok {
+		net_sheep.Baa( 0, "nil end point map returned from osif" )
+		return nil
+	}
+
+	return m
+}
+
+	
+/*
+	REVAMP:  needs to generate output based on endpoint list
 	Generate a json list of hosts which includes ip, name, switch(es) and port(s).
 */
 func (n *Network) host_list( ) ( jstr string ) {
 	var( 	
 		sep 	string = ""
-		hname	string = ""
-		seen	map[string]bool
+		//hname	string = ""
+		//seen	map[string]bool
 	)
 
-	seen = make( map[string]bool )
+	//seen = make( map[string]bool )
 	jstr = ` [ `						// an array of objects
 
-	if n != nil && n.hosts != nil {
-		for _, h := range n.hosts {
-			ip4, ip6 := h.Get_addresses()
-			mac :=  h.Get_mac()						// track on this as we will always see this
+	//--- deprecated if n != nil && n.hosts != nil {
+	if n != nil && n.endpts != nil {
+		//--- dep for _, h := range n.hosts {
+		for vmid, ep := range n.endpts {
+			ip, mac := ep.Get_addresses()
+			proj := ep.Get_project()
+			//mac :=  h.Get_mac()						// track on this as we will always see this
 
+			/*---- deprecated
 			if seen[*mac] == false {
 				seen[*mac] = true;					// we track hosts by both mac and ip so only show once
 
@@ -866,12 +1142,20 @@ func (n *Network) host_list( ) ( jstr string ) {
 				if n.ip2vmid[*ip4] != nil {
 					vmid = *n.ip2vmid[*ip4]
 				}
-				jstr += fmt.Sprintf( `%s { "name": %q, "vmid": %q, "mac": %q, "ip4": %q, "ip6": %q `, sep, hname, vmid, *(h.Get_mac()), *ip4, *ip6 )
-				if nconns := h.Get_nconns(); nconns > 0 {
+			--- */
+				sw, port := ep.Get_switch_port( )
+				sw_str := &empty_str
+				if sw != nil {
+					sw_str = sw.Get_id()
+				}
+				jstr += fmt.Sprintf( `%s { "epid": %q, "mac": %q, "project": %q, "ip": %q, "switch": %q, "port": %d }`, sep, vmid, *mac, *proj, *ip, *sw_str, port )
+
+				/* ------
+				if nconns := ep.Get_nconns(); nconns > 0 {
 					jstr += `, "conns": [`
 					sep = ""
 					for i := 0; i < nconns; i++ {
-						sw, port := h.Get_switch_port( i )
+						sw, port := ep.Get_switch_port( i )
 						if sw == nil {
 							break
 						}
@@ -884,9 +1168,10 @@ func (n *Network) host_list( ) ( jstr string ) {
 				}
 
 				jstr += ` }`						// end of this host
+				---- */
 
 				sep = ","
-			}
+			//---- }
 		}
 	} else {
 		net_sheep.Baa( 0, "ERR: host_list: n is nil (%v) or n.hosts is nil  [TGUNET007]", n == nil )
@@ -944,6 +1229,8 @@ func (n *Network) to_json( ) ( jstr string ) {
 	Transfer maps from an old network graph to this one
 */
 func (net *Network) xfer_maps( old_net *Network ) {
+	net.limits = old_net.limits
+/*
 	net.vm2ip = old_net.vm2ip
 	net.ip2vm = old_net.ip2vm
 	net.vmid2ip = old_net.vmid2ip
@@ -955,36 +1242,30 @@ func (net *Network) xfer_maps( old_net *Network ) {
 	net.gwmap = old_net.gwmap
 	net.fip2ip = old_net.fip2ip
 	net.ip2fip = old_net.ip2fip
-	net.limits = old_net.limits
+*/
 }
 
 
 // --------- public -------------------------------------------------------------------------------------------
 
 /*
+	REVAMP:  sdn host is no longer supported.
+
 	to be executed as a go routine.
 	nch is the channel we are expected to listen on for api requests etc.
 	sdn_host is the host name and port number where the sdn controller is running.
 	(for now we assume the sdn-host is a floodlight host and invoke FL_ to build our graph)
 */
-func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
+func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 	var (
 		act_net *Network
 		req				*ipc.Chmsg
-		max_link_cap	int64 = 0
-		refresh			int = 30
-		find_all_paths	bool = false		// if set, then we will find all paths for a reservation not just shortest
-		mlag_paths 		bool = true			// can be set to false in config (mlag_paths); overrides find_all_paths
-		link_headroom 	int = 0				// percentage that each link capacity is reduced by
-		link_alarm_thresh int = 0			// percentage of total capacity that when reached for a timeslice will trigger an alarm
 		limits map[string]*gizmos.Fence		// user link capacity boundaries
-		phost_suffix 	*string = nil
-		discount 		int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
-		relaxed			bool = false				// set with relaxed = true in config
-		hlist			*string = &empty_str		// host list we'll give to build should we need to build a dummy star topo
-
+		hlist			*string = &empty_str				// host list we'll give to build should we need to build a dummy star topo
+		eps_list	map[string]*gizmos.Endpt				// list of enpoints as delivered by openstack (we add to with VM/net changes)
 	)
 
+	/* ---- deprecated
 	if *sdn_host  == "" {
 		sdn_host = cfg_data["default"]["sdn_host"]
 		if sdn_host == nil {
@@ -997,120 +1278,104 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 			}
 		}
 	}
+	*/
 
 	net_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
 	net_sheep.Set_prefix( "netmgr" )
 	tegu_sheep.Add_child( net_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 	limits = make( map[string]*gizmos.Fence )
-	if cfg_data["fqmgr"] != nil {								// we need to know if fqmgr is adding a suffix to physical host names so we can strip
-		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {
-			phost_suffix = p
-			net_sheep.Baa( 1, "will strip suffix from mac2phost map: %s", *phost_suffix )
-		}	
+	cfg := mk_net_cfg( cfg_data )
+
+	if cfg == nil {
+		net_sheep.Baa( 0, "CRI: abort: unable to build a config struct for network goroutine" )
+		os.Exit( 1 )
 	}
 
-														// suss out config settings from our section
-	if cfg_data["network"] != nil {
-		if p := cfg_data["network"]["discount"]; p != nil {
-			d := clike.Atoll( *p ); 			
-			if d < 0 {
-				discount = 0
-			} else {
-				discount = d
-			}
-		}
-
-		if p := cfg_data["network"]["relaxed"]; p != nil {
-			relaxed = *p ==  "true" || *p ==  "True" || *p == "TRUE"
-		}
-		if p := cfg_data["network"]["refresh"]; p != nil {
-			refresh = clike.Atoi( *p ); 			
-		}
-		if p := cfg_data["network"]["link_max_cap"]; p != nil {
-			max_link_cap = clike.Atoi64( *p )
-		}
-		if p := cfg_data["network"]["verbose"]; p != nil {
-			net_sheep.Set_level(  uint( clike.Atoi( *p ) ) )
-		}
-
-		if p := cfg_data["network"]["all_paths"]; p != nil {
-			find_all_paths = false
-			net_sheep.Baa( 0, "config file key find_all_paths is deprecated: use find_paths = {all|mlag|shortest}" )
-		}
-
-		if p := cfg_data["network"]["find_paths"]; p != nil {
-			switch( *p ) {
-				case "all":	
-					find_all_paths = true
-					mlag_paths = false
-
-				case "mlag":
-					find_all_paths = false
-					mlag_paths = true
-
-				case "shortest":
-					find_all_paths = false
-					mlag_paths = false
-
-				default:
-					net_sheep.Baa( 0, "WRN: invalid setting in config: network:find_paths %s is not valid; must be: all, mlag, or shortest; assuming mlag  [TGUNET010]" )
-					find_all_paths = false
-					mlag_paths = true
-			}
-		}
-
-		if p := cfg_data["network"]["link_headroom"]; p != nil {
-			link_headroom = clike.Atoi( *p )							// percentage that we should take all link capacities down by
-		}
-
-		if p := cfg_data["network"]["link_alarm"]; p != nil {
-			link_alarm_thresh = clike.Atoi( *p )						// percentage of total capacity when an alarm is generated
-		}
-
-		if p := cfg_data["network"]["user_link_cap"]; p != nil {
-			s := "default"
-			f := gizmos.Mk_fence( &s, clike.Atoi64( *p ), 0, 0 )			// the default capacity value used if specific user hasn't been added to the hash
-			limits["default"] = f
-			v, _ := f.Get_limits()
-			net_sheep.Baa( 1, "link capacity limits set to: %d%%", v )
-		}
+	if cfg.def_ul_cap >= 0 {
+		s := "default"
+		f := gizmos.Mk_fence( &s, cfg.def_ul_cap, 0, 0 )			// the default capacity value used if specific user hasn't been added to the hash
+		limits["default"] = f
+		v, _ := f.Get_limits()
+		net_sheep.Baa( 1, "link capacity limits set to: %d%%", v )
 	}
 
+	if topo_file != nil && *topo_file != "" {
+		cfg.topo_file = topo_file						// command line override
+		net_sheep.Baa( 1, "topofile in config was overridden from command line: %s", *topo_file )
+	}
 														// enforce some sanity on config file settings
-	if refresh < 15 {
-		net_sheep.Baa( 0, "refresh rate in config file (%ds) was too small; set to 15s", refresh )
-		refresh = 15
+	if cfg.refresh < 15 {
+		net_sheep.Baa( 0, "refresh rate in config file (%ds) was too small; set to 15s", cfg.refresh )
+		cfg.refresh = 15
 	}
-	if max_link_cap <= 0 {
-		max_link_cap = 1024 * 1024 * 1024 * 10							// if not in config file use 10Gbps
+	if cfg.max_link_cap <= 0 {
+		cfg.max_link_cap = 1024 * 1024 * 1024 * 10							// if not in config file use 10Gbps
 	}
 
-	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
+	net_sheep.Baa( 1,  "network_mgr thread started: max_link_cap=%d refresh=%d", cfg.max_link_cap, cfg.refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, &empty_str )
+	net_sheep.Baa( 1, "requesting end point list from osif (blocking until it arrives)" )
+	eps_list = req_ep_list( nil, true )										// rquest list -- block until we get it
+	if len( eps_list ) <= 0 {
+		net_sheep.Baa( 1, "end point list received from osif with %d entries scheduling another request", len( eps_list ) )
+		req_ep_list( nch, false )										// rquest list response will come back and be processed in the loop below
+	} else {
+		net_sheep.Baa( 1, "end point list received from osif with %d entries (unblocking)", len( eps_list ) )
+	}
+
+	act_net = build( nil, eps_list, cfg, &empty_str )
 	if act_net == nil {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!  [TGUNET011]" )		// this is bad and WILL cause a core dump
 	} else {
 		net_sheep.Baa( 1, "initial network graph has been built" )
 		act_net.limits = limits
-		act_net.Set_relaxed( relaxed )
+		//act_net.Set_relaxed( relaxed )   // NEED?
 	}
 
-	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 						// tickle once, very soon after starting, to get a host list
-	tklr.Add_spot( int64( refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// get a host list from openstack now and again
-	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network
+	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 							// tickle once, very soon after starting, to get a host list
+	tklr.Add_spot( int64( cfg.refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER ) // get a host list from openstack now and again
+	tklr.Add_spot( int64( cfg.refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network
+
+														// set up message listeners for bus events etc
+	event_ch := make( chan *msgrtr.Envelope, 1024 )		// channel for message events
+	ev_data := &event_handler_data {
+		req_chan: nch,
+	}
+	msgrtr.Register( "endpt", event_ch, ev_data )			// listen for all network and endpoint messages
+	msgrtr.Register( "network", event_ch , ev_data )		// these arrive as msgrtr.Events in the main select below.
 	
 	for {
-		select {					// assume we might have multiple channels in future
+		select {							// receive data from any channel; ensure serialisation
+			case env := <- event_ch:		// message event received 
+				event := env.Event
+				tokens := strings.Split( event.Event_type, "." )
+				switch tokens[0] {
+					case "network":
+						netev_net( event, env.Ldata )
+
+					case "endpt":
+						netev_endpt( event, env.Ldata )
+
+					default: net_sheep.Baa( 1, "ignored: unknown/unrecognised event received: %s", event.Event_type )
+				}
+
 			case req = <- nch:
 				req.State = nil				// nil state is OK, no error
 
-				net_sheep.Baa( 3, "processing request %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
+				net_sheep.Baa( 4, "processing request %d", req.Msg_type )			// sometimes helps to see what we're doing
 				switch req.Msg_type {
 					case REQ_NOOP:			// just ignore -- acts like a ping if there is a return channel
 
 					case REQ_STATE:			// return state with respect to whether we have enough data to allow reservation requests
+											// we allow updates once the initial ep list has size.	
+						state := 0
+						if act_net != nil && act_net.ep_good {
+							state = 1
+						}
+						net_sheep.Baa( 1, "net-state: state=%d", state )
+					
+						/* --- depreacated
 						state := 0			// value reflects ability 2 == have all we need; 1 == have partial, but must block, 0 == have nothing
 						mlen := 0
 						if act_net.mac2phost != nil  && len( act_net.mac2phost ) > 0 {	// in lazy update world, we need only the agent supplied data
@@ -1118,6 +1383,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							state = 2													// once we have it we are golden
 						}
 						net_sheep.Baa( 1, "net-state: m2pho=%v/%d state=%d", act_net.mac2phost == nil, mlen, state )
+						---- */
 
 						req.Response_data = state
 
@@ -1126,8 +1392,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						if ok {
 							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )
 							net_sheep.Baa( 1,  "has-capacity request received on channel  %s -> %s", h1, h2 )
-							pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, find_all_paths, false );
-							pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, find_all_paths, true ); 	// reverse path
+							pcount_in, path_list_out, o_cap_trip := act_net.build_paths( h1, h2, commence, expiry,  bandw_out, cfg.find_all_paths, false );
+							pcount_out, path_list_in, i_cap_trip := act_net.build_paths( h2, h1, commence, expiry, bandw_in, cfg.find_all_paths, true ); 	// reverse path
 
 							if pcount_out > 0  && pcount_in > 0  {
 								path_list := make( []*gizmos.Path, pcount_out + pcount_in )		// combine the lists
@@ -1160,59 +1426,71 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 					case REQ_BWOW_RESERVE:								// one way bandwidth reservation, nothing really to vet, return a gate block
-						// host names are expected to have been vetted (if needed) and translated to project-id/IPaddr if IDs are enabled
-						var ipd *string
-						var dh  *gizmos.Host
+						// host names are expected to have been vetted (if needed) and translated to project/uuid/address:port
 
 						req.Response_data = nil
 						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
 						if ok {
-							src, dest := p.Get_hosts( )									// we assume project/host-name
+							//src, dest := p.Get_hosts( )									// we assume project/epuuid/ip:port
+							src, dest, _, dport, _, _ := p.Get_values( )					// we assume project/epuuid/ip:port for src,dest and need a dest port
 
 							if src != nil && dest != nil {
 								net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
 
 								usr := "nobody"											// default dummy user if not project/host
-								toks := strings.SplitN( *src, "/", 2 )					// suss out project name
+								sepid := ""
+								toks := strings.SplitN( *src, "/", 3 )					// suss out various bits of stuff from names
 								if len( toks ) > 1 {
 									usr = toks[0]										// the 'user' for queue setting
 								}
+								if len( toks ) > 2 {
+									sepid = toks[1]
+								}
+
+								//ipd := ""
+								depid := ""
+								toks = strings.SplitN( *dest, "/", 3 )
+								if len( toks ) > 1 {
+									depid = toks[1]
+								}
 	
-								ips, err := act_net.name2ip( src )
-								if err == nil {
-									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
-								}
+								sh := act_net.endpts[sepid]							// suss out endpoints, dest can be nil and that's ok
+								dh := act_net.endpts[depid]
+								if sh != nil {
+									ssw, _ := sh.Get_switch_port( )
+									gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
+									if (*dest)[0:1] == "!" || dh == nil {								// indicate that dest IP cannot be converted to a MAC address
+										gate.Set_extip( dest )
+									} else {									
+										if *dport != "0" {							// must check for port, and if there must set external address
+											gate.Set_extip( dest )
+										}
+									}
 
-								sh := act_net.hosts[*ips]
-								if ipd != nil {
-									dh = act_net.hosts[*ipd]						// this will be nil for an external IP
-								}
-								ssw, _ := sh.Get_switch_port( 0 )
-								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
-								if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address
-									gate.Set_extip( dest )
-								}
-
-								c, e := p.Get_window( )														// commence/expiry times
-								fence := act_net.get_fence( &usr )
-								max := int64( -1 )
-								if fence != nil {
-									max = fence.Get_limit_max()
-								}
-								if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
-									qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
-									p.Set_qid( qid ) 												// and add the queue id to the pledge
-
-									if gate.Add_queue( c, e, p.Get_bandwidth(), qid, fence ) {		// create queue AND inc utilisation on the link
-										req.Response_data = gate									// finally safe to set gate as the return data
-										req.State = nil												// and nil state to indicate OK
+									c, e := p.Get_window( )												// commence/expiry times
+									fence := act_net.get_fence( &usr )
+									max := int64( -1 )
+									if fence != nil {
+										max = fence.Get_limit_max()
+									}
+									if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
+										qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
+										p.Set_qid( qid ) 												// and add the queue id to the pledge
+	
+										if gate.Add_queue( c, e, p.Get_bandwidth(), qid, fence ) {		// create queue AND inc utilisation on the link
+											req.Response_data = gate									// finally safe to set gate as the return data
+											req.State = nil												// and nil state to indicate OK
+										} else {
+											net_sheep.Baa( 1, "owreserve: internal mishap: unable to set queue for gate: %s", gate )
+											req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
+										}
 									} else {
-										net_sheep.Baa( 1, "owreserve: internal mishap: unable to set queue for gate: %s", gate )
-										req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
+										net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
+										req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
 									}
 								} else {
-									net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
-									req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
+									net_sheep.Baa( 1, "owreserve: unable to parse one of the endpoint strings: %s %s", src, dest )
+									req.State = fmt.Errorf( "unable to create oneway reservation for %d: unable to parse endpoint name(s)" )
 								}
 							} else {
 								net_sheep.Baa( 1, "owreserve: one/both host names were invalid" )
@@ -1224,23 +1502,23 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						}
 
 					case REQ_BW_RESERVE:
-						var ip2		*string = nil					// tmp pointer for this block
+						//var ip2		*string = nil					// tmp pointer for this block
 
-						// host names are expected to have been vetted (if needed) and translated to project-id/name if IDs are enabled
+						// host names are expected to have been vetted (if needed) and translated to project/uuid/address
 						p, ok := req.Req_data.( *gizmos.Pledge_bw )
 						if ok {
 							h1, h2, _, _, commence, expiry, bandw_in, bandw_out := p.Get_values( )		// ports can be ignored
 							net_sheep.Baa( 1,  "network: bw reservation request received: %s -> %s  from %d to %d", *h1, *h2, commence, expiry )
 
 							suffix := "bps"
-							if discount > 0 {
-								if discount < 101 {
-									bandw_in -=  ((bandw_in * discount)/100)
-									bandw_out -=  ((bandw_out * discount)/100)
+							if cfg.discount > 0 {
+								if cfg.discount < 101 {
+									bandw_in -=  ((bandw_in * cfg.discount)/100)
+									bandw_out -=  ((bandw_out * cfg.discount)/100)
 									suffix = "%"
 								} else {
-									bandw_in -= discount
-									bandw_out -= discount
+									bandw_in -= cfg.discount
+									bandw_out -= cfg.discount
 								}
 
 								if bandw_out < 10 {			// add some sanity, and keep it from going too low
@@ -1249,18 +1527,17 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								if bandw_in < 10 {
 									bandw_in = 10
 								}
-								net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", discount, suffix, bandw_in, bandw_out )
+								net_sheep.Baa( 1, "bandwidth was reduced by a discount of %d%s: in=%d out=%d", cfg.discount, suffix, bandw_in, bandw_out )
 							}
 
-							ip1, err := act_net.name2ip( h1 )
-							if err == nil {
-								ip2, err = act_net.name2ip( h2 )
-							}
+							ep1_name := act_net.defrock_epname( h1 )			// endpoint uuids
+							ep2_name := act_net.defrock_epname( h2 )
 
-							if err == nil {
-								net_sheep.Baa( 2,  "network: attempt to find path between  %s -> %s", *ip1, *ip2 )
-								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( ip1, ip2, commence, expiry, bandw_out, find_all_paths, false ); 	// outbound path
-								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( ip2, ip1, commence, expiry, bandw_in, find_all_paths, true ); 		// inbound path
+							if ep1_name != "" && ep2_name != "" {
+								net_sheep.Baa( 2,  "network: attempt to find outbound path between  %s -> %s", ep1_name, ep2_name )
+								pcount_out, path_list_out, o_cap_trip := act_net.build_paths( &ep1_name, &ep2_name, commence, expiry, bandw_out, cfg.find_all_paths, false ); 	// outbound path
+								net_sheep.Baa( 2,  "network: attempt to find inbound  path between  %s -> %s", ep1_name, ep2_name )
+								pcount_in, path_list_in, i_cap_trip := act_net.build_paths( &ep2_name, &ep1_name, commence, expiry, bandw_in, cfg.find_all_paths, true ); 		// inbound path
 
 								if pcount_out > 0  &&  pcount_in > 0  {
 									net_sheep.Baa( 1,  "network: %d acceptable path(s) found icap=%v ocap=%v", pcount_out + pcount_in, i_cap_trip, o_cap_trip )
@@ -1283,7 +1560,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 										fence := act_net.get_fence( path_list[i].Get_usr() )
 										net_sheep.Baa( 2,  "\tpath_list[%d]: %s -> %s  (%s)", i, *h1, *h2, path_list[i].To_str( ) )
 										path_list[i].Set_queue( qid, commence, expiry, path_list[i].Get_bandwidth(), fence )		// create queue AND inc utilisation on the link
-										if mlag_paths {
+										if cfg.mlag_paths {
 											net_sheep.Baa( 1, "increasing usage for mlag members" )
 											path_list[i].Inc_mlag( commence, expiry, path_list[i].Get_bandwidth(), fence, act_net.mlags )
 										}
@@ -1305,8 +1582,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									net_sheep.Baa( 0,  "no paths in list: %s  cap=%v/%v", req.State, i_cap_trip, o_cap_trip )
 								}
 							} else {
-								net_sheep.Baa( 0,  "network: unable to map to an IP address: %s",  err )
-								req.State = fmt.Errorf( "unable to map host name to a known IP address: %s", err )
+								net_sheep.Baa( 0,  "network: unable to map to an enpoint uuid: %s (%s) %s (%s)",  *h1, ep1_name, *h2, ep2_name )
+								req.State = fmt.Errorf( "one of the endpoint uuids is not known: %s %s", *h1, *h2 )
 							}
 						} else {									// pledge wasn't a bw pledge
 							net_sheep.Baa( 1, "internal mishap: pledge passed to reserve wasn't a bw pledge: %s", p )
@@ -1341,6 +1618,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							
 						}
 
+					// should be deprecated with new_ep 
 					case REQ_ADD:							// insert new information into the various vm maps
 						if req.Req_data != nil {
 							switch req.Req_data.( type ) {
@@ -1355,13 +1633,253 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									}
 							}
 
-							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
+							// deprecated --- new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
+							new_net := build( nil, nil, cfg, hlist )
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 								act_net = new_net							// and finally use it
 							}
 						}
+
+											//----------------- end point management ------------------------
+					case REQ_EP2MAC:										// given an endpoint name return the mac address
+						if req.Response_ch != nil {
+							var ep *gizmos.Endpt
+							var ep_uuid string
+
+							switch epid := req.Req_data.( type ) {
+								case string:
+									ep = act_net.endpts[epid]
+									ep_uuid = epid
+
+								case *string:
+									ep = act_net.endpts[*epid]
+									ep_uuid = *epid
+								
+							}
+
+							if ep != nil {
+								req.Response_data = *(ep.Get_mac())
+							} else {
+								net_sheep.Baa( 2, "ep2mac did not map to a known enpoint: %s", ep_uuid )
+								req.Response_data = ""
+							}
+							//net_sheep.Baa( 1, ">>>> xlating ep2mac responding: %s", req.Response_data.( string ) )
+						}
+
+					case REQ_EP2PROJ:										// given an endpoint name return the project id
+						if req.Response_ch != nil {
+							var ep *gizmos.Endpt
+
+							switch epid := req.Req_data.( type ) {
+								case string:
+									ep = act_net.endpts[epid]
+
+								case *string:
+									ep = act_net.endpts[*epid]
+							}
+
+							if ep != nil {
+								req.Response_data = *(ep.Get_meta_value( "project" ))
+							} else {
+								req.Response_data = ""
+							}
+						}
+
+					case REQ_NEW_ENDPT:										// add a new endpoint, or endpoint set to the graph
+						req.Response_ch = nil								// ensure we don't try to write back on this
+						if req == nil || req.Req_data == nil {
+							net_sheep.Baa( 1, "no data on new endpoint reqeust" )
+						} else {
+							if m, ok := req.Req_data.( map[string]*gizmos.Endpt ); ok {		// pick up the map if it is the expected type
+								act_net, _ = update_net( act_net, m, cfg, hlist )
+							} else {
+								net_sheep.Baa( 1, "new endpoint reqeust contained bad data" )
+							}
+						}
+
+					case REQ_GET_ENDPTS:									// response back from osif if we had to make additional requests (os down?)
+						req.Response_ch = nil								// ensure we don't try to write back on this
+						req_again := true									// assume we'll need to request it again
+						if req == nil || req.Response_data == nil {
+							net_sheep.Baa( 1, "no data on endpoint response" )
+						} else {
+							if m, ok := req.Response_data.( map[string]*gizmos.Endpt ); ok {		// pick up the map if it is the expected type
+								act_net, req_again = update_net( act_net, m, cfg, hlist )
+							} else {
+								net_sheep.Baa( 1, "response from ostack endpoint request was not expected map type" )
+							}
+						}
+
+						if req_again {
+							req_ep_list( nch, false )					// request another which will process here when received
+						}
+
+					case REQ_GEN_QMAP:							// generate a new queue setting map
+						ts := req.Req_data.( int64 )			// time stamp for generation
+						req.Response_data, req.State = act_net.gen_queue_map( ts, false )
+
+					case REQ_GEN_EPQMAP:						// generate a new queue setting map but only for endpoints
+						ts := req.Req_data.( int64 )			// time stamp for generation
+						req.Response_data, req.State = act_net.gen_queue_map( ts, true )
 						
+
+					/* --- deprecated -- unused and with endpoint not needed
+					case REQ_GETPHOST:							// given a name or IP address, return the physical host
+						if req.Req_data != nil {
+							var ip *string
+
+							s := req.Req_data.( *string )
+							ip, req.State = act_net.name2ip( s )
+							if req.State == nil {
+								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
+								if req.Response_data == nil {
+									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", ip )
+								}	
+							}
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" )
+						}
+					------ */
+						
+					case REQ_GETIP:								// given an endpoint uuid return the default (first) ip address
+						if req.Req_data != nil {
+							s := req.Req_data.( *string )
+							req.Response_data, req.State = act_net.epid2ip( s )		// returns ip or nil
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" )
+						}
+					
+					//REVAMP:  this is used only by old steering and may be deprecated
+					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
+						if req.Req_data != nil {
+							ip, mac, swid, port, err := act_net.host_info(  req.Req_data.( *string ) )
+							if err != nil {
+								req.State = err
+								req.Response_data = nil
+							} else {
+								req.Response_data = fmt.Sprintf( "%s,%s,%s,%d", *ip, *mac, *swid, port )
+							}
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" )
+						}
+
+					case REQ_GETLMAX:							// DEPRECATED!  request for the max link allocation
+						req.Response_data = nil;
+						req.State = nil;
+
+					case REQ_NETUPDATE:											// build a new network graph
+						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
+						//deprecated----- new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
+						new_net := build( act_net, nil, cfg, hlist )
+						if new_net != nil {
+							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
+							act_net = new_net
+
+							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
+						} else {
+							net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
+						}
+
+
+					case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
+																	// this is similar, yet different, than the code in fq_mgr (we don't need phost suffix here)
+						req.Response_ch = nil;						// regardless of source, we should not reply to this request
+
+						if req.State != nil || req.Response_data != nil {				// response from ostack if with list or error
+							if  req.Response_data.( *string ) != nil {
+								hls := strings.TrimLeft( *(req.Response_data.( *string )), " \t" )		// ditch leading whitespace
+								hl := &hls
+								if *hl != ""  {
+									hlist = hl										// ok to use it
+									net_sheep.Baa( 2, "host list received from osif: %s", *hlist )
+								} else {
+									net_sheep.Baa( 1, "empty host list received from osif was discarded" )
+								}
+							} else {
+								net_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
+							}
+						} else {
+							req_hosts( nch, net_sheep )					// send requests to osif for data
+						}
+								
+					//	------------------ user api things ---------------------------------------------------------
+					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
+						data := req.Req_data.( []*string )
+						val := clike.Atoi64( *data[1] )	
+						if val < 0 {							// drop the user fence
+							delete( act_net.limits, *data[0] )
+							net_sheep.Baa( 1, "user link capacity deleted: %s", *data[0] )
+						} else {
+							f := gizmos.Mk_fence( data[0], val, 0, 0 )			// get the default frame
+							act_net.limits[*data[0]] = f
+							net_sheep.Baa( 1, "user link capacity set: %s now %d%%", *data[0], f.Get_limit_max() )
+						}
+						
+					case REQ_NETGRAPH:							// dump the current network graph
+						req.Response_data = act_net.to_json()
+						// TESTING -- remove next line before flight
+						req_ep_list( nch, false )										// rquest list -- block until we get it
+
+					case REQ_LISTHOSTS:							// spew out a json list of hosts with name, ip, switch id and port
+						req.Response_data = act_net.host_list( )
+
+					case REQ_LISTULCAP:							// user link capacity list
+						req.Response_data = act_net.fence_list( )
+
+					case REQ_LISTCONNS:							// for a given endpoint spit out the switch and port it is connected to
+						epid, ok := req.Req_data.( *string )
+						req.Response_data = nil			// assume failure
+						if ok && epid != nil {
+							ep := act_net.endpts[*epid]
+							if ep != nil {
+								req.Response_data = ep.To_json( );
+							} else {
+								req.State = fmt.Errorf( "did not find endpoint: %s", *epid )
+							}
+						} else {
+							req.State = fmt.Errorf( "internal mishap: bad data passed to network manager list conns" )
+						}
+
+					case REQ_GET_PHOST_FROM_MAC:			// try to map a MAC to a phost -- used for mirroring
+						mac, ok := req.Req_data.( *string )
+						if ok {
+							for _, ep := range act_net.endpts {
+								if ep.Equals_meta( "mac", mac ) {
+									req.Response_data = ep.Get_meta_value( "phost" )
+								}
+							}
+						}
+						/*
+						for k, v := range act_net.mac2phost {
+							if *mac == k {
+								req.Response_data = v
+							}
+						}
+						*/
+
+					case REQ_SETDISC:
+						req.State = nil;	
+						req.Response_data = "";			// we shouldn't send anything back, but if caller gave a channel, be successful
+						if req.Req_data != nil {
+							d := clike.Atoll( *(req.Req_data.( *string )) )
+							if d < 0 {
+								cfg.discount = 0
+							} else {
+								cfg.discount = d
+							}
+						}
+
+					// --------------------- agent things -------------------------------------------------------------
+					case REQ_MAC2PHOST:
+						req.Response_ch = nil			// we don't respond to these
+						//deprecated --- act_net.update_mac2phost( req.Req_data.( []string ), cfg.phost_suffix )
+						net_sheep.Baa( 1, "mac2phost list from agent ignored" )
+
+
+					//==================== deprecated with revamp, for history at the moment ===========================
+						
+					/* ----- deprecated --------------------
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map
 						if req.Req_data != nil {
 							act_net.vm2ip = req.Req_data.( map[string]*string )
@@ -1435,181 +1953,22 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						} else {
 							net_sheep.Baa( 1, "fip2ip map was nil; not changed" )
 						}
-
-					case REQ_GEN_QMAP:							// generate a new queue setting map
-						ts := req.Req_data.( int64 )			// time stamp for generation
-						req.Response_data, req.State = act_net.gen_queue_map( ts, false )
-
-					case REQ_GEN_EPQMAP:						// generate a new queue setting map but only for endpoints
-						ts := req.Req_data.( int64 )			// time stamp for generation
-						req.Response_data, req.State = act_net.gen_queue_map( ts, true )
-						
-					case REQ_GETGW:								// given a project ID (projects ID) map it to the gateway
+					----- */
+					/* ---- deprecated: http interface uses osif for a direct query
+					case REQ_GETGW:								// given a project ID map it to the gateway
 						if req.Req_data != nil {
 							tname := req.Req_data.( *string )
 							req.Response_data = act_net.gateway4tid( *tname )
 						} else {
 							req.Response_data = nil
 						}
-
-					case REQ_GETPHOST:							// given a name or IP address, return the physical host
-						if req.Req_data != nil {
-							var ip *string
-
-							s := req.Req_data.( *string )
-							ip, req.State = act_net.name2ip( s )
-							if req.State == nil {
-								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
-								if req.Response_data == nil {
-									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", ip )
-								}	
-							}
-						} else {
-							req.State = fmt.Errorf( "no data passed on request channel" )
-						}
-						
-					case REQ_GETIP:								// given a VM name or ID return the IP if we know it.
-						if req.Req_data != nil {
-							s := req.Req_data.( *string )
-							req.Response_data, req.State = act_net.name2ip( s )		// returns ip or nil
-						} else {
-							req.State = fmt.Errorf( "no data passed on request channel" )
-						}
-					
-					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
-						if req.Req_data != nil {
-							ip, mac, swid, port, err := act_net.host_info(  req.Req_data.( *string ) )
-							if err != nil {
-								req.State = err
-								req.Response_data = nil
-							} else {
-								req.Response_data = fmt.Sprintf( "%s,%s,%s,%d", *ip, *mac, *swid, port )
-							}
-						} else {
-							req.State = fmt.Errorf( "no data passed on request channel" )
-						}
-
-					case REQ_GETLMAX:							// DEPRECATED!  request for the max link allocation
-						req.Response_data = nil;
-						req.State = nil;
-
-					case REQ_NETUPDATE:											// build a new network graph
-						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
-						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
-						if new_net != nil {
-							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
-							act_net = new_net
-
-							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
-						} else {
-							net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
-						}
-
-
-					case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
-																	// this is similar, yet different, than the code in fq_mgr (we don't need phost suffix here)
-						req.Response_ch = nil;						// regardless of source, we should not reply to this request
-
-						if req.State != nil || req.Response_data != nil {				// response from ostack if with list or error
-							if  req.Response_data.( *string ) != nil {
-								hls := strings.TrimLeft( *(req.Response_data.( *string )), " \t" )		// ditch leading whitespace
-								hl := &hls
-								if *hl != ""  {
-									hlist = hl										// ok to use it
-									net_sheep.Baa( 2, "host list received from osif: %s", *hlist )
-								} else {
-									net_sheep.Baa( 1, "empty host list received from osif was discarded" )
-								}
-							} else {
-								net_sheep.Baa( 0, "WRN: no  data from openstack; expected host list string  [TGUFQM009]" )
-							}
-						} else {
-							req_hosts( nch, net_sheep )					// send requests to osif for data
-						}
-								
-					//	------------------ user api things ---------------------------------------------------------
-					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers
-						data := req.Req_data.( []*string )
-						val := clike.Atoi64( *data[1] )	
-						if val < 0 {							// drop the user fence
-							delete( act_net.limits, *data[0] )
-							net_sheep.Baa( 1, "user link capacity deleted: %s", *data[0] )
-						} else {
-							f := gizmos.Mk_fence( data[0], val, 0, 0 )			// get the default frame
-							act_net.limits[*data[0]] = f
-							net_sheep.Baa( 1, "user link capacity set: %s now %d%%", *data[0], f.Get_limit_max() )
-						}
-						
-					case REQ_NETGRAPH:							// dump the current network graph
-						req.Response_data = act_net.to_json()
-
-					case REQ_LISTHOSTS:							// spew out a json list of hosts with name, ip, switch id and port
-						req.Response_data = act_net.host_list( )
-
-					case REQ_LISTULCAP:							// user link capacity list
-						req.Response_data = act_net.fence_list( )
-
-					case REQ_LISTCONNS:							// for a given host spit out the switch(es) and port(s)
-						hname := req.Req_data.( *string )
-						host := act_net.hosts[*hname]
-						if host != nil {
-							req.Response_data = host.Ports2json( );
-						} else {
-							req.Response_data = nil			// assume failure
-							req.State = fmt.Errorf( "did not find host: %s", *hname )
-
-							net_sheep.Baa( 2, "looking up name for listconns: %s", *hname )
-							hname = act_net.vm2ip[*hname]		// maybe they sent a vm ID or name
-							if hname == nil || *hname == "" {
-								net_sheep.Baa( 2, "unable to find name in vm2ip table" )
-
-								if net_sheep.Would_baa( 3 ) {
-									for k, v := range act_net.vm2ip {
-										net_sheep.Baa( 3, "vm2ip[%s] = %s", k, *v );
-									}
-								}
-							} else {
-								net_sheep.Baa( 2, "name found in vm2ip table translated to: %s, looking up  host", *hname )
-								host = act_net.hosts[*hname]
-								if host != nil {
-									req.Response_data = host.Ports2json( );
-									req.State = nil
-								} else {
-									net_sheep.Baa( 2, "unable to find host entry for: %s", *hname )
-								}
-							}
-						}
-
-					case REQ_GET_PHOST_FROM_MAC:			// try to map a MAC to a phost -- used for mirroring
-						mac := req.Req_data.( *string )
-						for k, v := range act_net.mac2phost {
-							if *mac == k {
-								req.Response_data = v
-							}
-						}
-
-					case REQ_SETDISC:
-						req.State = nil;	
-						req.Response_data = "";			// we shouldn't send anything back, but if caller gave a channel, be successful
-						if req.Req_data != nil {
-							d := clike.Atoll( *(req.Req_data.( *string )) )
-							if d < 0 {
-								discount = 0
-							} else {
-								discount = d
-							}
-						}
-
-					// --------------------- agent things -------------------------------------------------------------
-					case REQ_MAC2PHOST:
-						req.Response_ch = nil			// we don't respond to these
-						act_net.update_mac2phost( req.Req_data.( []string ), phost_suffix )
+					----- */
 
 					default:
 						net_sheep.Baa( 1,  "unknown request received on channel: %d", req.Msg_type )
 				}
 
-				net_sheep.Baa( 3, "processing request complete %d", req.Msg_type )
+				net_sheep.Baa( 4, "processing request complete %d", req.Msg_type )
 				if req.Response_ch != nil {				// if response needed; send the request (updated) back
 					req.Response_ch <- req
 				}

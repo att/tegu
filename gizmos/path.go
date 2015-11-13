@@ -43,17 +43,17 @@
 			
 				The forward/backwards naming convention make sense, but are not obvious
 
-				Endpoints only have 'forward' switches and so when we set their queue we always
+				Leafpoints only have 'forward' switches and so when we set their queue we always
 				set the forward queue.
 
-				If the path is marked as a scramble, then it's not a true path between the endpoints.
+				If the path is marked as a scramble, then it's not a true path between the leafpoints.
 				For a scramble, the list of links represents only the unique set of links that are
 				involved in all possible paths between the end points.
 
 	Date:		26 November 2013
 	Author:		E. Scott Daniels
 
-	Mod:		03 Apr 2014 - Added support for endpoints
+	Mod:		03 Apr 2014 - Added support for leafpoints
 				11 Jun 2014 - Changes to support finding all paths rather than shortest
 				13 Jun 2014 - Added to the doc.
 				29 Jun 2014 - Changes to support user link limits.
@@ -61,23 +61,16 @@
 				29 Jul 2014 - Mlag support
 				19 Oct 2014 - Support setting queues only on outbound direction of path.
 				29 Oct 2014 - Added Get_nlinks() function.
+				30 Sep 2015 - Added gizmo.endpoint struct support and renamed the original
+					endpoint term to leafpoint so as not to be confused with the new endpoint
+					oriented network management in Tegu.
 */
 
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
 	"os"
-	//"strings"
-	//"time"
-
-	//"github.com/att/gopkgs/clike"
 )
 
 type Path struct {
@@ -86,10 +79,12 @@ type Path struct {
 	lidx	int
 	switches []*Switch
 	sidx	int
-	h1		*Host
-	h2		*Host
+	//deprecated --- h1		*Host
+	//deprecated --- h2		*Host
+	h1		*Endpt
+	h2		*Endpt
 	bw_amt	int64			// amount of bandwidth reserved along this path
-	endpts	[]*Link			// virtual links that represent the switch to vm endpoint 'link'
+	endpts	[]*Link			// virtual links that represent the switch to vm leafpoint 'link'
 	extip	*string			// external IP address to be added to the flow mod when needed
 	extflag	*string			// flag indicating whether external IP is source (-S) or dest (-D) needed by flow mod generator
 	is_reverse	bool		// set to indicate that the path was saved in reverse order
@@ -101,7 +96,7 @@ type Path struct {
 /*
 	Creates an empty path representation between two hosts.
 */
-func Mk_path( h1 *Host, h2 *Host ) ( p *Path ) {
+func Mk_path( h1 *Endpt, h2 *Endpt ) ( p *Path ) {
 	p = &Path {
 		h1:		h1,
 		h2:		h2,
@@ -169,6 +164,20 @@ func (p *Path) Set_scramble( state bool ) {
 */
 func (p *Path) Get_bandwidth( ) ( int64 )  {
 	return p.bw_amt
+}
+
+/*
+	Return the uuid of the first endpoint
+*/
+func (p *Path) Get_epid1( ) (*string )  {
+	return p.h1.Get_meta_value( "uuid" )
+}
+
+/*
+	Return the uuid of the second endpoint
+*/
+func (p *Path) Get_epid2( ) ( *string )  {
+	return p.h2.Get_meta_value( "uuid" )
 }
 
 /*
@@ -245,11 +254,11 @@ func (p *Path) Add_switch( s *Switch ) {
 }
 
 /*
-	Adds an endpoint that represents the connection between the switch and the
+	Adds a leafpoint that represents the connection between the switch and the
 	given host. This allows a queue outbound from the switch to the host to
 	be set.
 */
-func ( p *Path) Add_endpoint( l *Link ) {
+func ( p *Path) Add_leafpoint( l *Link ) {
 	var (
 		idx int = 0
 	)
@@ -260,7 +269,7 @@ func ( p *Path) Add_endpoint( l *Link ) {
 
 	if p.endpts[0] != nil {
 		if p.endpts[1] != nil {
-			p.endpts[0] = p.endpts[1]			// add pushes the endpoint -- should never happen, but allow it
+			p.endpts[0] = p.endpts[1]			// add pushes the leafpoint -- should never happen, but allow it
 		}
 		idx = 1
 	}
@@ -269,10 +278,10 @@ func ( p *Path) Add_endpoint( l *Link ) {
 }
 
 /*
-	Reverses the endpoints. The expectation is that they are in h1, h2 order, but if they were
+	Reverses the leafpoint. The expectation is that they are in h1, h2 order, but if they were
 	pushed backwards then this allows that to be corrected by the user.
 */
-func (p *Path) Flip_endpoints( ) {
+func (p *Path) Flip_leafpoints( ) {
 	ep := p.endpts[0]
 	p.endpts[0] =  p.endpts[1]
 	p.endpts[1] =  ep
@@ -399,7 +408,7 @@ func (p *Path) Set_queue( qid *string, commence int64, conclude int64, bw_amt in
 		}
 	}
 
-	if p.endpts[1] != nil {			// endpoints are added in h1,h2 order (regardless of path order), so always looking for ep[1] here	
+	if p.endpts[1] != nil {			// leafpoints are added in h1,h2 order (regardless of path order), so always looking for ep[1] here	
 		eqid := "E1" + *qid;
 		err = p.endpts[1].Set_forward_queue( &eqid, commence, conclude, bw_amt, usr )		// amount out from h1 into h2
 		if err != nil { return }
@@ -436,14 +445,14 @@ func (p *Path) Get_extflag( ) ( *string ) {
 /*
 	Return pointer to host.
 */
-func (p *Path) Get_h1( ) ( *Host ) {
+func (p *Path) Get_h1( ) ( *Endpt ) {
 	return p.h1
 }
 
 /*
 	Return pointer to host.
 */
-func (p *Path) Get_h2( ) ( *Host ) {
+func (p *Path) Get_h2( ) ( *Endpt ) {
 	return p.h2
 }
 
@@ -451,7 +460,7 @@ func (p *Path) Get_h2( ) ( *Host ) {
 	Return the forward link information (switch/port/queue-num) associated with the first (ingress) switch
 	in the path.  This is the port and queue number used on the first switch in the path to send data _out_
 	from h1.  The data is based on queue ID and the timestamp given (queue numbers can vary over time).
-	See also Get_endpoint_spq()
+	See also Get_leafpoint_spq()
 */
 func (p *Path) Get_ilink_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 	var (
@@ -477,7 +486,7 @@ func (p *Path) Get_ilink_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 	to h1 (inbound) from h2.
 	The data is based on queue ID and the timestamp given (queue numbers can vary over time).
 
-	See also Get_endpoint_spq()
+	See also Get_leafpoint_spq()
 */
 func (p *Path) Get_elink_spq( qid *string, tstamp int64 ) ( spq *Spq ) {
 	var (
@@ -598,22 +607,22 @@ func (p *Path) Get_intermed_spq( tstamp int64 )  ( []*Spq ){
 }
 
 /*
-	Returns the pair of switch/port/queue-num objects that are associated with the endpoint
-	links.  An endpoint link is the connection between the ingress/egress switch and the
+	Returns the pair of switch/port/queue-num objects that are associated with the leafpoint
+	links.  A leafpoint link is the connection between the ingress/egress switch and the
 	attached host.  This is _not_ the same as the ingress link and egress link which are
 	the information related to the first true link on the path.
 
 	This function will return nil pointers when both hosts are on the same switch as
-	that case is managed as a virtual link and not as endpoints (probably should be
+	that case is managed as a virtual link and not as leafpoints (probably should be
 	changed, but for now that's the way it is).
 
 	Qid is the queue base name that we'll attach E0 and E1 to as a prefix.
 
-	Endpoints are added in h1,h2 order and not in path order, so this function must
+	Leafpoints are added in h1,h2 order and not in path order, so this function must
 	return them respecitive to the path which may mean inverting them as the caller
-	of this function should expect that e0 is the endpoint at the start of the path.
+	of this function should expect that e0 is the leafpoints at the start of the path.
 */
-func (p *Path) Get_endpoint_spq( qid *string, tstamp int64 ) ( e0 *Spq, e1 *Spq ) {
+func (p *Path) Get_leafpoint_spq( qid *string, tstamp int64 ) ( e0 *Spq, e1 *Spq ) {
 	var (
 		idx0 int = 0
 		idx1 int = 1
@@ -698,14 +707,21 @@ func (p *Path) Dump( reverse bool ) {
 
 
 /*
-	Generates a string representing the path.
+	Stringer interface. 
 */
-func (p *Path) To_str( ) ( s string ) {
+func (p *Path) String( ) ( s string ) {
 	var (
 		sep string = ""
 	)
+	if p == nil {
+		return "--nil--"
+	}
 
-	s = ""
+	extip := ""
+	if p.extip != nil {
+		extip = *p.extip
+	}
+	s = fmt.Sprintf( "%s,%s e=%s ", *(p.h1.Get_meta_value( "uuid" )), *(p.h2.Get_meta_value( "uuid" )), extip )
 
 	for i := 0; i < p.sidx; i++ {
 		s += fmt.Sprintf( "%s %s ", sep, *(p.switches[i].Get_id()) )
@@ -716,6 +732,13 @@ func (p *Path) To_str( ) ( s string ) {
 }
 
 /*
+	Deprecated.
+*/
+func (p *Path) To_str( ) ( s string ) {
+	return p.String()
+}
+
+/*
 	Generates a string of json which represents the path.
 */
 func (p *Path) To_json( ) (json string) {
@@ -723,7 +746,10 @@ func (p *Path) To_json( ) (json string) {
 		sep string = ""
 	)
 
-	json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", *p.h1.Get_mac(), "h2", *p.h2.Get_mac(), "links" )
+	_, mac1 := p.h1.Get_addresses()
+	_, mac2 := p.h2.Get_addresses()
+	//json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", *p.h1.Get_mac(), "h2", *p.h2.Get_mac(), "links" )
+	json = fmt.Sprintf( "{ %q: %q, %q: %q, %q: [ ", "h1", *mac1, "h2", *mac2, "links" )
 	for i := 0; i < p.lidx; i++ {
 		json += fmt.Sprintf( "%s%s ", sep, p.links[i].To_json() )
 		sep = ","

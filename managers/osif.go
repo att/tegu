@@ -789,12 +789,16 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 	// ---------------- end config parsing ----------------------------------------
 
 
+
 	if os_admin != nil {														// only if we are using openstack as a database
 		//tklr.Add_spot( 3, my_chan, REQ_GENCREDS, nil, 1 )						// add tickle spot to drive us once in 3s and then another to drive us based on config refresh rate
 		tklr.Add_spot( int64( 180 ), my_chan, REQ_GENCREDS, nil, ipc.FOREVER )
 	}
 
-	osif_sheep.Baa( 2, "osif manager is running  %x", my_chan )
+	for _, v := range os_refs {
+		osif_sheep.Baa( 1, "cred: %s", v )
+	}
+	osif_sheep.Baa( 1, "osif manager is initialised; now listening on channel (%d cred sets)", len( os_refs ) )
 	for {
 		msg = <- my_chan					// wait for next message from tickler
 		msg.State = nil						// default to all OK
@@ -880,6 +884,13 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					go get_all_osvm_info( msg, os_refs, os_projects, id2pname, pname2id )		// do it asynch and return the result on the message channel
 					msg = nil																	// prevent response from this function
 				}
+
+			case REQ_GET_ENDPTS:																// generate a map of endpoints for the indicated project or all
+				if msg.Response_ch != nil {
+					go get_all_osep_info( msg, os_refs )										// do it asynch and return the result on the message channel
+					msg = nil																	// prevent response from this function
+				}
+
 
 			case REQ_GET_DEFGW:							// dig out the default gateway for a project
 				if msg.Response_ch != nil {

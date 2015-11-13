@@ -83,92 +83,95 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 		return
 	}
 
+	// h1/h2 are the host 'names' given on the reservation:   project/endpoint/address:port{vlan} or !///address:port
+	// this now becomes: proj/epid[:ip-addr]:port; if ip-addr is missing then we assume 'default' ip address
+	// ANSWER:  how do we convert old non-ep reservations to ep reservations?
 	h1, h2, p1, p2, _, expiry, _, _ := p.Get_values( )		// hosts, transport (tcp/udp) ports and expiry are all we need
 	v1, v2 := p.Get_vlan( )									// vlan match criteria for one/both endpoints
 
-	ip1 := name2ip( h1 )
-	ip2 := name2ip( h2 )
+	plist := p.Get_path_list( )							// each path that is a part of the reservation
 
-	if ip1 != nil  &&  ip2 != nil {				// good ip addresses so we're good to go
-		plist := p.Get_path_list( )				// each path that is a part of the reservation
+	timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 
-		timestamp := time.Now().Unix() + 16					// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
+	for i := range plist { 								// for each path, send fmgr requests for each endpoint
+		freq := Mk_fqreq( rname )						// default flow mod request with empty match/actions (for bw requests, we don't need priority or such things)
 
-		for i := range plist { 								// for each path, send fmgr requests for each endpoint
-			freq := Mk_fqreq( rname )						// default flow mod request with empty match/actions (for bw requests, we don't need priority or such things)
+		freq.Ipv6 = p.Get_matchv6()						// should we force a match on IPv6 rather than IPv4?
+		freq.Cookie =	0xffff							// should be ignored, if we see this out there we've got problems
+		freq.Single_switch = false						// path involves multiple switches by default
+		freq.Dscp, freq.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
 
-			freq.Ipv6 = p.Get_matchv6()						// should we force a match on IPv6 rather than IPv4?
-			freq.Cookie =	0xffff							// should be ignored, if we see this out there we've got problems
-			freq.Single_switch = false						// path involves multiple switches by default
-			freq.Dscp, freq.Dscp_koe = p.Get_dscp()			// reservation supplied dscp value that we're to match and maybe preserve on exit
-
-			if (*p).Is_paused( ) {
-				freq.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
+		if (*p).Is_paused( ) {
+			freq.Expiry = time.Now().Unix( ) +  15		// if reservation shows paused, then we set the expiration to 15s from now  which should force the flow-mods out
+		} else {
+			if to_limit > 0 && expiry > now + to_limit {
+				freq.Expiry = now + to_limit			// expiry must be capped so as not to overflow virtual switch variable size
 			} else {
-				if to_limit > 0 && expiry > now + to_limit {
-					freq.Expiry = now + to_limit			// expiry must be capped so as not to overflow virtual switch variable size
-				} else {
-					freq.Expiry = expiry
-				}
-			}
-			freq.Id = rname
-
-			extip := plist[i].Get_extip()					// if an external IP address is necessary on the freq get it
-			if extip != nil {
-				freq.Extip = extip
-			} else {
-				freq.Extip = &empty_str
-			}
-
-			espq1, _ := plist[i].Get_endpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
-			if espq1 == nil {												// if single switch ep1 will be nil
-				freq.Single_switch = true
-			}
-
-			freq.Match.Ip1 = plist[i].Get_h1().Get_address( pref_v6 )		// must use path h1/h2 as this could be the reverse with respect to the overall pledge and thus reverse of pledge
-			freq.Match.Ip2 = plist[i].Get_h2().Get_address( pref_v6 )
-			freq.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
-			if freq.Single_switch {
-				freq.Espq.Queuenum = 1										// same switch always over br-rl queue 1
-			}
-			freq.Exttyp = plist[i].Get_extflag()		// indicates whether the external IP is the source or dest along this path
-
-											//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
-			tptype_list := "none"							// default to no specific protocol
-			if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
-				tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
-			}
-			tptype_toks := strings.Split( tptype_list, " " )
-
-			for tidx := range( tptype_toks ) {				// must have a req for each transport proto type, clone base, add the proto specific changes, & send to fqmgr
-				cfreq := freq.Clone()						// since we send this off for asynch processing we must make a copy
-
-				cfreq.Tptype = &tptype_toks[tidx]			// transport type (tcp, udp or none)
-
-				if *cfreq.Exttyp == "-S" {					// indicates that this is a 'reverse' path (h2 sending) and we must invert the Tp port numbers and vland ids
-					cfreq.Match.Tpsport= p2
-					cfreq.Match.Tpdport= p1
-					cfreq.Match.Vlan_id= v2
-				} else {
-					cfreq.Match.Tpsport= p1
-					cfreq.Match.Tpdport= p2
-					cfreq.Match.Vlan_id= v1
-				}
-
-				rm_sheep.Baa( 1, "res_mgr/push_rea: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
-					i, *rname, *cfreq.Exttyp, tptype_toks[tidx], *h1, *h2, *cfreq.Match.Ip1, *cfreq.Match.Ip2, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
-					cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, *cfreq.Extip, expiry, cfreq.Expiry )
-
-				msg = ipc.Mk_chmsg()
-				msg.Send_req( fq_ch, ch, REQ_BW_RESERVE, cfreq, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
-				
-	
-				// WARNING:  this is q-lite only -- there is no attempt to set up intermediate switches!
+				freq.Expiry = expiry
 			}
 		}
+		freq.Id = rname
 
-		p.Set_pushed()				// safe to mark the pledge as having been pushed.
+		extip := plist[i].Get_extip()					// if an external IP address is necessary on the freq get it
+		if extip != nil {
+			freq.Extip = extip
+			//rm_sheep.Baa( 1, ">>>> pushing external=%s", *freq.Extip )
+		} else {
+			freq.Extip = &empty_str
+		}
+
+		espq1, _ := plist[i].Get_leafpoint_spq( rname, timestamp )		// end point switch, port, queue information; ep1 nil if single switch
+		if espq1 == nil {												// if single switch ep1 will be nil
+			freq.Single_switch = true
+		}
+
+		freq.Match.Ip1 = plist[i].Get_epid1( )							// we need the uuid of the endpoint to do translation in fqmgr
+		freq.Match.Ip2 = plist[i].Get_epid2( )
+		//rm_sheep.Baa( 1, ">>>> pushing path=%s", plist[i] )
+		//rm_sheep.Baa( 1, ">>>> pushing match1=%s  match2=%s", *freq.Match.Ip1, *freq.Match.Ip2 )
+
+		freq.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
+		if freq.Single_switch {
+			freq.Espq.Queuenum = 1										// same switch always over br-rl queue 1
+		}
+		freq.Exttyp = plist[i].Get_extflag()		// indicates whether the external IP is the source or dest along this path
+
+										//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
+		tptype_list := "none"							// default to no specific protocol
+		if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
+			tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
+		}
+		tptype_toks := strings.Split( tptype_list, " " )
+
+		for tidx := range( tptype_toks ) {				// must have a req for each transport proto type, clone base, add the proto specific changes, & send to fqmgr
+			cfreq := freq.Clone()						// since we send this off for asynch processing we must make a copy
+
+			cfreq.Tptype = &tptype_toks[tidx]			// transport type (tcp, udp or none)
+
+			if *cfreq.Exttyp == "-S" {					// indicates that this is a 'reverse' path (h2 sending) and we must invert the Tp port numbers and vland ids
+				cfreq.Match.Tpsport= p2
+				cfreq.Match.Tpdport= p1
+				cfreq.Match.Vlan_id= v2
+			} else {
+				cfreq.Match.Tpsport= p1
+				cfreq.Match.Tpdport= p2
+				cfreq.Match.Vlan_id= v1
+			}
+
+			rm_sheep.Baa( 1, "res_mgr/push_bw: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
+				i, *rname, *cfreq.Exttyp, tptype_toks[tidx], *h1, *h2, *cfreq.Match.Ip1, *cfreq.Match.Ip2, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
+				cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, *cfreq.Extip, expiry, cfreq.Expiry )
+
+			msg = ipc.Mk_chmsg()
+			msg.Send_req( fq_ch, ch, REQ_BW_RESERVE, cfreq, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
+			
+
+			// WARNING:  this is q-lite only -- there is no attempt to set up intermediate switches!
+		}
 	}
+
+	p.Set_pushed()				// safe to mark the pledge as having been pushed.
+
 }
 
 
@@ -201,13 +204,12 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 	src, dest, src_tpport, dest_tpport, _, expiry  := p.Get_values( )		// hosts, transport ports, and expiry time
 	vlan := p.Get_vlan( )													// vlan match criteria for source
 
-	ip_src := name2ip( src )
-	ip_dest := name2ip( dest )
+	ip_src := addr_from_pea( src )						// get the address portion of the p/e/a strings
+	ip_dest := addr_from_pea( dest )
 
 	if ip_src != nil  &&  ip_dest != nil {				// good ip addresses so we're good to go
 		gate := p.Get_gate( )							// get the gate information that is applied for the oneway
 		if gate != nil {								// be parinoid
-			//timestamp := time.Now().Unix() + 16				// assume this will fall within the first few seconds of the reservation as we use it to find queue in timeslice
 			freq := Mk_fqreq( rname )						// default flow mod request no match/actions
 
 			freq.Ipv6 = p.Get_matchv6()						// should we force a match on IPv6 rather than IPv4?
@@ -227,8 +229,8 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 			}
 			freq.Id = rname
 
-			freq.Match.Ip1 = gate.Get_src().Get_address( pref_v6 )		// should match pledge, but gate is the ultimate authority
-			freq.Match.Ip2 = gate.Get_dest().Get_address( pref_v6 )
+			freq.Match.Ip1 = gate.Get_src().Get_meta_value( "uuid" )	// we wing round endpoint IDs now
+			freq.Match.Ip2 = gate.Get_dest().Get_meta_value( "uuid" )
 			freq.Espq = gate.Get_spq( rname, now + 16 )					// switch port queue
 			freq.Extip = gate.Get_extip( )								// returns nil if not an external and that's what we need
 

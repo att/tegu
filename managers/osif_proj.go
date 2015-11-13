@@ -37,6 +37,7 @@
 				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 				01 Apr 2015 - Added ipv6 support for finding gateway/routers.
 				16 Jun 2015 - Turned down some of the bleat messages.
+				25 Sep 2015 - Added support to generate endpoint information.
 */
 
 package managers
@@ -51,6 +52,8 @@ import (
 
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/gopkgs/ostack"
+
+	"github.com/att/tegu/gizmos"
 )
 
 
@@ -765,3 +768,81 @@ func get_all_osvm_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_pr
 	msg.Response_ch <- msg
 }
 
+
+
+/*
+	Gathers the endpoint (VM) information for all endpoints in one or more projects. If "_all_proj" is given as the project name then
+	all projects  known to Tegu are fetched.
+
+	Expected to execute as a go routine and writes the resulting array to the channel specified in the message.
+*/
+func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
+
+	if msg == nil || msg.Response_ch == nil {
+		return															// prevent accidents
+	}
+
+	msg.Response_data = nil
+	msg.State = nil
+
+	if msg.Req_data == nil {
+		osif_sheep.Baa( 1, "osep_info: request data didn't contain a project name or ID" )
+		msg.State = fmt.Errorf( "osep_info: request data didn't contain a project name or ID" )
+		msg.Response_ch <- msg
+		return
+	}
+
+	epmap := make( map[string]*gizmos.Endpt )						// map to send to request thread
+
+	pid := msg.Req_data.( *string )
+	if *pid == "_all_proj" {
+		for k := range os_refs {
+			if k != "_ref_" {
+				oseps, err := os_refs[k].Map_gw_endpoints( nil )				// get router endpoints first
+				if err == nil {
+					osif_sheep.Baa( 2, "fetching endpoints for %s (found %d router endponts)", k, len( oseps ) )
+					oseps, err = os_refs[k].Map_endpoints( oseps )				// get regular VM endpoints now
+				}
+				if err == nil {
+					osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", k, len( oseps ) )
+					for epid, v := range oseps {
+						epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
+						epmap[epid].Set_router( v.Is_router() )
+						epmap[epid].Set_meta_value( "netid", *(v.Get_netid()) )
+					}
+				} else {
+					osif_sheep.Baa( 1, "osep_info: could not dig out VM information for project: %s: %s", k, err )
+				}
+			}
+		}
+
+		msg.Response_data = epmap
+		if len( epmap ) <= 0 {
+			msg.State = fmt.Errorf( "osep_info: unable to dig any endpoint information for all projects" )
+		} else {
+			msg.State = fmt.Errorf( "osep_info: fetched endpoint info for all projects: %d elements", len( epmap ) )
+			msg.State = nil
+		}
+	} else {
+		osif_sheep.Baa( 1, "osep_info: huh" )
+		oref := os_refs[*pid]
+		if oref != nil {
+			oseps, err := oref.Map_endpoints( nil )					// get regular VM info
+			if err == nil {
+				oseps, err = oref.Map_gw_endpoints( oseps )		// get router info, add to previously returned map
+			}
+			if err == nil {
+				osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", *pid, len( oseps ) )
+				for epid, v := range oseps {
+					epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
+					epmap[epid].Set_router( v.Is_router() )
+					epmap[epid].Set_meta_value( "netid", *(v.Get_netid()) )
+				}
+			} else {
+				osif_sheep.Baa( 1, "osep_info: could not dig out VM information for project: %s: %s", *pid, err )
+			}
+		}
+	}
+
+	msg.Response_ch <- msg
+}

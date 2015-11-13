@@ -177,7 +177,7 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 
 	if fq_sheep.Would_baa( 3 ) {
 		for k, v := range fmap {
-			fq_sheep.Baa( 3, "fq_req to action id=%s %s = %s", fq.Id, k, v )
+			fq_sheep.Baa( 3, "fq_req to action id=%s %s = %s", *fq.Id, k, v )
 		}
 	}
 
@@ -241,7 +241,7 @@ func ( fq *Fq_req ) To_bwow_map( ) ( fmap map[string]string ) {
 
 	if fq_sheep.Would_baa( 2 ) {
 		for k, v := range fmap {
-			fq_sheep.Baa( 2, "fq_req to action id=%s %s = %s", fq.Id, k, v )
+			fq_sheep.Baa( 2, "fq_req to action id=%s %s = %s", *fq.Id, k, v )
 		}
 	}
 

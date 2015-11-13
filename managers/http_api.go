@@ -101,12 +101,8 @@
 package managers
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
 	"io/ioutil"
-	//"html"
 	"net/http"
 	"os"
 	"strings"
@@ -123,6 +119,38 @@ import (
 	"github.com/att/tegu/gizmos"
 )
 
+// ---------------- internal http helper data structs -----------------------------------------------------
+
+/*
+	Project, endpoint address struct
+	Convient thing to manage the now messier than ever endpoint string: project/endpoint/address:port{vlan}
+*/
+type Pea struct {
+	Project	string
+	Ep_uuid	string
+	Address	string
+	Port	string
+	Vlan	string
+}
+
+func mk_pea( project string, ep_uuid string, addr string, port string, vlan string ) ( *Pea ) {
+	p := &Pea {
+		Project: project,
+		Ep_uuid: ep_uuid,
+		Address: addr,
+		Port: port,
+		Vlan: vlan,
+	}
+
+	return p
+}
+
+/*
+	Generate a string with just pea components (no port/vlan)
+*/
+func (p *Pea) String( ) ( string ) {
+	return fmt.Sprintf( "%s/%s/%s", p.Project, p.Ep_uuid, p.Address )
+}
 
 /* ---- validation and authorisation functions ---------------------------------------------------------- */
 
@@ -133,6 +161,27 @@ func mk_resname( ) ( string ) {
 	r := res_nmseed
 	res_nmseed++
 	return fmt.Sprintf( "res%x_%05d", pid, r );
+}
+
+/*
+	Accepts an endpoint uuid and project and returns true if the endpoint is associated with 
+	the project; false if not.
+*/
+func validate_ep_proj( ep_uuid *string, proj *string ) ( bool ) {
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	req := ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, my_ch, REQ_EP2PROJ, *ep_uuid, nil )	// send to network to verify a path and reserve bw on the link(s)
+	req = <- my_ch												// get response from the network thread
+
+	if req.Response_data != nil {
+		eproj, ok := req.Response_data.( string ) 
+		http_sheep.Baa( 1, "validating project/endpoint for ep=%s target=%s p=%s", *ep_uuid, *proj, eproj )
+		if ok {
+			return eproj == *proj
+		} 
+	}
+
+	return false
 }
 
 /*
@@ -149,32 +198,57 @@ func mk_resname( ) ( string ) {
 
 	If the resulting host names match (project/host[:port]) then we return an error
 	as this isn't allowed.
+
+
+	New format for endpoint oriented network management is a 'pea' string with a 
+	leading token:
+		token/project/endpoint/IP:port{vlan}
+
+		!///IP:port  for external addresses
 */
-func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, v1 *string, v2 *string, err error ) {
-	var ht *string
+func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) {
 	
-	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
-	p1 = &zero_string
-	p2 = &zero_string
+	h2_isreal := true										// set to false if !// found so we don't validate it
 
 	if h1[0:1] == "!" {										// the external host needs to be h2 for flow-mod generation
 		hx := h1											// so switch them if !address is first.
 		h1 = h2
 		h2 = hx
+		h2_isreal = false
+	} else {
+		if h2[:1] == "!" {
+			h2_isreal = false
+		}
 	}
 	
+	http_sheep.Baa( 1, "validating hosts: (%s) (%s)", h1, h2 )
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this token/project pair for host
-	req = <- my_ch													// hard wait for response
+	req = <- my_ch													// hard wait for response (response is token stripped (proj/endpt/ip-stuff
 
 	if req.State != nil {
 		err = fmt.Errorf( "h1 validation failed: %s", req.State )
 		return
 	}
 
-	ht, p1, v1 = gizmos.Split_hpv( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
-	h1x = *ht
+	raw_name := req.Response_data.( *string ) 						// result from validate is proj/endpt/ip-address-goo
+	tokens := strings.Split( *raw_name, "/" )
+	if len( tokens ) < 3 {
+		// FIXME -- handle old style proj/name?
+		err = fmt.Errorf( "h1 validation failed: %s is not project/endpoint/ip-address[:port[{vlan}]]", *raw_name )
+		http_sheep.Baa( 1, "%s", err )
+		return 
+	}
+
+	h, p, v := gizmos.Split_hpv( &tokens[2] ) 					// split address:port{vlan} portion of string
+	if ! validate_ep_proj( &tokens[1], &tokens[0] ) {
+		err = fmt.Errorf( "endpoint 1 (%s %s) not associated with project: %s", tokens[1], tokens[2], *p )
+		return nil, nil, err
+	}
+
+	pea1 = mk_pea( tokens[0], tokens[1], *h, *p, *v )			// make internal project/endpoint/address struct to return
 
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
@@ -182,19 +256,39 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 
 	if req.State != nil {
 		err = fmt.Errorf( "h2 validation failed: %s", req.State )
-		return
+		return nil, nil, err
 	}
 
-	ht, p2, v2 = gizmos.Split_hpv( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
-	h2x = *ht
-	if h1x == h2x {
-		err = fmt.Errorf( "host names are the same" )
-		return
+	raw_name = req.Response_data.( *string ) 						// result from validate is proj/endpt/ip-address-goo
+	tokens = strings.Split( *raw_name, "/" )
+	if len( tokens ) < 3 {
+		// FIXME -- handle old style proj/name?
+		err = fmt.Errorf( "h2 validation failed: %s is not project/endpoint/ip-address[:port[{vlan}]]", *raw_name )
+		http_sheep.Baa( 1, "%s", err )
+		pea1 = nil
+		return 
 	}
 
-	return
+	h, p, v = gizmos.Split_hpv( &tokens[2] ) 					// split address:port{vlan} into components
+
+	//http_sheep.Baa( 1, ">>>> hpv = (%s) (%s) (%s)", *h, *p, *v )
+	
+	if h2_isreal  &&  ! validate_ep_proj( &tokens[1], &tokens[0] ) {
+		err = fmt.Errorf( "endpoint 2 (%s) not associated with project: %s", tokens[1], *p )
+		return nil, nil, err
+	}
+
+	pea2 = mk_pea( tokens[0], tokens[1], *h, *p, *v )			// make internal project/endpoint/address struct to return
+
+	if pea1.Ep_uuid == pea2.Ep_uuid {
+		err = fmt.Errorf( "endpoint names are the same h1=%s h2=%s", h1, h2 )
+		http_sheep.Baa( 1, "endpoints do not validate: same: h1=%s h2=%s", h1, h2 )
+		return nil, nil, err
+	}
+
+	http_sheep.Baa( 2, "endpoint validate: %s %s	[OK]", h1, h2 )
+	return pea1, pea2, nil
 }
-
 
 /*
 	Return true if the sender string is the localhost (127.0.0.1).
@@ -456,6 +550,7 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 	req = ipc.Mk_chmsg( )
 	req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, res, nil )	// validate and approve from a network perspective
 	req = <- my_ch											// get response from the network thread
+
 
 	if req.Response_data != nil {
 		gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
@@ -788,73 +883,69 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 				case "reserve":
 					var res *gizmos.Pledge_bw
 
-						key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs
-						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
-						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
-						if !ok {
-							nerrors++
-							reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <host1>[,<host2>] cookie dscp; received: %s", mlist, recs[i] );
-							break
+					key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs
+					tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
+					ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
+					if !ok {
+						nerrors++
+						reason = fmt.Sprintf( "missing parameters: (%s); usage: reserve <bandwidth[K|M|G][,<outbandw[K|M|G]> {[<start>-]<end-time>|+sec} <uuid1>[,<uuid2>] cookie dscp; received: %s", mlist, recs[i] );
+						break
+					}
+
+					if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
+						subtokens := strings.Split( *tmap["bandw"], "," )
+						bandw_in = int64( clike.Atof( subtokens[0] ) )
+						bandw_out = int64( clike.Atof( subtokens[1] ) )
+					} else {
+						bandw_in = int64( clike.Atof( *tmap["bandw"] ) )		// no comma, so single value applied to each
+						bandw_out = bandw_in
+					}
+
+					startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
+					h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+
+					res = nil
+					pea1, pea2, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+
+					if err == nil {
+						dscp := tclass2dscp["voice"]							// default to using voice traffic class
+						dscp_koe := false										// we do not keep it as the packet exits the environment
+
+						if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
+							if strings.HasPrefix( *tmap["dscp"], "global_" ) {
+								dscp_koe = true											// global_* causes the value to be retained when packets exit the environment
+								dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
+							} else {
+								dscp = tclass2dscp[*tmap["dscp"]]
+							}
+							if dscp <= 0 {
+								err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
+							}
 						}
-
-						if strings.Index( *tmap["bandw"], "," ) >= 0 {				// look for inputbandwidth,outputbandwidth
-							subtokens := strings.Split( *tmap["bandw"], "," )
-							bandw_in = int64( clike.Atof( subtokens[0] ) )
-							bandw_out = int64( clike.Atof( subtokens[1] ) )
-						} else {
-							bandw_in = int64( clike.Atof( *tmap["bandw"] ) )		// no comma, so single value applied to each
-							bandw_out = bandw_in
-						}
-
-						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
-						h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
-
-						res = nil
-						h1, h2, p1, p2, v1, v2, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
 
 						if err == nil {
-							update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
-							update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
-
-							dscp := tclass2dscp["voice"]							// default to using voice traffic class
-							dscp_koe := false										// we do not keep it as the packet exits the environment
-
-							if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
-								if strings.HasPrefix( *tmap["dscp"], "global_" ) {
-									dscp_koe = true											// global_* causes the value to be retained when packets exit the environment
-									dscp = tclass2dscp[(*tmap["dscp"])[7:] ]				// pull the value based on the trailing string
-								} else {
-									dscp = tclass2dscp[*tmap["dscp"]]
-								}
-								if dscp <= 0 {
-									err = fmt.Errorf( "traffic classifcation string is not valid: %s", *tmap["dscp"] )
-								}
-							}
-
-							if err == nil {
-								res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-								res, err = gizmos.Mk_bw_pledge( &h1, &h2, p1, p2, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
-							}
+							res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+							h1 = pea1.String()							// proj/ep/addr
+							h2 = pea2.String()
+							res, err = gizmos.Mk_bw_pledge( &h1, &h2, &pea1.Port, &pea2.Port, startt, endt, bandw_in, bandw_out, &res_name, tmap["cookie"], dscp, dscp_koe )
 						}
+					}
 
-						if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
-							res.Set_vlan( v1, v2 )							// augment the rest of the reservation
-							if tmap["ipv6"] != nil {
-								res.Set_matchv6( *tmap["ipv6"] == "true" )
-							}
-							
-							reason, jreason, ecount = finalise_bw_res( res, res_paused )	// check for dup, allocate in network, and add to res manager inventory
-							if ecount == 0 {
-								state = "OK"
-							} else {
-								nerrors += ecount - 1 												// number of errors added to the pile by the call
-							}
+					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+						res.Set_vlan( &pea1.Vlan, &pea2.Vlan )							// augment the rest of the reservation
+						reason, jreason, ecount = finalise_bw_res( res, res_paused )	// check for dup, allocate in network, and add to res manager inventory
+						if ecount == 0 {
+							state = "OK"
 						} else {
-							if err == nil {
-								err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
-							}
+							nerrors += ecount - 1 												// number of errors added to the pile by the call
+						}
+					} else {
+						if err == nil {
+							reason = fmt.Sprintf( "reservation rejected: specific reason unknown" )						// ensure we have something for message
+						} else {
 							reason = fmt.Sprintf( "reservation rejected: %s", err )
 						}
+					}
 
 				case "ow_reserve":												// one way (outbound) reservation (marking and maybe rate limiting)
 					var res *gizmos.Pledge_bwow
@@ -879,12 +970,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
 					res = nil
-					h1, h2, p1, p2, v1, _, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+					//h1, h2, p1, p2, v1, _, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+					pea1, pea2, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
 
 					if err == nil {
-						update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
-						update_graph( &h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
-
 						dscp := tclass2dscp["voice"]							// default to using voice traffic class
 
 						if tmap["dscp"] != nil && *tmap["dscp"] != "0" {				// 0 is the old default from tegu_req (back compat)
@@ -900,17 +989,19 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 						if err == nil {
 							res_name := mk_resname( )					// name used to track the reservation in the cache and given to queue setting commands for visual debugging
-							res, err = gizmos.Mk_bwow_pledge( &h1, &h2, p1, p2, startt, endt, bandw_out, &res_name, tmap["cookie"], dscp )
+							h1 = pea1.String()							// proj/ep/addr
+							h2 = pea2.String()
+							res, err = gizmos.Mk_bwow_pledge( &h1, &h2, &pea1.Port, &pea2.Port, startt, endt, bandw_out, &res_name, tmap["cookie"], dscp )
 						}
 					}
 
 					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
-						res.Set_vlan( v1 )													// augment the rest of the reservation
+						res.Set_vlan( &pea1.Vlan )													// augment the rest of the reservation
 						if tmap["ipv6"] != nil {
 							res.Set_matchv6( *tmap["ipv6"] == "true" )
 						}
 						
-						reason, jreason, ecount = finalise_bwow_res( res, res_paused )		// check for dup, allocate in network, and add to res manager inventory
+						reason, jreason, ecount = finalise_bwow_res( res, res_paused )			// check for dup, allocate in network, and add to res manager inventory
 						if ecount == 0 {
 							state = "OK"
 						} else {
@@ -944,6 +1035,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						}
 					}
 
+			/*
 			case "steer":								// parse a steering request and make it happen
 					var res *gizmos.Pledge_steer
 
@@ -955,7 +1047,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 					tmap := gizmos.Mixtoks2map( tokens[1:], "window usrsp ep1 ep2 mblist cookie" )		// map tokens in order to these names	(not as efficient, but makes code easier to read below)
 
-					h1, h2, p1, p2, _, _, err := validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
+					h1, h2, p1, p2, _, _, err := orig_validate_hosts( *tmap["usrsp"] + "/" + *tmap["ep1"], *tmap["usrsp"] + "/" + *tmap["ep2"] )		// translate project/host[port] into tenantID/host and if token/project/name rquired validates token.
 					if err != nil {
 						reason = fmt.Sprintf( "invalid endpoints:  %s", err )
 						http_sheep.Baa( 1, "steering reservation rejected: %s", reason )
@@ -1041,6 +1133,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						reason = fmt.Sprintf( "%s", req.State )
 					}
 					http_sheep.Baa( 1, "steering reservation %s; errors: %s", state, reason )
+				*/
 
 				case "setulcap":									// set a user link cap; expect user-name limit
 					if validate_auth( &auth_data, is_token, admin_roles ) {
@@ -1108,7 +1201,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 										http_sheep.Set_level( nv )
 
 									case "net", "network":
-										net_sheep.Set_level( nv )
+										http_sheep.Set_level( nv )
 										
 									case "agent":
 										am_sheep.Set_level( nv )

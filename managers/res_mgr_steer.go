@@ -262,8 +262,8 @@ func push_st_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chmsg, h
 		return
 	}
 
-	ep1 = name2ip( ep1 )										// we work only with IP addresses; sets to nil if "" (L*)
-	ep2 = name2ip( ep2 )
+	ep1 = addr_from_pea( ep1 )										// we work only with IP addresses; sets to nil if "" (L*)
+	ep2 = addr_from_pea( ep2 )
 
 	nmb := p.Get_mbox_count()
 	mblist := make( []*gizmos.Mbox, nmb )

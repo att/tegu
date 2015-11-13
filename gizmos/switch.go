@@ -62,7 +62,7 @@ type Switch struct {
 	id			*string				// reference id for the switch
 	links		[]*Link				// links to other switches
 	lidx		int					// next open index in links
-	hosts		map[string] bool	// hosts that are attched to this switch
+	hosts		map[string] bool	// hosts that are attched to this switch (aka endpoints)
 	hvmid		map[string]*string	// vmids of attached hosts
 	hport		map[string] int		// the port that the host (string) attaches to
 
@@ -151,6 +151,18 @@ func (s *Switch) Add_host( host *string, vmid *string, port int ) {
 }
 
 /*
+	Track an attached endpoint (aka host).
+*/
+func (s *Switch) Add_endpt( epid *string, port int ) {
+	if s == nil {
+		return
+	}
+
+	s.hosts[*epid] = true
+	s.hport[*epid] = port
+}
+
+/*
 	Returns true if the named host is attached to the switch.
 	The host may be a pointer to either a host name or uuid string.
 */
@@ -226,7 +238,7 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 	found = nil
 	cap_trip = false
 
-	//fmt.Printf( "\n\nsearching neighbours of (%s) for %s\n", s.To_str(), *target )
+	obj_sheep.Baa( 3, "searching neighbours of (%s) for %s", s, *target )
 	for i := 0; i < s.lidx; i++ {
 		if s != fsw  {
   			has_room, err := s.links[i].Has_capacity( commence, conclude, inc_cap, usr, usr_max )
@@ -235,7 +247,6 @@ func (s *Switch) probe_neighbours( target *string, commence, conclude, inc_cap i
 				if (fsw.Flags & tegu.SWFL_VISITED) == 0 {
 					obj_sheep.Baa( 3, "switch:probe_neigbour: following link %d -- has capacity to (%s) and NOT visited", i, fsw.To_str() )
 					if s.Cost + s.links[i].Cost < fsw.Cost {
-						//fmt.Printf( "\tsetting cost: %d\n", s.Cost + s.links[i].Cost )
 						fsw.Cost = s.Cost + s.links[i].Cost
 						fsw.Prev = s								// shortest path to this node is through s
 						fsw.Plink = i								// using its ith link
