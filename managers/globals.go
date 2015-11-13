@@ -254,8 +254,8 @@ var (
 	agent.
 */
 type Fq_parms struct {
-	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
-	Ip2		*string
+	Id1		*string				// ids of hosts or endpoints. If order is important id1 is src. Could be uuid or mac
+	Id2		*string
 	Tpsport	*string				// transport layer source port (strings to allow mask)
 	Tpdport *string				// transport layer dest port
 	Swport	int					// the switch port
