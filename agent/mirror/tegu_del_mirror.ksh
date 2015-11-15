@@ -30,6 +30,7 @@
 #                  25 Jun 2015 - Corrected PATH.
 #                  15 Sep 2015 - Remove extra copyright
 #                  19 Oct 2015 - Allow delete of mirrors from bridges other than br-int
+#                  15 Nov 2015 - Fixed rather bad bug introduced w/last change
 #
 
 function logit
@@ -68,10 +69,10 @@ sudo=sudo
 
 mirrorname=$1
 
-$echo $sudo ovs-vsctl get mirror "$mirrorname" output_port
-$sudo ovs-vsctl get mirror "$mirrorname" output_port > /tmp/m$$ && {
+$echo $sudo ovs-vsctl get mirror "$mirrorname" output_port _uuid
+$sudo ovs-vsctl get mirror "$mirrorname" output_port _uuid > /tmp/m$$ && {
 	# get output_port UUID
-	uuid=`cat /tmp/m$$`
+	uuid=`sed -n 1p /tmp/m$$`
 	bridgename=$(findbridge $uuid)
 
 	# get name from uuid
@@ -86,7 +87,7 @@ $sudo ovs-vsctl get mirror "$mirrorname" output_port > /tmp/m$$ && {
 	esac
 
 	# get mirror UUID
-	uuid=`grep _uuid /tmp/m$$ | sed 's/.*: //'`
+	uuid=`sed -n 2p /tmp/m$$`
 	$echo $sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
 	$sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
 	rm -f /tmp/m$$
