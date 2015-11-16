@@ -121,7 +121,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			fq_data.Expiry = expiry
 
 			mb = mblist[i]
-			fq_match.Ip1 = ep1
+			fq_match.Id1 = ep1
 			fq_match.Meta = &mstr
 
 			fq_action.Resub = &resub
@@ -130,9 +130,9 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 
 			if ep1 != nil {									// if source is a specific address, then we need only one 300 rule
 				rm_sheep.Baa( 2, "specific endpoint, 300 fmod goes to the MB switch only" )
-				fq_data.Match.Ip1 = nil									// there is no source to match at this point
+				fq_data.Match.Id1 = nil									// there is no source to match at this point
 				fq_data.Match.Smac = nil
-				fq_data.Match.Ip2 = ep2
+				fq_data.Match.Id2 = ep2
 				fq_data.Swid, fq_data.Match.Swport = mb.Get_sw_port( )	// specific switch and input port needed for this fmod
 				fq_data.Lbmac = mb.Get_mac()							// fqmgr will need the mac if the port is late binding
 			} else {													// if no specific src, the 100 rule lives on each switch, so we must put a 300 on each too
@@ -160,8 +160,8 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 		fq_action.Resub = &resub
 
 		fq_data.Expiry = expiry
-		fq_data.Match.Ip1 = ep1
-		fq_data.Match.Ip2 = ep2
+		fq_data.Match.Id1 = ep1
+		fq_data.Match.Id2 = ep2
 		set_proto_port( fq_data, proto, forward ) 		// set the protocol match port dest in forward direction, src in reverse
 
 		if i == 0 {										// push the ingress rule (possibly to all switches)
@@ -177,7 +177,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				fq_data.Swid = nil												// ensure unset; if ep1 is undefined (all), then 100 f-mod goes to all switches
 			}
 
-			fq_data.Match.Ip1 = nil												// for 100 rules we only want to match src based on mac in case both endpoint VMs live on same phys host
+			fq_data.Match.Id1 = nil												// for 100 rules we only want to match src based on mac in case both endpoint VMs live on same phys host
 			fq_data.Nxt_mac = mb.Get_mac( )
 			jstr, _ := fq_data.To_json( )
 			rm_sheep.Baa( 1, "write ingress fmod: %s", *jstr )
@@ -192,16 +192,16 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 			fq_match.Meta = &mstr_2xx											// pri 2xx marks and avoids 0x04 so that they hit even if a 300 rule matched
 			fq_data.Match.Smac = nil											// we match based on input port and dest mac, so no need for this
 			if ep2 == nil {
-				fq_data.Match.Ip1 = nil											// for L* there isn't an endpoint; prevent an IP match in fmod
+				fq_data.Match.Id1 = nil											// for L* there isn't an endpoint; prevent an IP match in fmod
 			}
 			fq_action.Resub = &resub_2xx
 
-			if fq_data.Match.Dmac == nil && fq_data.Match.Ip2 == nil {			// for l* there won't be a destination endpoint inbound; need a lower priority in this case and an additional 2xx rule
+			if fq_data.Match.Dmac == nil && fq_data.Match.Id2 == nil {			// for l* there won't be a destination endpoint inbound; need a lower priority in this case and an additional 2xx rule
 				rm_sheep.Baa( 1, "adding 210 rule to match reverse" )
 				fq_210 := fq_data.Clone()										// need to lay in a 210 f-mod first if there's no end point
 
 				//clonedif ep2 == nil {
-				//	fq_210.Match.Ip1 = nil										// for L* there isn't and endpoint and as such we need to prevent match on IP in fmod
+				//	fq_210.Match.Id1 = nil										// for L* there isn't and endpoint and as such we need to prevent match on IP in fmod
 				//}
 				// clonedfq_210.Match.Smac = nil											// smac is nil since we want to match on the source IP
 
@@ -209,7 +209,7 @@ func steer_fmods( ep1 *string, ep2 *string, mblist []*gizmos.Mbox, expiry int64,
 				//clonedfq_210.Lbmac = mb.Get_mac()										// fqmgr will need the mac if the port is late binding (-128)
 				//clonedfq_210.Action.Resub = &resub_2xx
 
-				fq_210.Match.Ip2 = ep1											// the 210 rule will match the reverse (ip2 is the dest which we need to match on the fmod)
+				fq_210.Match.Id2 = ep1											// the 210 rule will match the reverse (ip2 is the dest which we need to match on the fmod)
 				fq_210.Pri = 210
 
 				msg := ipc.Mk_chmsg()

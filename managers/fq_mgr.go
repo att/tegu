@@ -270,16 +270,16 @@ func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 		return
 	}
 
-	data.Match.Smac = data.Match.Ip1				// we send the source endpoint uuid to let agent convert and find vlan and ofport
+	data.Match.Smac = data.Match.Id1				// we send the source endpoint uuid to let agent convert and find vlan and ofport
 	fq_sheep.Baa( 2, "src endpoing: %s", *data.Match.Smac )
 
-	mac2 := epid2mac( data.Match.Ip2 )				// must convert the 'remote' endpoint to a real mac as agent on phost won't have uuid knowledge
+	mac2 := epid2mac( data.Match.Id2 )				// must convert the 'remote' endpoint to a real mac as agent on phost won't have uuid knowledge
 	if mac2 == "" {
-		fq_sheep.Baa( 1, "could not map endpoint id (2) to mac: %s", *data.Match.Ip2 )
+		fq_sheep.Baa( 1, "could not map endpoint id (2) to mac: %s", *data.Match.Id2 )
 		return
 	}
 	data.Match.Dmac = &mac2
-	fq_sheep.Baa( 2, "dest mac address mapped: %s ==> %s", *data.Match.Ip2, mac2 )
+	fq_sheep.Baa( 2, "dest mac address mapped: %s ==> %s", *data.Match.Id2, mac2 )
 
 	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
 	if phost_suffix != nil {										// we need to add the physical host suffix
@@ -289,8 +289,8 @@ func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 
 	//FIXME:  do we? must add a way to pass IP addresses on match
 
-	//data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
-	//data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
+	//data.Match.Smac = ip2mac[*data.Match.Id1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	//data.Match.Dmac = ip2mac[*data.Match.Id2]					// add to data for To_bw_map() call later
 
 	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
 	msg.Actions = make( []action, 1 )							// just a single action
@@ -337,22 +337,22 @@ func send_bwow_fmods( data *Fq_req, phost_suffix *string ) {
 	}
 
 	/*
-	mac1 := epid2mac( data.Match.Ip1 )
+	mac1 := epid2mac( data.Match.Id1 )
 	if mac1 == "" {
-		fq_sheep.Baa( 1, "oneway: unable to map endpoint (1) uuid (%s) to mac address", *data.Match.Ip1 )
+		fq_sheep.Baa( 1, "oneway: unable to map endpoint (1) uuid (%s) to mac address", *data.Match.Id1 )
 		return
 	}
 	data.Match.Smac = &mac1
 	*/
-	data.Match.Smac = data.Match.Ip1							// we pass the endpoint uuid and let agent convert to mac/vlan/ofport tuple
+	data.Match.Smac = data.Match.Id1							// we pass the endpoint uuid and let agent convert to mac/vlan/ofport tuple
 	
 
 	mac2 := ""
-	if data.Match.Ip2 != nil {														// if ep2 is external, then it's ok to be nil
-		//--deprecated data.Match.Dmac = ip2mac[*data.Match.Ip2]					// this may come up nil and that's ok
-		mac2 = epid2mac( data.Match.Ip2 )											// dest must be converted to mac as agent won't have remote phost info
+	if data.Match.Id2 != nil {														// if ep2 is external, then it's ok to be nil
+		//--deprecated data.Match.Dmac = ip2mac[*data.Match.Id2]					// this may come up nil and that's ok
+		mac2 = epid2mac( data.Match.Id2 )											// dest must be converted to mac as agent won't have remote phost info
 		if mac2 == "" {																// but if it comes in, it better xlate
-			fq_sheep.Baa( 1, "oneway: unable to map endpoint (2) uuid (%s) to mac address", *data.Match.Ip1 )
+			fq_sheep.Baa( 1, "oneway: unable to map endpoint (2) uuid (%s) to mac address", *data.Match.Id1 )
 			return
 		}
 
@@ -456,10 +456,10 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 	smac := data.Match.Smac								// smac wins if both smac and sip are given
 	if smac == nil {
-		if data.Match.Ip1 != nil {						// src supplied, match on src
-			smac = ip2mac[*data.Match.Ip1]
+		if data.Match.Id1 != nil {						// src supplied, match on src
+			smac = ip2mac[*data.Match.Id1]
 			if smac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Ip1 )
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Id1 )
 				fq_sheep.Baa( 1, "ip2mac has %d entries", len( ip2mac ) )
 				return
 			}
@@ -471,10 +471,10 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 	dmac := data.Match.Dmac								// dmac wins if both dmac and sip are given
 	if dmac == nil {
-		if data.Match.Ip2 != nil {						// src supplied, match on src
-			dmac = ip2mac[*data.Match.Ip2]
+		if data.Match.Id2 != nil {						// src supplied, match on src
+			dmac = ip2mac[*data.Match.Id2]
 			if dmac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s  [TGUFQM006]", *data.Match.Ip2 )
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s  [TGUFQM006]", *data.Match.Id2 )
 				return
 			}
 		}

@@ -75,7 +75,7 @@ func send_meta_fm( hlist []string, table int, cookie int, pattern string ) {
 	Data expected in the fq_req:
 		Nxt_mac - the mac address that is to be set on the action as dest
 		Expiry  - the timeout for the fmod(s)
-		Ip1/2	- The src/dest IP addresses for match (one must be supplied)
+		Id1/2	- The src/dest IP addresses for match (one must be supplied)
 		Meta	- The meta value to set/match (both optional)
 		Swid	- The switch DPID or host name (ovs) (used as -h option)
 		Swport	- The switch port to match (inbound)
@@ -106,7 +106,7 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 	/*
 	//===== right now no restriction/checking on some kind of source/dest
 	else {														// for table 0 we insist on having at least a src IP or port or a dest ip
-		if data.Match.Ip1 == nil && data.Match.Ip2 == nil {
+		if data.Match.Id1 == nil && data.Match.Id2 == nil {
 			if data.Match.Swport == -1 {
 				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: both source and dest IP addresses nil and no inbound switch port set" )
 				return
@@ -148,15 +148,15 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 
 	smac := data.Match.Smac								// smac wins if both smac and sip are given
 	if smac == nil {
-		if data.Match.Ip1 != nil {						// smac missing, set src IP (needed to support multiple res)
-			toks := strings.Split( *data.Match.Ip1, "/" )	// split off project/
+		if data.Match.Id1 != nil {						// smac missing, set src IP (needed to support multiple res)
+			toks := strings.Split( *data.Match.Id1, "/" )	// split off project/
 			match_opts += " -S " + toks[len( toks )-1]
 		}
 /*
-		if data.Match.Ip1 != nil {						// src supplied, match on src
-			smac = ip2mac[*data.Match.Ip1]
+		if data.Match.Id1 != nil {						// src supplied, match on src
+			smac = ip2mac[*data.Match.Id1]
 			if smac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: src IP did not translate to MAC: %s", *data.Match.Ip1 )
+				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: src IP did not translate to MAC: %s", *data.Match.Id1 )
 				return
 			}
 		}
@@ -168,10 +168,10 @@ func send_stfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string )
 
 	dmac := data.Match.Dmac								// dmac wins if both dmac and sip are given
 	if dmac == nil {
-		if data.Match.Ip2 != nil {						// src supplied, match on src
-			dmac = ip2mac[*data.Match.Ip2]
+		if data.Match.Id2 != nil {						// src supplied, match on src
+			dmac = ip2mac[*data.Match.Id2]
 			if dmac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: dst IP did not translate to MAC: %s", *data.Match.Ip2 )
+				fq_sheep.Baa( 0, "ERR: cannot set steering fmod: dst IP did not translate to MAC: %s", *data.Match.Id2 )
 				return
 			}
 		}

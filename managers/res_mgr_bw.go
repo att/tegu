@@ -125,10 +125,10 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 			freq.Single_switch = true
 		}
 
-		freq.Match.Ip1 = plist[i].Get_epid1( )							// we need the uuid of the endpoint to do translation in fqmgr
-		freq.Match.Ip2 = plist[i].Get_epid2( )
+		freq.Match.Id1 = plist[i].Get_epid1( )							// we need the uuid of the endpoint to do translation in fqmgr
+		freq.Match.Id2 = plist[i].Get_epid2( )
 		//rm_sheep.Baa( 1, ">>>> pushing path=%s", plist[i] )
-		//rm_sheep.Baa( 1, ">>>> pushing match1=%s  match2=%s", *freq.Match.Ip1, *freq.Match.Ip2 )
+		//rm_sheep.Baa( 1, ">>>> pushing match1=%s  match2=%s", *freq.Match.Id1, *freq.Match.Id2 )
 
 		freq.Espq = plist[i].Get_ilink_spq( rname, timestamp )			// spq info comes from the first link off of the switch, not the endpoint link back to the VM
 		if freq.Single_switch {
@@ -159,7 +159,7 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 			}
 
 			rm_sheep.Baa( 1, "res_mgr/push_bw: forward endpoint flow-mods for path %d: %s flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d ext=%s exp/fm_exp=%d/%d",
-				i, *rname, *cfreq.Exttyp, tptype_toks[tidx], *h1, *h2, *cfreq.Match.Ip1, *cfreq.Match.Ip2, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
+				i, *rname, *cfreq.Exttyp, tptype_toks[tidx], *h1, *h2, *cfreq.Match.Id1, *cfreq.Match.Id2, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
 				cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, *cfreq.Extip, expiry, cfreq.Expiry )
 
 			msg = ipc.Mk_chmsg()
@@ -229,8 +229,8 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 			}
 			freq.Id = rname
 
-			freq.Match.Ip1 = gate.Get_src().Get_meta_value( "uuid" )	// we wing round endpoint IDs now
-			freq.Match.Ip2 = gate.Get_dest().Get_meta_value( "uuid" )
+			freq.Match.Id1 = gate.Get_src().Get_meta_value( "uuid" )	// we wing round endpoint IDs now
+			freq.Match.Id2 = gate.Get_dest().Get_meta_value( "uuid" )
 			freq.Espq = gate.Get_spq( rname, now + 16 )					// switch port queue
 			freq.Extip = gate.Get_extip( )								// returns nil if not an external and that's what we need
 
@@ -252,11 +252,11 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 				cfreq.Match.Vlan_id= vlan
 
 				ip2_str := ""
-				if cfreq.Match.Ip2 != nil {
-					ip2_str = *cfreq.Match.Ip2
+				if cfreq.Match.Id2 != nil {
+					ip2_str = *cfreq.Match.Id2
 				}
 				rm_sheep.Baa( 1, "res_mgr/push_bwow: flag=%s tptyp=%s VMs=%s,%s dir=%s->%s tpsport=%s  tpdport=%s  spq=%s/%d/%d exp/fm_exp=%d/%d",
-					*rname, tptype_toks[tidx], *src, *dest, *cfreq.Match.Ip1, ip2_str, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
+					*rname, tptype_toks[tidx], *src, *dest, *cfreq.Match.Id1, ip2_str, *cfreq.Match.Tpsport, *cfreq.Match.Tpdport,
 					cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, expiry, cfreq.Expiry )
 
 				msg = ipc.Mk_chmsg()

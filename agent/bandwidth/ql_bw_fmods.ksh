@@ -58,7 +58,7 @@
 #				to do the following:
 #					1) using the local (source) uuid, suss out the vland and the openflow port number
 #					   from ovs. 
-#					2) mach outbound traffic based on the inbound openflow port/mac combo since that
+#					2) match outbound traffic based on the inbound openflow port/mac combo since that
 #					   is unique where MAC might not be.
 #					3) match inbound traffic based on the mac/vlan combination as that is uniqueue
 #					   where mac alone is not.
@@ -86,6 +86,7 @@
 #				20 Oct 2015 - Correct bug that was not marking the protocol correctly (was putting on all src
 #								or all dest on both inbound and outbound fmods rather than src for one and
 #								dest for the other.
+#				13 Nov 2015 - Now susses the bridge based on uuid from ovs rather than assuming br-int.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -111,11 +112,11 @@ function uuid2mac
 {
 	if [[ $1 == *":"* ]]		# we assume that a uuid does not have colons
 	then
-		echo "$1 -1"			# no vlan if mac is passed in
+		echo "$1 -1 0"			# no vlan or port if mac is passed in (we assume this is the remote side)
 		return
 	fi
 
-	ql_suss_ovsd | grep $1 | awk '{ print $5, $7, $3 }'
+	ql_suss_ovsd | grep $1 | awk '{ print $5, $7, $3, $8 }'		#  mac, vlan, port, bridge
 }
 
 # ----------------------------------------------------------------------------------------------------------
@@ -159,7 +160,7 @@ do
 	case $1 in
 		-6)		ip_type="-6";;							# force ip6 option to be given to send_ovs_fmod (outbound only).
 		-b)		mt_base="$2"; shift;;
-		-d)		uuid2mac "$2" | read rmac dvlan dofport; shift;;	# get the mac, vlan and openflow port from ovs based on neutron uuid
+		-d)		uuid2mac "$2" | read rmac dvlan dofport dbridge junk; shift;;	# get the mac, vlan, bridge and openflow port from ovs based on neutron uuid
 		-D)		ex_local=0;;								# external IP is "associated" with the rmac (-d) address
 		-E)		exip="$2"; shift;;
 		-h)		host="-h $2"; shift;;
@@ -180,7 +181,7 @@ do
 				;;		
 
 		-q)		queue="-q $2"; shift;;					# soon to change to meter
-		-s)		uuid2mac "$2" | read lmac svlan sofport; shift;;	# get the mac, vlan and openflow port from ovs based on neutron uuid
+		-s)		uuid2mac "$2" | read lmac svlan sofport sbridge junk; shift;;	# get the mac, vlan and openflow port from ovs based on neutron uuid
 		-S)		ex_local=1;;								# external IP is "associaetd" with the lmac (-s) address.
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		odscp="-T $2"; shift;;
@@ -220,6 +221,12 @@ else
 	fi
 fi
 
+if [[ -n sbridge ]]
+then
+	logit "setting bridge based on sbridge: $sbridge"
+	bridge=$sbridge
+fi
+
 # CAUTION:  this is confusing, so be careful (see notes in flower box at top)
 if [[ -n $exip ]]						# need to set up matching for external
 then
@@ -255,10 +262,13 @@ else
 	idscp="-T 0"
 fi
 
-if [[ -n $queue ]]
+if [[ ! -f /etc/tegu/allow_cq ]]				# unless this file is present, then we disable queue setting
 then
-	echo "ignoring -q setting: htb queues not allowed   [OK]"
-	queue=""
+	if [[ -n $queue ]]
+	then
+		echo "ignoring -q setting: htb queues not allowed   [OK]"
+		queue=""
+	fi
 fi
 
 # CAUTION: action options to send_ovs_fmods are probably order dependent, so be careful.

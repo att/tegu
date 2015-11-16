@@ -50,6 +50,7 @@
 #
 #	Mods:		17 Jun 2015 - Corrected handling of queue value when 0.
 #				09 Oct 2015 - Added ability to accept a neutron uuid for translation to mac/port.
+#				16 Nov 2015 - Now susses the bridge based on uuid from ovs rather than assuming br-int.
 # ---------------------------------------------------------------------------------------------------------
 
 # via broker on qos102: PATH=/tmp/daniels_b:$PATH ql_bwow_fmods -s 9458f3be-0a84-4b29-8e33-073ceab8d6e4 -d fa:16:3e:ed:cc:e5 -p udp: -q 2 -t 59 -T 184 -V 2 
@@ -82,7 +83,7 @@ function uuid2mac
 		return
 	fi
 
-	ql_suss_ovsd | grep $1 | awk '{ print $5, $7, $3 }'
+	ql_suss_ovsd | grep $1 | awk '{ print $5, $7, $3, $8 }'		#  mac, vlan, port, bridge
 }
 
 
@@ -121,7 +122,7 @@ do
 		-P)		pri_base=5; dproto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
 		-q)		queue="$2"; shift;;						# ignored until HTB replacedment is found
 		#-s)		smac="$2"; shift;;						# source (local) mac address
-		-s)		uuid2mac "$2" | read smac svlan sofport; shift;;
+		-s)		uuid2mac "$2" | read smac svlan sofport sbridge; shift;;
 		-S)		sip="-S $2"; shift;;					# local IP needed if local port (-p) is given
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		odscp="-T $2"; shift;;
@@ -163,6 +164,11 @@ then
 		exip="${exip%\]*}"
 	fi
 	exip="-D $exip"
+fi
+
+if [[ -n $sbridge ]]
+then
+	bridge=$sbridge						# use what was sussed from ovs if we can
 fi
 
 if [[ -n $sproto && -z sip ]]			# must have a source IP if source proto is supplied
