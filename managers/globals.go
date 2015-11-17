@@ -74,7 +74,6 @@ import (
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/config"
 	"github.com/att/gopkgs/ipc"
-
 	"github.com/att/tegu/gizmos"
 )
 
@@ -143,6 +142,13 @@ const (
 	REQ_YANK_RES				// yank out a reservation causing flow-mods to drop
 	REQ_LISTULCAP				// user link capacity list
 	REQ_ALLUP					// signal that all initialisation has been completed
+	REQ_GET_SNINFO				// request information about a subnet given a uuid (osif)
+	REQ_GW2PHOST				// given a gateway id return the physical host (osif)
+	REQ_WA_PORT					// agent wa_* requests	(agent manager) add port
+	REQ_WA_TUNNEL				// create a tunnel
+	REQ_WA_ROUTE				// create a route
+	REQ_WA_DELCONN				// delete connection
+	REQ_WA_PING					// ping wa stuff
 	REQ_GET_HOSTINFO			// request a full set of host info from the maps
 	REQ_GET_MIRRORS				// get a list of mirrors from res mgr
 	REQ_GET_DEFGW				// given a project[/junk] string, return the default (first in list) gateway (router)
@@ -245,6 +251,21 @@ var (
 	tclass2dscp map[string]int			// traffic class string (voice, video, af...) to a value
 	isSSL bool							// mirroring flag to know if ssl is on
 )
+
+//-- osif data passing structs ---------------------------------------------------------------------------------------------
+/*
+	Subnet information. Returned from osif get subnet info request. The token is the openstack token we have
+	for the matching project. This needs to go to the agent so that addWANPort can work.
+*/
+type Subnet_info struct {
+	name	*string
+	ip		*string
+	project	*string
+	cidr	*string
+	phost	*string
+	uuid	*string
+	token	*string
+}
 
 //-- fq-manager data passing structs ---------------------------------------------------------------------------------------
 

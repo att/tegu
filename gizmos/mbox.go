@@ -31,9 +31,6 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
 	//"io/ioutil"
 	//"html"

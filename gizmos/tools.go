@@ -28,6 +28,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		13 May 2014 -- Added toks2map function.
+				29 Sep 2014 -  The toks2map() funciton now stops parsing when the
 				29 Sep 2014 -  The toks2map() function now stops parsing when the
 					first token that does not match a key=value pair in order to
 					prevent issues with the huge openstack tokens that are base64
@@ -46,22 +47,11 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
-	//"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
 	"regexp"
 	"strings"
 	"time"
 
-	//"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
-	//"github.com/att/gopkgs/token"
-	//"github.com/att/gopkgs/ipc"
 )
 
 

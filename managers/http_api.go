@@ -74,6 +74,7 @@
 				18 Nov 2014 : Changes to support lazy osif data fetching
 				24 Nov 2014 : Corrected early return in update graph (preventing !//ipaddress from causing
 					an ip2mac map to be forced out to fqmgr.
+				05 Jan 2015 : Added support for wide area rest interface calls.
 				16 Jan 2015 : Support port masks in flow-mods.
 				27 Jan 2015 : Allow bandwidth specification to be decimal value (e.g. 155.2M)
 				17 Feb 2015 : Added mirroring
@@ -94,6 +95,7 @@
 				29 Jun 2015 : Now checkpoints after a delete reservation (tracker 272).
 								Fixed mirroring references from config.
 				16 Jul 2015 : Correct typo in the default admin role string.
+				11 Aug 2015 : Added wa ping support.
 				12 Aug 2015 : Corrected debug message.
 				03 Sep 2015 : Added latency option to verbose.
 */
@@ -1583,6 +1585,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	http_sheep.Baa( 1, "sysproc roles: %s", *sysproc_roles )
 	http_sheep.Baa( 1, "mirror roles: %s", *mirror_roles )
 
+																	//  define callbacks that are driven when various http requests are received
 	http.HandleFunc( "/tegu/api", api_deal_with )					// reserve/delete etc should eventually be removed from this
 	http.HandleFunc( "/tegu/bandwidth", api_deal_with )				// define bandwidth callback TODO: add a callback specifically for bandwidth things
 
@@ -1593,7 +1596,19 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 		http_sheep.Baa( 1, "mirroring is disabled" )
 	}
 
-	isSSL = (ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "")
+	// these are deprecated
+	http.HandleFunc( "/tegu/rest/ports", http_wa_ports )	// wide area rest api handlers
+	http.HandleFunc( "/tegu/rest/tunnels", http_wa_tunnel )
+	http.HandleFunc( "/tegu/rest/routes", http_wa_route )
+	http.HandleFunc( "/tegu/rest/connections", http_wa_conn )
+
+	http.HandleFunc( "/tegu/wa/ping", http_wa_ping )	// wide area rest api handlers
+	http.HandleFunc( "/tegu/wa/ports", http_wa_ports )	// wide area rest api handlers
+	http.HandleFunc( "/tegu/wa/tunnels", http_wa_tunnel )
+	http.HandleFunc( "/tegu/wa/routes", http_wa_route )
+	http.HandleFunc( "/tegu/wa/connections", http_wa_conn )
+
+	isSSL = (ssl_cert != nil && *ssl_cert != "" && ssl_key != nil && *ssl_key != "")			// global needed by mirroring
 	if isSSL {
 		if  create_cert {
 			http_sheep.Baa( 1, "creating SSL certificate and key: %s %s", *ssl_cert, *ssl_key )

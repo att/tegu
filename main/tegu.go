@@ -131,6 +131,7 @@
 				25 Jun 2015 : Corrected bug with mirror expiration and xlation of proj/vm to mac.
 				02 Jul 2015 : Corrected physical host fetch bug in osif.
 				06 Jul 2015 : Version bump
+				11 Aug 2015 : Corrected bug in agent response processing (wa)
 				29 Jul 2015 : Tracker bug fixes (263,266) version bump.
 				03 Sep 2015 : Correct panic in network.go.
 				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
@@ -143,7 +144,8 @@
 				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
 				3.1		- QoS-Lite with steering and mirroring added
 				3.2		- QoS-Lite with steering and WACC support added
-				4.1		- QoS-Lite with steering, mirroring; major endpoint network changes
+				4.1		- QoS-Lite with mirroring; major endpoint network changes
+				4.2		- QoS-Lite with wide area, mirroring; major endpoint network changes
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
 
@@ -172,7 +174,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.1.0/1b115"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v4.2.0/1b175"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite) 4.1 endpt prod, 4.2 endpt/wa
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

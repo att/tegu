@@ -52,14 +52,7 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"strings"
 	"time"
 
 	//"github.com/att/gopkgs/clike"

@@ -112,10 +112,17 @@ def normalizeHostname(hostname):
         because that is what Openstack host-list returns. Strip the
         domainname if FQDN is read in.
     '''
+<<<<<<< HEAD
+    return hostname.split(".")[0]
+
+def shortName(name):
+    return name.split('@')[0].split('.')[0]
+=======
     return hostname.split(".")[0].strip()
 
 def shortName(name):
     return name.split('@')[0].split('.')[0].strip()
+>>>>>>> master
 
 
 def parseLldpCtl(file, hosts, thisHost=None, ifacelist=set()):
@@ -226,7 +233,11 @@ class SwitchFileLoader(NetDataSource):
 
     def parseCisco(self, name, switch):
 
+<<<<<<< HEAD
+        links = re.findall('\n([^\s]+).*Eth(\d+(?:/\d+)?)\s+\d+\s+\S+' + \
+=======
         links = re.findall('\n([^\s]+)[\s\n]*Eth(\d+(?:/\d+)?)\s+\d+\s+\S+' + \
+>>>>>>> master
                            '\s+Ethernet(\d+(?:/\d+)?)', switch['lldp'])
 
         #print(name + "(Cisco)")
@@ -261,8 +272,13 @@ class SwitchFileLoader(NetDataSource):
 
     def parseArista(self, name, switch):
 
+<<<<<<< HEAD
+        links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+).*Ethernet(\d+(?:/\d+)?)',
+                           switch['lldp'])
+=======
         links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+)[\s\n]*Ethernet(\d+(?:/\d+)?)',
                            switch['lldp'], flags=re.DOTALL)
+>>>>>>> master
 
         #print(name + " (Arista)")
         for linkmatch in links:
@@ -497,8 +513,12 @@ class TopoGen:
             if elem not in self.hosts:
                 self.switches.append(elem)
 
+<<<<<<< HEAD
+            elem_links = ds.getElementLinks(elem)
+=======
             #print elem;
 	    elem_links = ds.getElementLinks(elem)
+>>>>>>> master
             for link in elem_links:
                 if link.dst not in visited:
 		    #print link;

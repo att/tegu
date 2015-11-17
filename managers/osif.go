@@ -898,6 +898,18 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					msg = nil							// prevent early response
 				}
 
+			case REQ_GET_SNINFO:						// dig out all of the bits of subnet info and return in a subnet_info struct
+				if msg.Response_ch != nil {
+					go get_sninfo( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+					msg = nil							// prevent early response
+				}
+
+			case REQ_GW2PHOST:							// given a gateway id (router id) return the physical host it lives on
+				if msg.Response_ch != nil {
+					go osif_gw2phost( msg, os_refs, os_projects, id2pname, pname2id )			// do it asynch and return the result on the message channel
+					msg = nil							// prevent early response
+				}
+
 			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string
 				if msg.Response_ch != nil {
 					if ! have_project(  msg.Req_data.( *string ), pname2id, id2pname ) {				// ensure that we have creds for this project, if not attempt to get

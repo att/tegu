@@ -35,7 +35,9 @@
 				05 Jun 2014 : Fixed stray reference to net_sheep.
 				29 Oct 2014 : Corrected potential core dump if agent msg received is less than
 					100 bytes.
+				06 Jan 2015 : Added support for wide area (wacc)
 				17 Jun 2105 : Added oneway reservation support.
+				11 Aug 2015 : Corrected problem with returning wa_port results, added wa_ping.
 */
 
 package managers
@@ -57,7 +59,7 @@ import (
 
 type action struct {			// specific action
 	Atype	string				// something like map_mac2phost, or intermed_queues
-	Aid		uint32				// action id to be sent in the response
+	Aid		uint32				// action id used to map the response back to caller's request
 	Data	map[string]string	// generic data - probably json directly from the outside world, but who knows
 	Hosts	[]string			// list of hosts to apply the action to
 	Dscps	string				// space separated list of dscp values
@@ -95,6 +97,13 @@ type agent_msg struct {
 	Vinfo	string			// agent verion (dbugging mostly)
 	Rid		uint32			// original request id
 }
+
+type pend_req struct {		// pending request -- something is expecting a response on a channel
+	req		*ipc.Chmsg		// the original message (request) that will be sent back
+	id		uint32			// our internal id for the request (put into the agent request and used as hash key)
+}
+
+// ---------------------------------------------------------------------------------------------------
 
 /*
 	Build the agent list from the map. The agent list is a 'sequential' list of all currently
@@ -215,8 +224,12 @@ func (ad *agent_data) send2all( smgr *connman.Cmgr,  msg string ) {
 	from the cache. If the blob is pulled, then we act on it, else we
 	assume another buffer or more will be coming to complete the blob
 	and we'll do it next time round.
+
+	We should be synchronous through this function since it is called
+	directly by our main goroutine, thus it is safe to update the request
+	tracker map directly (no locking).
 */
-func ( a *agent ) process_input( buf []byte ) {
+func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 	var (
 		req	agent_msg		// unpacked message struct
 	)
@@ -234,22 +247,47 @@ func ( a *agent ) process_input( buf []byte ) {
 	
 			switch( req.Ctype ) {					// "command type"
 				case "response":					// response to a request
-					if req.State == 0 {
+					if req.State == 0 {				// successful response
 						switch( req.Rtype ) {
-							case "map_mac2phost":
+							case "map_mac2phost":												// map goes to network manager (no pending request)
 								msg := ipc.Mk_chmsg( )
-								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
-			
+								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// we don't expect a response
+
+									msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
+
+/*
+---- caution this is code from steering, do not let it overlay the following code which is needed for wa!
 							default:	
-								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )
+								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )		// if we don't recognise it we assume it should be ignored
 								if am_sheep.Would_baa( 2 ) {
 									am_sheep.Baa( 2, "first few ignored messages from response:" )
 									for i := 0; i < len( req.Rdata ) && i < 10; i++ {
 										am_sheep.Baa( 2, "[%d] %s", i, req.Rdata[i] )
 									}
 								}
-						}
-					} else {
+*/
+
+							default:
+								if req.Rid > 0 {			// find the pending request and fill it in, then write it on the channel referenced by the request
+									pr := rt_map[req.Rid]
+									if pr != nil {
+										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: tpe=%s rid=%d state=%d", req.Rtype, req.Rid, req.State )
+										msg := pr.req					// message block that was sent to us; fill out the response and return
+										msg.Response_data = req.Rdata
+										msg.State = nil
+
+										delete( rt_map, req.Rid )						// done with the pending request block
+										msg.Response_ch <- msg							// send response back to the process that caused the command to run
+									} else {
+										am_sheep.Baa( 1, "WRN: agent response ignored: no pending req for id: type=%s rid=%d [TGUAGTXXX]", req.Rtype, req.Rid )   //FIX message id
+									}
+								} else {
+									am_sheep.Baa( 1, "agent response ignored: no request id: type=%s state=%d", req.Rtype, req.State )
+								}
+
+
+						}								// end rtype switch
+					} else {							// failed request
 						switch( req.Rtype ) {
 							case "bwow_fmod":
 								am_sheep.Baa( 1, "ERR: oneway bandwidth flow-mod failed; check agent logs for details  [TGUAGT006]" )
@@ -257,17 +295,38 @@ func ( a *agent ) process_input( buf []byte ) {
 									am_sheep.Baa( 1, "  [%d] %s", i, req.Rdata[i] )
 								}
 
+/*
+----- don't let this code overlay the default below when merging master in.
 							default:
-								am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: %s  [TGUAGT002]", req.Rtype )
+								am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: state=%d %s  [TGUAGT002]", req.State, req.Rtype )
 								for i := 0; i < len( req.Rdata ) && i < 20; i++ {
 									am_sheep.Baa( 2, "  [%d] %s", i, req.Rdata[i] )
+								}
+*/
+
+							default:
+								if req.Rid > 0 {			// find the pending request and fill it in, then write it on the channel referenced by the request
+									pr := rt_map[req.Rid]
+									if pr != nil {
+										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: tpe=%s rid=%d state=%d", req.Rtype, req.Rid, req.State )
+										msg := pr.req					// message block that was sent to us; fill out the response and return
+										msg.Response_data = req.Rdata
+										msg.State = fmt.Errorf( "rc=%d", req.State )
+
+										delete( rt_map, req.Rid )						// done with the pending request block
+										msg.Response_ch <- msg							// send response back to the process that caused the command to run
+									} else {
+										am_sheep.Baa( 1, "WRN: agent failure response ignored: no pending req for id: type=%s rid=%d [TGUAGTXXX]", req.Rtype, req.Rid )   //FIX message id
+									}
+								} else {
+									am_sheep.Baa( 1, "agent failure response ignored: no request id: type=%s state=%d", req.Rtype, req.State )
 								}
 						}
 					}
 
 				default:
 					am_sheep.Baa( 1, "WRN:  unrecognised command type type from agent: %s  [TGUAGT003]", req.Ctype )
-			}
+			}													// end ctype switch
 		}
 
 		jblob = a.jcache.Get_blob()								// get next blob if the buffer completed one and containe a second
@@ -276,7 +335,7 @@ func ( a *agent ) process_input( buf []byte ) {
 	return
 }
 
-//-------- request builders -----------------------------------------------------------------------------------------
+//-------- request builders ---- (see agent_wa.go too) -----------------------------------------------------------------------------
 
 /*
 	Build a request to have the agent generate a mac to phost list and send it to one agent.
@@ -302,6 +361,7 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 	msg := &agent_cmd{ Ctype: "action_list" }				// create command struct then convert to json
 	msg.Actions = make( []action, 1 )
 	msg.Actions[0].Atype = "map_mac2phost"
+	msg.Actions[0].Aid = 0
 	msg.Actions[0].Hosts = strings.Split( *hlist, " " )
 	jmsg, err := json.Marshal( msg )			// bundle into a json string
 
@@ -325,6 +385,7 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 	msg := &agent_cmd{ Ctype: "action_list" }				// create command struct then convert to json
 	msg.Actions = make( []action, 1 )
 	msg.Actions[0].Atype = "intermed_queues"
+	msg.Actions[0].Aid = 0
 	msg.Actions[0].Hosts = strings.Split( *hlist, " " )
 	msg.Actions[0].Dscps = *dscp
 
@@ -363,16 +424,21 @@ func shift_values( list string ) ( new_list string ) {
 
 func Agent_mgr( ach chan *ipc.Chmsg ) {
 	var (
-		port	string = "29055"						// port we'll listen on for connections
-		adata	*agent_data
-		host_list string = ""
-		dscp_list string = "46 26 18"				// list of dscp values that are used to promote a packet to the pri queue in intermed switches
-		refresh int64 = 60
-		iqrefresh int64 = 1800							// intermediate queue refresh (this can take a long time, keep from clogging the works)
+		port		string = "29055"					// port we'll listen on for connections
+		adata		*agent_data
+		host_list	string = ""
+		dscp_list 	string = "46 26 18"					// list of dscp values that are used to promote a packet to the pri queue in intermed switches
+		refresh 	int64 = 60
+		iqrefresh 	int64 = 1800						// intermediate queue refresh
+		req_id		uint32 = 1							// sync request id, key for hash (start at 1; 0 should never have an entry)
+		req_track	map[uint32]*pend_req				// hash of pending requests
+		type2name 	map[int]string						// map REQ_ types to a string that is passed as the command constant
+		def_wan_uuid *string = nil						// default uuid for the wan (from config)
 	)
 
 	adata = &agent_data{}
 	adata.agents = make( map[string]*agent )
+	req_track = make( map[uint32]*pend_req )
 
 	am_sheep = bleater.Mk_bleater( 0, os.Stderr )		// allocate our bleater and attach it to the master
 	am_sheep.Set_prefix( "agentmgr" )
@@ -396,6 +462,13 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 				iqrefresh = 90
 			}
 		}
+		if p := cfg_data["agent"]["wan_uuid"]; p != nil {		// uuid that gets passed to the agent for the add-port call
+			def_wan_uuid = p
+			am_sheep.Baa( 1, "wan uuid will default to: %s", *def_wan_uuid )
+		} else {
+			dup_str := ""
+			def_wan_uuid = &dup_str
+		}
 	}
 	if cfg_data["default"] != nil {						// we pick some things from the default section too
 		if p := cfg_data["default"]["pri_dscp"]; p != nil {			// list of dscp (diffserv) values that match for priority promotion
@@ -407,8 +480,14 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	}
 	
 	dscp_list = shift_values( dscp_list )				// must shift values before giving to agent
+	
+	type2name = make( map[int]string, 5 )
+	type2name[REQ_WA_PORT] = "wa_port"					// command constants that get sent off to the agent
+	type2name[REQ_WA_PING] = "wa_ping"
+	type2name[REQ_WA_TUNNEL] = "wa_tunnel"
+	type2name[REQ_WA_ROUTE]	= "wa_route"
+	type2name[REQ_WA_DELCONN] = "wa_del_conn"
 
-														// enforce some sanity on config file settings
 	am_sheep.Baa( 1,  "agent_mgr thread started: listening on port %s", port )
 
 	tklr.Add_spot( 2, ach, REQ_MAC2PHOST, nil, 1 );  					// tickle once, very soon after starting, to get a mac translation
@@ -460,11 +539,31 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 						if host_list != "" {
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
+	
+					case REQ_WA_PING, 				// wa commands can be setup/sent by a common function
+						REQ_WA_PORT,
+						REQ_WA_TUNNEL,
+						REQ_WA_ROUTE,
+						REQ_WA_DELCONN:
+						if req.Req_data != nil {
+							req_track[req_id] = &pend_req {			// tracked request to have block when response recevied from agent
+								req: req,
+								id:	req_id,
+							}
 
+							adata.send_wa_cmd( type2name[req.Msg_type], smgr, req_track[req_id], def_wan_uuid )		// do the real work to push to agent
+							req = nil									// prevent immediate response
+							req_id++
+							if req_id == 0 {
+								req_id = 1
+							}	
+						} else {
+							req.State = fmt.Errorf( "missing data on request to agent manager" )		// immediate failure
+						}
 				}
 
-				am_sheep.Baa( 3, "processing request finished %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
-				if req.Response_ch != nil {				// if response needed; send the request (updated) back
+				if req != nil  &&  req.Response_ch != nil {				// if response needed; send the request (updated) back
+					am_sheep.Baa( 3, "processing request finished %d", req.Msg_type )			// we seem to wedge in network, this will be chatty, but may help
 					req.Response_ch <- req
 				}
 
@@ -497,7 +596,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 								cval = len( sreq.Buf )
 							}
 							am_sheep.Baa( 2, "data: [%s]  %d bytes received:  first 100b: %s", sreq.Id, len( sreq.Buf ), sreq.Buf[0:cval] )
-							adata.agents[sreq.Id].process_input( sreq.Buf )
+							adata.agents[sreq.Id].process_input( sreq.Buf, req_track )
 						} else {
 							am_sheep.Baa( 1, "data from unknown agent: [%s]  %d bytes ignored:  %s", sreq.Id, len( sreq.Buf ), sreq.Buf )
 						}

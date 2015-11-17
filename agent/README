@@ -1,2 +1,5 @@
 This directory contains interface scripts which the tegu-agent
 uses to execute direct interaction with switches.  
+	bandwidth - Scripts related to bandwidth reservation
+	mirror	  - Scripts related to port mirroring
+	wa		  - Scripts related to wide area network stitching

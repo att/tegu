@@ -787,7 +787,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 
 	if p2 < 0 {									
 		if p2 == p1 {
-			id = fmt.Sprintf( "%s.%s.$s", sw, m1, m2 ) 			// late binding, we don't know port, so use mac for ID
+			id = fmt.Sprintf( "%s.%s.%s", sw, *m1, *m2 ) 			// late binding, we don't know port, so use mac for ID
 		} else {
 			id = fmt.Sprintf( "%s.%d", sw, p1 )					// endpoint -- only a forward link to p1
 		}

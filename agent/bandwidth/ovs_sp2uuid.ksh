@@ -18,7 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-
 #	Mnemonic:	ovs_sp2uuid -- map a switch dpid/port combination to ovs UUID.
 #	Abstract:	This script accepts the dpid for a switch and an openflow port
 #				number and writes the UUID of the asscoiated internal OVS port

@@ -18,8 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#!/usr/bin/env ksh
-
 #	Mnemonic:	tegu_verification.ksh
 #	Abstract:	Runs a few regression(ish) tests to verify that tegu is working.
 #				Must have OS_PASSWORD and OS_AUTH_URL defined in the environment.

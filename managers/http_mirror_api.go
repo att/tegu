@@ -340,7 +340,7 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 		if req.Response_data == nil {
 			err = fmt.Errorf("Cannot find MAC: " + mac)
 		} else {
-			vm = Mk_netreq_vm( nil, nil, nil, nil, req.Response_data.(*string), &mac, nil, nil, nil )	// only use the two fields
+			vm = Mk_netreq_vm( nil, nil, nil, nil, req.Response_data.(*string), &mac, nil, nil, nil, nil )	// only use the two fields
 			http_sheep.Baa( 1, "name=NIL id=NIL ip4=NIL phost=%s mac=%s gw=NIL fip=NIL", safe(vm.phost), safe(vm.mac) )
 		}
 		return
@@ -357,7 +357,7 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 		if req.Response_data == nil {
 			err = fmt.Errorf("Cannot find Port UUID: " + uuid + ", " + req.State.Error())
 		} else {
-			vm = Mk_netreq_vm( nil, nil, nil, nil, req.Response_data.(*string), &uuid, nil, nil, nil )	// only use the two fields
+			vm = Mk_netreq_vm( nil, nil, nil, nil, req.Response_data.(*string), &uuid, nil, nil, nil, nil )	// only use the two fields
 			http_sheep.Baa( 1, "name=NIL id=NIL ip4=NIL phost=%s uuid=%s gw=NIL fip=NIL", safe(vm.phost), safe(vm.mac) )
 		}
 		return

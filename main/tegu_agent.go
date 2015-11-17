@@ -45,6 +45,8 @@
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
 				05 Oct 2014 : Now writes stderr from all commands even if good return.
+				06 Jan 2015 : Wa support.
+				13 Jan 2015 : Added check for "exits" result fro wa_route.
 				14 Jan 2014 : Added ssh-broker support. (bump to 2.0)
 				25 Feb 2015 : Added mirroring (version => 2.1), command line flags comment, and "mirrirwiz" handling.
 				27 Feb 2015 : Allow fmod to be sent to multiple hosts (steering).
@@ -58,6 +60,9 @@
 					if the agent pops the timeout.
 				25 Jun 2015 : Now puts stderr out from a mirror command on failure or bleat level 2+.
 				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
+				17 Jul 2015 : Merge with steering, reference wa scripts from /var/lib/tegu/bin rather
+					than /opt/app/bin.
+				11 Aug 2015 : Corrected initialisation of state value in port.
 				02 Sep 2015 : Pick up new agent script.
 
 	NOTE:		There are three types of generic error/warning messages which have
@@ -74,6 +79,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/att/gopkgs/bleater"
@@ -85,9 +91,11 @@ import (
 
 // globals
 var (
-	version		string = "v2.3/19025"
+	version		string = "v2.1.1/18115"		// wide area support added with broker
 	sheep *bleater.Bleater
+	// the next two should be deprecated with broker
 	shell_cmd	string = "/bin/ksh"
+	ssh_cmd		string = "ssh"				// allows us to use a dummy for testing
 
 	running_sim	bool = false	// prevent queueing more if one is running (set up intermediate)
 	running_map bool = false	// map phost
@@ -205,6 +213,118 @@ func  buf_into_array( buf bytes.Buffer, a []string, sidx int ) ( idx int ) {
 }
 
 // --------------- request support (command execution) ----------------------------------------------------------
+
+/*	Run a wide area command which fits a generic profile. The agent (us) is expected to know what values need to be pulled
+	from the parm list and how they are placed on the command line. Tegu's agent manager knows what the
+	interface is with the caller (could be WACC, could be something different) and thus tegu is
+	responsible for taking the raw stdout and putting it into a form that the requestor can digest.
+
+	Type is "wa_del_conn" "wa_port", "wa_tunnel", or "wa_route"
+ */
+func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, path *string, timeout time.Duration ) ( jout []byte, err error ) {
+    var (
+		cmd_str string
+		allow_exists bool = false		// we might allow file exists "errors" if this is set
+    )
+	
+	pstr := ""
+	if path != nil {
+		pstr = fmt.Sprintf( "PATH=%s:$PATH ", *path )		// path to add if needed
+	}
+
+	parms := act.Data
+
+	switch cmd_type {
+		case "wa_ping":
+				if parms["state"] != "fail"  {
+					cmd_str = fmt.Sprintf( `echo "tegu running on $(hostname) parm=%s`,  parms["state"] )
+				} else {
+					cmd_str = fmt.Sprintf( `no-such-command` )
+				}
+
+		case "wa_port":
+				allow_exists = true
+				cmd_str = fmt.Sprintf( `%s sudo /var/lib/tegu/bin/addWANPort %s %s %s`, pstr, parms["token"], parms["wan_uuid"], parms["subnet"] )
+
+		case "wa_tunnel":
+				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANTunnel %s %s %s`, pstr, parms["localrouter"], parms["localip"], parms["remoteip"] )
+
+		case "wa_route":
+				cmd_str = fmt.Sprintf( `%s  sudo /var/lib/tegu/bin/addWANRoute %s %s %s %s`,
+						pstr, parms["localrouter"], parms["localip"], parms["remoteip"], parms["remote_cidr"] )
+
+		case "wa_del_conn":
+				cmd_str = fmt.Sprintf( `%s sudo /var/lib/tegu/bin/deleteWANConnection %s %s %s %s`,  pstr, parms["token"], parms["wan_uuid"], parms["router"], parms["remote_cidr"] )
+	}
+
+	sheep.Baa( 1, "wa_cmd executing: %s", cmd_str )
+
+	msg := agent_msg{}				// build response to send back
+	msg.Ctype = "response"
+	msg.Rtype = cmd_type
+	msg.Rid = act.Aid				// response id so tegu can map back to requestor
+	msg.Vinfo = version
+	msg.State = 0
+
+	//msg.Rdata, msg.Edata, err = extcmd.Cmd2strings( cmd_str ) 		// execute command and package output as json in response format
+
+	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
+	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// for now, there will only ever be one host for these commands
+	if err != nil {
+		sheep.Baa( 1, "WRN: error submitting wa command  to %s: %s", act.Hosts[0], err )
+		jout, _ = json.Marshal( msg )
+		sheep.Baa( 1, "returning error: %s", jout )
+		return
+	}
+
+	rdata := make( []string, 8192 )								// response output converted to strings
+	edata := make( []string, 8192 )
+	ridx := 0													// index of next insert point into rdata
+	wait4 := 1
+	timer_pop := false
+	for wait4 > 0 && !timer_pop {								// wait for response back on the channel or the timer to pop
+		select {
+			case <- time.After( timeout * time.Second ):		// timeout if we don't get something back soonish
+				sheep.Baa( 1, "WRN: timeout waiting for wa command response to: %s", cmd_str )
+				timer_pop = true
+
+			case resp := <- ssh_rch:					// response from broker
+				wait4--
+				stdout, stderr, _, err := resp.Get_results()
+				host, _, _ := resp.Get_info()
+				eidx := buf_into_array( stderr, edata, 0 )			// capture error messages, if any
+				msg.Edata = edata[0:eidx]
+				if err != nil {
+					msg.State = 1
+					if allow_exists && msg.Edata != nil && len( msg.Edata ) > 0 {
+						if strings.Contains( msg.Edata[0], "File exists" ) {
+							sheep.Baa( 1, "WRN wa_cmd (%s) indicates element (route, etc.) exists;  stdout: %d lines; stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+							msg.State = 0
+						}
+					}
+					sheep.Baa( 1, "WRN: error running wa command: host=%s: %s", host, err )
+				} else {
+					ridx = buf_into_array( stdout, rdata, ridx )			// capture what came back for return
+				}
+				if err != nil || sheep.Would_baa( 2 ) {
+					dump_stderr( stderr, "wa " + host )			// always dump stderr on error, or in chatty mode
+				}
+		}
+	}
+
+	msg.Rdata = rdata[0:ridx]										// return just what was filled in
+
+	if msg.State > 0 {
+		sheep.Baa( 1, "wa_cmd (%s) failed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+		sheep.Baa( 0, "ERR: %s unable to execute: %s: %s	[TGUAGN000]", cmd_type, cmd_str, err )
+	} else {
+		sheep.Baa( 1, "wa_cmd (%s) completed: stdout: %d lines;  stderr: %d lines", cmd_type, len( msg.Rdata ), len( msg.Edata )  )
+	}
+
+	jout, err = json.Marshal( msg )
+	sheep.Baa( 1, "json_out: %s", jout )
+	return
+}
 
 /*
 	Builds an option string of the form '-X value' if value passed in is not nil, and an empty string if
@@ -809,6 +929,14 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 						sheep.Baa( 1, "handle blob: setqueues still running, not restarted" )
 					}
 
+
+			case "wa_ping", "wa_port", "wa_tunnel", "wa_route", "wa_del_conn":									// execute one of the wa commands
+					p, err := req.Actions[i].do_wa_cmd( req.Actions[i].Atype, broker, nil, 5 )		// no path needed at the moment for these
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
+
 			case "mirrorwiz":
 					do_mirrorwiz(req.Actions[i], broker, path)
 
@@ -821,6 +949,7 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 
 			case "bwow_fmod":									// generate oneway bandwidth flow-mods
 					p, err := req.Actions[i].do_bwow_fmod( req.Actions[i].Atype, broker, path, 15 )
+
 					if err == nil {
 						resp[ridx] = p
 						ridx++
@@ -881,6 +1010,7 @@ func main() {
 	rdir := flag.String( "rdir", def_rdir, "rsync remote directory" )
 	rlist := flag.String( "rlist", def_rlist, "rsync file list" )
 	tegu_host := flag.String( "h", "localhost:29055", "tegu_host:port" )
+	testing := flag.Bool( "t", false, "testing mode" )
 	user	:= flag.String( "u", def_user, "ssh user-name" )
 	verbose := flag.Bool( "v", false, "verbose" )
 	vlevel := flag.Int( "V", 1, "verbose-level" )
@@ -889,6 +1019,10 @@ func main() {
 	if *needs_help {
 		usage( version )
 		os.Exit( 0 )
+	}
+
+	if *testing {					// may imply different behaviour....
+		ssh_cmd = "dummy_ssh"			// use a dummy ssh command to prevent sending to the remote host
 	}
 
 	if *id <= 0 {

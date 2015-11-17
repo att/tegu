@@ -18,7 +18,7 @@
 # ---------------------------------------------------------------------------
 #
 
-'''	
+'''
         Mnemonic:   tegu_ha.py
         Abstract:   High availability script for tegu. Pings other tegu's in the
                     standby_list. If no other tegu is running, then makes the

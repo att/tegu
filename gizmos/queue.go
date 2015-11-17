@@ -35,18 +35,7 @@
 package gizmos
 
 import (
-	//"bufio"
-	//"encoding/json"
-	//"flag"
 	"fmt"
-	//"io/ioutil"
-	//"html"
-	//"net/http"
-	//"os"
-	//"strings"
-	//"time"
-
-	//"github.com/att/gopkgs/clike"
 )
 
 type Queue struct {
