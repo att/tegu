@@ -52,6 +52,12 @@ func ( ad *agent_data ) send_wa_cmd( atype string, smgr *connman.Cmgr, pr *pend_
 
 	if pr.req.Req_data != nil {
 		switch atype {
+			case "wa_ping":
+				parm_map = make( map[string]string )
+				ping_data := pr.req.Req_data.( *wa_ping_req )
+				parm_map["state"] = ping_data.State
+				host = *ping_data.host
+
 			case "wa_port":
 				port_data := pr.req.Req_data.( *wa_port_req )			// get the port request information (token, project, subnet )
 				parm_map = port_data.To_map()							// convert to map to pass to agent as parms

@@ -81,6 +81,7 @@
 				16 Jun 2015 - Corrected possible core dump in host_info() -- not checking for nil name.
 				18 Jun 2015 - Added oneway rate limiting and delete support.
  				02 Jul 2015 - Extended the physical host refresh rate.
+				03 Sep 2015 - Correct nil pointer core dump cause.
 */
 
 package managers
@@ -625,12 +626,14 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		hr_factor = 100 - int64( link_headroom )
 	}
 
+
+	// REVAMP:   eliminate the floodlight call openstack interface should be sending us a list of endpoints to use; use them directly
 	if strings.Index( *flhost, ":" ) >= 0  {
 		links = gizmos.FL_links( flhost )					// request the current set of links from floodlight
 		hlist = gizmos.FL_hosts( flhost )					// get a current host list from floodlight
 	} else {
 		hlist = old_net.build_hlist()						// simulate output from floodlight by building the host list from openstack maps
-		links, err = gizmos.Read_json_links( *flhost )
+		links, err = gizmos.Read_json_links( *flhost )		// build links from the topo file; if empty/missing, we'll generate a dummy next
 		if err != nil || len( links ) <= 0 {
 			if host_list != nil {
 				net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *flhost )
@@ -659,7 +662,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		return
 	}
 
-	for i := range links {								// parse all links returned from the controller
+	for i := range links {								// parse all links returned from the controller (build our graph of switches and links)
 		if links[i].Capacity <= 0 {
 			links[i].Capacity = max_capacity			// default if it didn't come from the source
 		}
@@ -712,12 +715,13 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		n.hupdate = false
 	}
 
-	for i := range hlist {			// parse the unpacked json; structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
+	// REVAMP:  expect hlist to be a list of endpoints which we just need to map to switches and add.
+	for i := range hlist {			// parse the unpacked json (host list); structs are very dependent on the floodlight output; TODO: change FL_host to return a generic map
 		if len( hlist[i].Mac )  > 0  && len( hlist[i].AttachmentPoint ) > 0 {		// switches come back in the list; if there are no attachment points we assume it's a switch & drop
 			ip6 = ""
 			ip4 = ""
 
-			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this does snarf everything
+			if len( hlist[i].Ipv4 ) > 0 { 							// floodlight returns them all in a list; openstack produces them one at a time, so for now this doesn't snarf everything
 				if strings.Index( hlist[i].Ipv4[0], ":" ) >= 0 {	// if emulating floodlight, we get both kinds of IP in this field, one per hlist entry (ostack yields unique mac for each ip)
 					ip6 = hlist[i].Ipv4[0];
 				} else {
@@ -1158,14 +1162,16 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 					case REQ_BWOW_RESERVE:								// one way bandwidth reservation, nothing really to vet, return a gate block
 						// host names are expected to have been vetted (if needed) and translated to project-id/IPaddr if IDs are enabled
 						var ipd *string
+						var dh  *gizmos.Host
 
 						req.Response_data = nil
 						p, ok := req.Req_data.( *gizmos.Pledge_bwow )
 						if ok {
 							src, dest := p.Get_hosts( )									// we assume project/host-name
-							net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
 
 							if src != nil && dest != nil {
+								net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
+
 								usr := "nobody"											// default dummy user if not project/host
 								toks := strings.SplitN( *src, "/", 2 )					// suss out project name
 								if len( toks ) > 1 {
@@ -1174,11 +1180,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	
 								ips, err := act_net.name2ip( src )
 								if err == nil {
-									ipd, err = act_net.name2ip( dest )
+									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
 								}
 
 								sh := act_net.hosts[*ips]
-								dh := act_net.hosts[*ipd]						// this will be nil for an external IP
+								if ipd != nil {
+									dh = act_net.hosts[*ipd]						// this will be nil for an external IP
+								}
 								ssw, _ := sh.Get_switch_port( 0 )
 								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
 								if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address

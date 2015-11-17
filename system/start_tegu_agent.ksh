@@ -18,7 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#!/usr/bin/env ksh
 #
 #	Mnemonic:	start_agent
 #	Abstract:	Simple diddy to start the tegu_agent pointing at the proper spots for log and such.

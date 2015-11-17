@@ -51,7 +51,6 @@ import (
 	"sync"
 	"time"
 
-	//"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/gopkgs/ostack"
 )
@@ -63,7 +62,9 @@ import (
 type osif_project struct {
 	name		*string
 	lastfetch	int64						// timestamp of last map update to detect freshness
-	vmid2ip		map[string]*string			// translation maps for the project
+											// translation maps for the project
+	// REVAMP:   need a map of VMs interface uuids to IP addresses; endpoints use uuid of interface
+	vmid2ip		map[string]*string			
 	ip2vmid		map[string]*string
 	ip2vm		map[string]*string
 	vm2ip		map[string]*string			// vm name to ip; gateway IPs are used as names
@@ -346,7 +347,6 @@ func (p *osif_project) ip2cidr( ip4 *string ) ( *string ) {
 		k_toks := strings.Split( k, "/" )										// need to match on project too
 		if len( k_toks ) == 1  ||  k_toks[0] ==  project || project == "" {		// safe to check the cidr
 			c_toks := strings.Split( *v, "/" )
-			//if in_subnet( ip, c_toks[0], clike.Atoi( c_toks[1] ) ) {
 			if in_subnet( ip, c_toks[0],  c_toks[1] ) {
 				osif_sheep.Baa( 1, "mapped ip to CIDR for: %s  %s", *ip4, *v )
 				return v
@@ -758,6 +758,86 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 		return
 	}
 
+	if tokens[0][0:1] == "!" {				// first character is a bang, but there is a name/id that follows
+		tokens[0] = tokens[0][1:]			// ditch it for this
+	}
+
+	pid := &tokens[0]
+	pname := id2pname[*pid]
+	if pname == nil {						// it should be an id, but allow for a name/host to be sent in
+		pname = &tokens[0]
+		pid = pname2id[*pname]
+	}
+
+	if pid == nil {
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to an project (nil pid): %s",  *(msg.Req_data.( *string )) )  // might be !project/vm, and so this is ok
+		msg.State = fmt.Errorf( "%s could not be mapped to an osif_project", *(msg.Req_data.( *string )) )
+		msg.Response_ch <- msg
+		return
+	}
+
+	p := os_projs[*pid]
+	if p == nil {
+		osif_sheep.Baa( 1, "get hostinfo: %s mapped to a pid; pid did not map to project: %s", *(msg.Req_data.( *string )), *pid )
+		msg.State = fmt.Errorf( "%s could not be mapped to an osif_project", *(msg.Req_data.( *string )) )
+		msg.Response_ch <- msg
+		return
+	}
+
+	creds := os_refs[*pname]
+	if creds == nil {
+		osif_sheep.Baa( 1, "get hostinfo: %s mapped to a project; did not map to creds: %s", *(msg.Req_data.( *string )), *pname )
+		msg.State = fmt.Errorf( "%s could not be mapped to openstack creds ", *pname )
+		msg.Response_ch <- msg
+		return
+	}
+	
+	osif_sheep.Baa( 2, "lazy update: get host info setup complete for (%s) %s", *pname, *(msg.Req_data.( *string )) )
+
+	search := *pid + "/" + tokens[1]							// search string must be id/hostname
+	name, id, ip4, fip4, mac, gw, cidr, phost, gwmap, _, err := p.Get_info( &search, creds, true )
+	if err != nil {
+		msg.State = fmt.Errorf( "unable to retrieve host info: %s", err )
+		msg.Response_ch <- msg
+		return
+	}
+	
+	osif_sheep.Baa( 2, "lazyupdate: Response_data = %s %s %s %s %s %s", safe( name ), safe( id ), safe( ip4 ), safe( phost ), safe( mac ), safe( gw ) )
+	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, cidr, fip4, gwmap )		// build the vm data block for network manager
+	msg.Response_ch <- msg																// and send it on its merry way
+
+	return
+}
+
+/*
+	Get openstack host information.
+	Given a project-id/host as input, dig out all of the host's information and build a struct
+	that can be passed into the network manager as an add host to graph request. This
+	expects to run as a go routine and to write the response directly back on the channel
+	givn in the message block.
+*/
+/* ---- deprecated -------
+func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
+	if msg == nil || msg.Response_ch == nil {
+		return															// prevent accidents
+	}
+
+	msg.Response_data = nil
+
+	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
+	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s bad tokens",  *(msg.Req_data.( *string )) )
+		msg.State = fmt.Errorf( "invalid project/hostname string: %s", *(msg.Req_data.( *string )) )
+		msg.Response_ch <- msg
+		return
+	}
+
+	if tokens[0] == "!" { 					// !//ipaddress was given; we've got nothing, so bail now
+		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s lone bang",  *(msg.Req_data.( *string )) )
+		msg.Response_ch <- msg
+		return
+	}
+
 	p, pid, creds, err := pid2data( &tokens[0], os_refs, os_projs, id2pname, pname2id )
 	if err != nil {
 		osif_sheep.Baa( 1, "get host info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )
@@ -781,6 +861,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 
 	return
 }
+----- */
 
 /*
 	Invoked as a goroutine (asynch) to dig the needed subnet information from the current project block
@@ -858,6 +939,12 @@ func osif_gw2phost( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs 
 		msg.Response_ch <- msg
 		return
 	}
+	
+/*
+	osif_sheep.Baa( 2, "lazyupdate: Response_data = %s %s %s %s %s %s", safe( name ), safe( id ), safe( ip4 ), safe( phost ), safe( mac ), safe( gw ) )
+	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, fip4, gwmap )		// build the vm data block for network manager
+	msg.Response_ch <- msg																// and send it on its merry way
+*/
 
 	phost, err := p.gw2phost( &tokens[1], creds )			// dig from exising info, or request update from openstack if stale
 	if err == nil  &&  phost != nil {

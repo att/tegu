@@ -97,6 +97,8 @@
 				18 Jun 2015 : Added oneway delete support.
 				25 Jun 2015 : Corrected bug preventing mirror reserations from being deleted (they require an agent
 						command to be run and it wasn't.)
+				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
+				08 Oct 2015 : Added !pushed check back to active reservation pushes.
 */
 
 package managers
@@ -342,7 +344,7 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 					(*p).Reset_pushed()
 				}
 			} else {
-				if (*p).Is_active() || (*p).Is_active_soon( 15 ) {	// not pushed, and became active while we napped, or will activate in the next 15 seconds
+				if ! (*p).Is_pushed() && ((*p).Is_active() || (*p).Is_active_soon( 15 )) {			// not pushed, and became active while we napped, or will activate in the next 15 seconds
 					switch (*p).(type) {
 						case *gizmos.Pledge_bwow:
 							bwow_push_res( p, &rname, ch, hto_limit, pref_v6 )
@@ -407,13 +409,29 @@ func (i *Inventory) reset_push() {
 	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.
 	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
 	seconds).
+
+	Because of timestamp limitations on the file system, it is possible for the start process to select the
+	wrong checkpoint file if more than one checkpoint files were created within a second of each other. To 
+	prevent problems this function will only write a checkpoint if the last one was written more than two 
+	seconds ago (to avoid clock issues and the nano timer). If it hasn't been longe enough, this function 
+	returns true (retry) and the calling function should call again (probably after a tickler pop) to 
+	issue a checkpoint.  There is no need to "queue" anything because if several checkpoint requests are 
+	made in the same second, then all of them will be captured the next time a write is allowed and the 
+	inventory is parsed.  If the checkpoint can be written, then false is returned.  In either case, 
+	the time that the last checkpoint file was written is also returned. 
 */
-func (i *Inventory) write_chkpt( ) {
+func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
+
+	now := time.Now().Unix()
+	if now - last < 2 {
+		rm_sheep.Baa( 2, "retry checkpoint signaled" )
+		return true, last			// can only dump 1/min; show queued to force main loop to recall
+	}
 
 	err := i.chkpt.Create( )
 	if err != nil {
 		rm_sheep.Baa( 0, "CRI: resmgr: unable to create checkpoint file: %s  [TGURMG003]", err )
-		return
+		return false, last
 	}
 
 	for nm, v := range i.ulcap_cache {							// write out user link capacity limits that have been set
@@ -438,6 +456,8 @@ func (i *Inventory) write_chkpt( ) {
 	} else {
 		rm_sheep.Baa( 1, "resmgr: checkpoint successful: %s", ckpt_name )
 	}
+
+	return false, time.Now().Unix()				// not queued, and send back the new chkpt time
 }
 
 /*
@@ -698,6 +718,7 @@ func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error )
 	for _, r := range inv.cache {
 		if !(*r).Is_expired()  && (*p).Equals( r ) {
 			rid = (*r).Get_id( )
+			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
 			return
 		}
 	}
@@ -865,7 +886,9 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		inv	*Inventory
 		msg	*ipc.Chmsg
 		ckptd	string
-		last_qcheck	int64				// time that the last queue check was made to set window
+		last_qcheck	int64 = 0			// time that the last queue check was made to set window
+		last_chkpt	int64 = 0			// time that the last checkpoint was written
+		retry_chkpt bool = false		// checkpoint needs to be retried because of a timing issue
 		queue_gen_type = REQ_GEN_EPQMAP
 		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
 		all_sys_up	bool = false;		// set when we receive the all_up message; some functions (chkpt) must wait for this
@@ -954,6 +977,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	last_qcheck = time.Now().Unix()
 	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )			// push reservations to agent just before they go live
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
+	tklr.Add_spot( 5, my_chan, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
@@ -973,10 +997,18 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 				// periodic checkpointing turned off with the introduction of tegu_ha
 				//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
-			case REQ_CHKPT:
+			case REQ_RTRY_CHKPT:									// called to attempt to send a queued checkpoint request
+				if all_sys_up {
+					if retry_chkpt {
+						rm_sheep.Baa( 3, "invoking checkpoint (retry)" )
+						retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
+					}
+				}
+
+			case REQ_CHKPT:											// external thread has requested checkpoint
 				if all_sys_up {
 					rm_sheep.Baa( 3, "invoking checkpoint" )
-					inv.write_chkpt( )
+					retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
 				}
 
 			case REQ_DEL:											// user initiated delete -- requires cookie
@@ -1050,7 +1082,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
 				data := msg.Req_data.( []*string )
 				inv.add_ulcap( data[0], data[1] )
-				inv.write_chkpt( )
+				retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
 
 			// CAUTION: the requests below come back as asynch responses rather than as initial message
 			case REQ_IE_RESERVE:						// an IE reservation failed

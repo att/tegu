@@ -24,6 +24,9 @@
 .\"                 Robert Eby
 .\"
 .\"     Mods:		14 Jun 2015 - Created
+.\"					01 Sep 2015 - Filled in unfinished section.
+.\"					18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
+.\"					22 Sep 2015 - Updates based on code changes.
 .\"
 .TH TEGU_REQ 1 "Tegu Manual"
 .CM 4
@@ -46,6 +49,12 @@ For details on the Tegu HTTP API, look at \fItegu(8)\fP.
 .SH COMMAND LINE OPTIONS
 \fItegu_req\fR interprets the following options:
 .\" ==========
+.TP 8
+.B \-c
+Causes a search of the keystone service catalogue to be skipped. If not supplied, then 
+tegu_req will attempt to find the URL for Tegu by searching for the netqos service 
+name (see -S) in the catalogue.  If the service is not defined, then localhost is 
+assumed unless -h is supplied.
 .TP 8
 .B \-d
 Causes JSON output from Tegu to be formatted in a dotted hierarchical style.
@@ -76,9 +85,16 @@ Only useful if -T is not used.
 Causes extra arguments, in the form of key=value, to be passed to Tegu for certain requests.
 The commands where this is used are: listres, listhosts, graph, reserve, steer.
 .TP 8
+.B \-R name
+Supplies the region name overriding the OS_REGION from the environment.
+.TP 8
 .B \-r name
 Allow specification of a "root" name for the JSON output.
 The default root name is the name of the command (e.g. "graph" when using the graph command).
+.TP 8
+.B \-S name
+Allows the user to supply the service name that is searched for in the keystone catalogue.
+If not supplied netqos is used.
 .TP 8
 .B \-s
 Causes tegu_req to use secure TLS (HTTPS) protocol for requests to Tegu.
@@ -121,7 +137,49 @@ as an expiry time nnn seconds from the current time.
 a reservation.)
 .IP
 \fBhost1,host2\fP
-TODO
+Defines the host pair for which traffic will be managed.
+For situations where traffic needs to be managed between a VM and any external host,
+the second host should be the router (e.g. 10.7.0.1).
+Hosts may be supplied as either names or IP addresses.
+If Tegu has been started in tenant aware mode, then the host specification is Tenant-ID/Host
+(e.g. 39b219aaa21c4677ae7dee310ddb3790/esd_ss3).
+The tenant aware mode allows the VMs to reside under different tenants and to still have a
+reservation between them established and managed by Tegu.
+.IP
+If the new version of Tegu is running, and is configured to require tokens as a part of
+the reservation host name, then the format of host1 and host2 is: token/tenant/host.
+The tenant can be either the ID or the name, and the token is what is returned by a
+keystone token-get request.
+Tegu supports the use of VM ID (uuid strings) in place of tenant/host pair in the above description.
+If a VM ID is being used in place of a tenant/VM-name pair the syntax is token//ID where
+the tenant portion is omitted (//).
+.IP
+A reservation between a VM and a host with an external (non-VM) IP address is created using
+the following host1,host2 syntax: token/tenant/VM,!//IP-address.
+The bang (!) indicates that the second host does not have a token that can be verified,
+and causes Tegu to establish a reservation for traffic between the VM and the IP address
+which is protected as far as the VM's gateway.
+.IP
+The token command line parameters (-t token or -T) can be used, and the resulting/associated
+values can be substituted into the host name(s) any place that a %t appears.
+Using the example above, if the command line contains a -T (generate token) then the
+following host name would cause the generated token to be placed at the head of the name: %t/cloudqos/esd-ss3.
+.IP
+Transport layer (TCP or UDP) ports may also be specified for one or both hosts.
+If it is necessary to use a port it can be added to the host name following a colon (:).
+For example: daniels8:4444.
+A port mask may be added after the port, separating the mask from the port with a slant
+(e.g. 4444/0xfff0).
+Port masks are supported only in OVS v1.6 and later, so be sure that the virtual switches
+in use are new enough when using masks.
+The port value may also be given as a hex value if prefixed with a leading 0x.
+.IP
+If the VM is capable of acting as a VLAN trunk, meaning that packets are generate with a
+VLAN ID in place, the VLAN ID may be used to match packets.
+If this is desired, the VLAN ID used for matching should be placed in curly braces,
+and appended as the last part of the endpoint (host) name (e.g. daniels8:4444{3}
+when using a transport port number, or daniels8{3} if a port number is not required).
+
 .IP
 \fBcookie\fP
 Is a string that is used when deleting a reservation.
@@ -130,9 +188,13 @@ reservation to be deleted if a matching cookie is supplied.
 The cookie may not contain any spaces, and does not need to be unique across reservations.
 .IP
 \fBdscp\fP
-The DSCP value to use.
-Must be between 0 and 64.
-The default, if not specified is WTF?
+The traffic classification. 
+This is one of three strings, "voice", "control", or "data"; each may be prefixed with 
+"global_."
+The strings map to one of the supported ITONS DSCP values.
+If the global_ prefix is added, the traffic markings (dscp values) are kept as the traffic 
+passes out of the cloud environment. 
+If omitted, "voice" is assumed.
 
 .TP 8
 .B owreserve [bandwidth_in,]bandwidth_out [start-]expiry host1-host2 cookie [dscp]
@@ -223,7 +285,7 @@ The list includes which includes host name, VM UUID, MAC address, IP address(es)
 .SS Flow Steering Commands
 .TP 8
 .B steer {[start-]end|+seconds} tenant src-host dest-host mbox-list [cookie]
-TODO
+This is a prototype flow-steering command (deprecated).
 
 .SS Mirroring Commands
 .TP 8
@@ -255,23 +317,26 @@ In this scenario, it is possible that only a subset of the mirrors may be constr
 the output JSON will indicate which mirrors succeeded.
 Ports are specified in the same way as hosts are for the Tegu reserve request; e.g.
 .IP
+mac:mac ID - names the port directly using the MAC id of the VM attached to the port.
+A port name that looks like a MAC address (without the "mac:" prefix) will also be accepted.
+.IP
+UUID - names the port directly using the Neutron port UUID of the port.
+The UUID must be formatted in the normal UUID style (with dashes).
+.IP
 name or IP - if not in "tenant aware mode", the name or IP address of the host attached to the port.
 .IP
 token/tenant/host - for "host" (with 1 port only) on "tenant".
 .IP
 token//vm_uuid - for the host with UUID "vm_uuid"
-.IP
-mac:mac ID - names the port directly using the MAC id of the VM attached to the port.
 Tegu will attempt to determine which physical machine the bridge is on and set up the mirror appropriately.
 
 .IP
 .B output
 Specifies where the mirror should be directed to.
 This may either be another port, or a GRE tunnel.
-If specified as an IP address (IPv4 or IPv6) or DNS name, then a new GRE endpoint is constructed
-on the \fBbr-int\fP bridge (with the specified IP address), and the mirror is connected to this endpoint.
-If specified as a port (using the same syntax as for ports above), then the mirror is
-connected to the pre-existing port.
+If specified as an IP address (IPv4 or IPv6) or DNS name, then a new GRE endpoint is constructed,
+with the specified IP address, on the same bridge as the port being mirrored, and the mirror is connected to this endpoint.
+If specified as a port (using the same syntax as for ports above), then the mirror is connected to the pre-existing port.
 Note: initially, only local ports on \fBbr-int\fP will be supported, that is sending mirroring
 output to a port on a different host from the mirrored ports will not be initially
 supported, as it requires flow steering.
@@ -286,10 +351,13 @@ This allows GRE endpoints to be pre-specified.
 Is an optional string that is used to provide a minimum of security for the mirror.
 If provided, it is required when deleting (del-mirror) or viewing (show-mirror) the mirror.
 The cookie may not contain any spaces, and does not need to be unique across mirror requests.
+If a cookie is not desired when specifying the \fIvlan\fP option (see below), hen the empty
+string should be provided for the cookie.
 .IP
 .B vlan
 Is an optional string that can be used to specify one or more (comma separated) VLANs to
 be added to the create mirror request passed to openvswitch.
+This specifies that only packets for the listed VLAN(s) should be mirrored.
 If provided, it must consist of a comma separated list of VLAN ids from 0 to 4095.
 If the string is provided and is syntactically incorrect, the mirror request is rejected.
 

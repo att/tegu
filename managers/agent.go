@@ -37,6 +37,7 @@
 					100 bytes.
 				06 Jan 2015 : Added support for wide area (wacc)
 				17 Jun 2105 : Added oneway reservation support.
+				11 Aug 2015 : Corrected problem with returning wa_port results, added wa_ping.
 */
 
 package managers
@@ -253,7 +254,9 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// we don't expect a response
 
 									msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
-				
+
+/*
+---- caution this is code from steering, do not let it overlay the following code which is needed for wa!
 							default:	
 								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )		// if we don't recognise it we assume it should be ignored
 								if am_sheep.Would_baa( 2 ) {
@@ -262,6 +265,27 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 										am_sheep.Baa( 2, "[%d] %s", i, req.Rdata[i] )
 									}
 								}
+*/
+
+							default:
+								if req.Rid > 0 {			// find the pending request and fill it in, then write it on the channel referenced by the request
+									pr := rt_map[req.Rid]
+									if pr != nil {
+										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: tpe=%s rid=%d state=%d", req.Rtype, req.Rid, req.State )
+										msg := pr.req					// message block that was sent to us; fill out the response and return
+										msg.Response_data = req.Rdata
+										msg.State = nil
+
+										delete( rt_map, req.Rid )						// done with the pending request block
+										msg.Response_ch <- msg							// send response back to the process that caused the command to run
+									} else {
+										am_sheep.Baa( 1, "WRN: agent response ignored: no pending req for id: type=%s rid=%d [TGUAGTXXX]", req.Rtype, req.Rid )   //FIX message id
+									}
+								} else {
+									am_sheep.Baa( 1, "agent response ignored: no request id: type=%s state=%d", req.Rtype, req.State )
+								}
+
+
 						}								// end rtype switch
 					} else {							// failed request
 						switch( req.Rtype ) {
@@ -271,10 +295,31 @@ func ( a *agent ) process_input( buf []byte, rt_map map[uint32]*pend_req ) {
 									am_sheep.Baa( 1, "  [%d] %s", i, req.Rdata[i] )
 								}
 
+/*
+----- don't let this code overlay the default below when merging master in.
 							default:
-								am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: %s  [TGUAGT002]", req.Rtype )
+								am_sheep.Baa( 1, "WRN: response messages for failed command were not interpreted: state=%d %s  [TGUAGT002]", req.State, req.Rtype )
 								for i := 0; i < len( req.Rdata ) && i < 20; i++ {
 									am_sheep.Baa( 2, "  [%d] %s", i, req.Rdata[i] )
+								}
+*/
+
+							default:
+								if req.Rid > 0 {			// find the pending request and fill it in, then write it on the channel referenced by the request
+									pr := rt_map[req.Rid]
+									if pr != nil {
+										am_sheep.Baa( 2, "found request id in block and it mapped to a pending request: tpe=%s rid=%d state=%d", req.Rtype, req.Rid, req.State )
+										msg := pr.req					// message block that was sent to us; fill out the response and return
+										msg.Response_data = req.Rdata
+										msg.State = fmt.Errorf( "rc=%d", req.State )
+
+										delete( rt_map, req.Rid )						// done with the pending request block
+										msg.Response_ch <- msg							// send response back to the process that caused the command to run
+									} else {
+										am_sheep.Baa( 1, "WRN: agent failure response ignored: no pending req for id: type=%s rid=%d [TGUAGTXXX]", req.Rtype, req.Rid )   //FIX message id
+									}
+								} else {
+									am_sheep.Baa( 1, "agent failure response ignored: no request id: type=%s state=%d", req.Rtype, req.State )
 								}
 						}
 					}
@@ -438,6 +483,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 	
 	type2name = make( map[int]string, 5 )
 	type2name[REQ_WA_PORT] = "wa_port"					// command constants that get sent off to the agent
+	type2name[REQ_WA_PING] = "wa_ping"
 	type2name[REQ_WA_TUNNEL] = "wa_tunnel"
 	type2name[REQ_WA_ROUTE]	= "wa_route"
 	type2name[REQ_WA_DELCONN] = "wa_del_conn"
@@ -494,7 +540,11 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
 	
-					case REQ_WA_PORT, REQ_WA_TUNNEL, REQ_WA_ROUTE, REQ_WA_DELCONN:	// wa commands can be setup/sent by a common function
+					case REQ_WA_PING, 				// wa commands can be setup/sent by a common function
+						REQ_WA_PORT,
+						REQ_WA_TUNNEL,
+						REQ_WA_ROUTE,
+						REQ_WA_DELCONN:
 						if req.Req_data != nil {
 							req_track[req_id] = &pend_req {			// tracked request to have block when response recevied from agent
 								req: req,

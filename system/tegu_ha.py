@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# vi: sw=4 ts=4:
 #
 # ---------------------------------------------------------------------------
 #   Copyright (c) 2013-2015 AT&T Intellectual Property
@@ -17,21 +18,31 @@
 # ---------------------------------------------------------------------------
 #
 
-'''	Mnemonic:	tegu_ha.py
-	Abstract:	High availability script for tegu. Pings other tegu's in the
-                standby_list. If no other tegu is running, then makes the
-                current tegu active. If it finds multiple tegu running, then
-                determines whether current tegu should be shut down or not based
-                on db timestamps. Assumes that db checkpoints from other tegus
-                do not override our checkpoints
+'''
+        Mnemonic:   tegu_ha.py
+        Abstract:   High availability script for tegu. Pings other tegu's in the
+                    standby_list. If no other tegu is running, then makes the
+                    current tegu active. If it finds multiple tegu running, then
+                    determines whether current tegu should be shut down or not based
+                    on db timestamps. Assumes that db checkpoints from other tegus
+                    do not override our checkpoints
 
-  	Date:		15 December 2015
-	Author:		Kaustubh Joshi
-	Mod:		2014 15 Dec - Created script
-				2015 30 Jan - Minor fixes.
-                2015 04 Feb - Change to ensure that the stanby file is always
-                    there when tegu isn't running on the current host. (needed
-                    only for monitoring at this point).
+        Date:       15 December 2015
+        Author:     Kaustubh Joshi
+        Mod:        2014 15 Dec - Created script
+                    2015 30 Jan - Minor fixes.
+                    2015 04 Feb - Change to ensure that the stanby file is always
+                        there when tegu isn't running on the current host. (needed
+                        only for monitoring at this point).
+                    2015 06 Aug - Adjusted retry to offset response time delays.
+                    2015 11 Aug - Added ability to recognise all host aliases for
+                        this machine.
+                    2015 12 Aug - Tweaked to allow for the case where the host
+                        isn't in DNS.
+                    2015 27 Aug - Work around to recognize fqdn's
+                    2015 31 Aug - Prevent too many successive quick restarts.
+                    2015 09 Sep - Work around to handle hostnames which do not
+                        have a domain
  ------------------------------------------------------------------------------
 
   Algorithm
@@ -72,8 +83,13 @@ TEGU_PROTO = 'http'
 
 SSH_CMD = 'ssh -o StrictHostKeyChecking=no %s@%s '
 
+RETRY_COUNT = 3      # How many times to retry ping command
+CONNECT_TIMEOUT = 3  # Ping timeout
+MAX_QUICK_STARTS = 4        # we stop if there are > 4 restarts in quick succession
+QUICK_RESTART_SEC = 150     # we consider it a quick restart if less than this
+
 DEACTIVATE_CMD = '/usr/bin/tegu_standby on;' \
-    'killall tegu; killall tegu_agent'               # Command to kill tegu
+    'killall tegu >/dev/null 2>&1; killall tegu_agent >/dev/null 2>&1'  # Command to kill tegu
 ACTIVATE_CMD = '/usr/bin/tegu_standby off;' \
     '/usr/bin/start_tegu; /usr/bin/start_tegu_agent' # Command to start tegu
 
@@ -83,11 +99,13 @@ SYNC_CMD = '/usr/bin/tegu_synch'
 # HA Configuration
 HEARTBEAT_SEC = 5                    # Heartbeat interval in seconds
 PRI_WAIT_SEC = 5                     # Backoff to let higher prio tegu take over
-STDBY_LIST = ETCDIR + '/standby_list'# list of other hosts that might run tegu
+STDBY_LIST = ETCDIR + '/standby_list' # list of other hosts that might run tegu
 
 # if present then this is a standby machine and we don't start
 STDBY_FILE = ETCDIR + '/standby'
 VERBOSE = 0
+
+TEGUCONF_FILE = ETCDIR + '/tegu.cfg'
 
 def logit(msg):
     '''Log error message on stdout with timestamp'''
@@ -125,6 +143,33 @@ def get_checkpoint(host=''):
     except subprocess.CalledProcessError:
         warn("Could not sync chkpts from %s" % host)
     return False
+
+def parse_teguconfig():
+    ''' This function reads the tegu config file and returns configuration
+    attributes in key/value format ''' 
+    cdata = {}
+    section = "default"
+    cdata[section] = {}
+    try:
+        with open(TEGUCONF_FILE, "r") as tegufile:
+            for line in tegufile.readlines():
+                if line.strip(" \t\r\n")[:1] == '#':
+                    continue
+                elif line.lstrip(" \t")[:1] == ":":
+                    toks = line.lstrip(" \t").split(" ")
+                    section = toks[0][1:].strip("\n")
+                    cdata[section] = {}
+                else:
+                    if line[:1] == '\n':
+                        continue
+                    toks = line.split("=")
+                    key = toks[0].strip(" \t")
+                    value = toks[1].strip(" \t\n\r")
+                    cdata[section][key] = value
+        return cdata
+    except OSError:
+        logit("unable to open %s file for some reason" % TEGUCONF_FILE)
+    return
 
 def extract_dt(dt_str, dt_col, tm_col):
     '''
@@ -216,14 +261,16 @@ def is_active(host='localhost'):
 
     # must use no-proxy to avoid proxy servers gumming up the works
     # grep stderr redirected to avoid pipe complaints
-    curl_str = ('curl --noproxy \'*\' --connect-timeout 3 -s -d '\
+    curl_str = ('curl --noproxy \'*\' --connect-timeout %d -s -d '\
                 + '"ping" %s://%s:%d/tegu/api | grep -q -i pong 2>/dev/null')\
-                % (TEGU_PROTO, host, TEGU_PORT)
-    try:
-        subprocess.check_call(curl_str, shell=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
+                % (CONNECT_TIMEOUT, TEGU_PROTO, host, TEGU_PORT)
+    for i in xrange(RETRY_COUNT):
+        try:
+            subprocess.check_call(curl_str, shell=True)
+            return True
+        except subprocess.CalledProcessError:
+            continue
+    return False
 
 def deactivate_tegu(host=''):
     ''' Deactivate tegu on a given host. If host is omitted, local
@@ -248,6 +295,8 @@ def activate_tegu(host=''):
 
 def main_loop(standby_list, this_node, priority):
     '''Main heartbeat and liveness check loop'''
+    quick_start = 0           # number of restarts close together
+    last_start = 0
     priority_wait = False
     while True:
         if not priority_wait:
@@ -289,7 +338,22 @@ def main_loop(standby_list, this_node, priority):
         # If no active tegu, then we must try to start one
         if not any_active:
             if priority_wait or priority == 0:
-                logit("no running tegu found, starting here")
+                now = int( time.time() )
+                if now - last_start < QUICK_RESTART_SEC:           # quick restart (crash?)
+                    quick_start += 1
+                    if quick_start > MAX_QUICK_STARTS:
+                        crit( "refusing to restart tegu: too many restarts in quick succession.  [TGUHA001]" )
+                        return
+                else:
+                    quick_start = 0               # reset if it's been a while since last restart
+
+                if last_start == 0:
+                    diff = "never by this instance"
+                else:
+                    diff = "%d seconds ago" % (now - last_start)
+                logit( "no running tegu found, starting here; last start %s" % diff )
+
+                last_start = now
                 priority_wait = False
                 activate_tegu()            # Start local tegu
             else:
@@ -299,19 +363,31 @@ def main_loop(standby_list, this_node, priority):
 def main():
     '''Main function'''
 
-    logit("tegu_ha v1.0 started")
+    logit("tegu_ha v1.1 started")
 
+    cdata = parse_teguconfig()
+    if "phost_suffix" not in cdata["fqmgr"].keys():
+        cdata["fqmgr"]["phost_suffix"] = ""
+
+    fqdn_list = []
     this_node = socket.getfqdn()
-
+    fqdn_list.append(this_node)
+    if len(this_node.split(".")) > 1:
+        fqdn_list.append(this_node.split(".")[0] + cdata["fqmgr"]["phost_suffix"] \
+                                            + this_node[this_node.index("."):])
     ok = False
     mcount = 0                  # critical error after an hour of waiting
     while not ok:               # loop until we find us
         ok = True
-        # Ready list of standby tegu nodes and find us
+        # Read list of standby tegu nodes and find us
         standby_list = [l.strip() for l in open(STDBY_LIST, 'r')]
 
         try:
-            priority = standby_list.index(this_node)
+            for fqdn in fqdn_list:
+                if fqdn in standby_list:
+                    priority = standby_list.index(fqdn)
+                    this_node = fqdn
+                    break
             standby_list.remove(this_node)
         except ValueError:
             if mcount == 0:         # dont flood the log

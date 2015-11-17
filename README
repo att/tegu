@@ -89,6 +89,7 @@ Managers:
 
 	osif.go			openstack interface manager.
 	osif_proj.go	project specific openstack interface functions.
+
 	fqmgr.go		flowmod/queue manager
 	fq_req.go   	Fqmgr request structure and related functions
 	fq_mgr_steer.go	Steering based fq-mgr support
@@ -108,7 +109,6 @@ They will be referenced as needed during the build process (unlike C, there is n
 to build a library to link against). Now that tegu is in github, you should be able
 to 'go get github/att/gopkgs'  to pull them down.
 
-		
 Go Environment:
 The GOPATH variable must be set to the top level directory in your source 
 tree. Within that directory there should be src, bin, and pkg directories. 

@@ -56,3 +56,52 @@ func TestTools( t *testing.T ) {			// must use bloody camel case to be recognise
 	}
 }
 
+func test_one_hasany( t *testing.T, kstr string, ui interface{}, expect bool ) ( int ) {
+	ecount := 0
+	toks := strings.Split( kstr, " " )
+
+	state := gizmos.Map_has_any( ui, toks )				// true if map has any key in the list
+	if state == expect {
+		fmt.Fprintf( os.Stderr, "[OK]   expected %v state checking key list (tokenised): %s\n", state, kstr )
+	} else {
+		fmt.Fprintf( os.Stderr, "[FAIL] unexpected %v state checking key list (tokenised): %s\n", state, kstr )
+		t.Fail()
+		ecount++
+	}
+
+	// test passing a string
+	state = gizmos.Map_has_any( ui, kstr )				// true if map has any key in the list
+	if state == expect {
+		fmt.Fprintf( os.Stderr, "[OK]   expected %v state checking key list by string: %s\n", state, kstr )
+		return 0
+	} else {
+		fmt.Fprintf( os.Stderr, "[FAIL] unexpected %v state checking key list by string: %s\n", state, kstr )
+		t.Fail()
+		ecount++
+	}
+
+	return ecount
+}
+
+func TestAnyKey( t *testing.T ) {
+	fmt.Fprintf( os.Stderr, "\n------ key map testing ------\n" )
+	m := make( map[string]bool, 15 )
+
+	m["foo"] = true
+	m["goo"] = false
+	m["longer"] = false
+	m["tegu_admin"] = false
+	m["admin"] = false
+
+	for k := range m {
+		fmt.Fprintf( os.Stderr, "[INFO] key in the map: %s\n", k )
+	}
+
+	errs := test_one_hasany( t, "foo bar now are you here", m, true )
+	errs += test_one_hasany( t, "tegu_admin tegu_mirror admin", m, true )
+	errs += test_one_hasany( t, "tegu_mirror tegu_bwr", m, false )
+
+	if errs == 0 {
+		fmt.Fprintf( os.Stderr, "[OK]   All key checks passed\n" )
+	}
+}

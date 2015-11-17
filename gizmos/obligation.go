@@ -410,6 +410,15 @@ func (ob *Obligation) Get_queue( qid *string, tstamp int64 ) ( qnum int ) {
 	return
 }
 
+/*
+	Compares the UNIX timestamp passed in with the range now through the final
+	timestamp supported by obligation and returns true if the timestamp is in
+	range.
+*/
+func Valid_obtime( usr_ts int64 ) bool {
+	return usr_ts <= DEF_END_TS  && usr_ts >= time.Now().Unix()
+}
+
 // ----------------- json and string things -------------------------------
 
 /*

@@ -18,7 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#!/usr/bin/env ksh
 #
 #	Mnemonic:	tegu_standby
 #	Abstract:	Simple script to either turn on or turn off standby mode. We do this by creating/removing

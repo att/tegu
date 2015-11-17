@@ -18,8 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#!/usr/bin/env ksh
-
 #
 #	Mnemonic:	tegu_synch
 #	Abstract:	Simple script to take a snapshot of the checkpoint environment and push it off to

@@ -43,7 +43,7 @@ type Net_vm  struct {
 	mac		*string			// MAC
 	gw		*string			// the gateway associated with the VM (if known)
 	fip		*string			// floating ip
-	cidr	*string			// the associated cidr (wa needs it)
+	cidr	*string			// the associated cidr (wa needs it)   // REVAMP???
 	gwmap	map[string]*string // the gateway information associated with the VM (obsolete)
 }
 
