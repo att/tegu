@@ -42,6 +42,7 @@
 					comments and switch to stringer interface instead of To_str(). Added support for
 					oneway bandwidth reserations with a function that checks outbound capacity
 					on all switch links.
+				10 Sep 2015 - Allow finding attached 'hosts' based on uuid.
 */
 
 package gizmos
@@ -151,14 +152,18 @@ func (s *Switch) Add_host( host *string, vmid *string, port int ) {
 
 /*
 	Returns true if the named host is attached to the switch.
+	The host may be a pointer to either a host name or uuid string.
 */
 func (s *Switch) Has_host( host *string ) (bool) {
 	if s == nil {
 		return false
 	}
 
-	r := s.hosts[*host]
-	return r
+	if s.hvmid[*host] != nil {			// allow searches based on the uuid
+		return true
+	}
+
+	return s.hosts[*host]
 }
 
 /*

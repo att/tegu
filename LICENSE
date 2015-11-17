@@ -1,5 +1,6 @@
-// vi: sw=4 ts=4:
-/*
+This licence applies to all files in this repository unless otherwise specifically
+stated inside of the file. 
+
  ---------------------------------------------------------------------------
    Copyright (c) 2013-2015 AT&T Intellectual Property
 
@@ -15,19 +16,3 @@
    See the License for the specific language governing permissions and
    limitations under the License.
  ---------------------------------------------------------------------------
-*/
-
-/*
-	Mnemonic:	const.go
-	Absrract:	These are constants that are shared by all packages (gizmos, managers
-				and main). There are likely to be very few of them.
-	Date:		18 March 2014
-	Author: 	E. Scott Daniels
-*/
-
-
-package tegu
-
-const (
-	SWFL_VISITED int = 0x01			// switch was visited during shortest path search
-)

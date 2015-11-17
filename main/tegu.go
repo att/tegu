@@ -132,6 +132,11 @@
 				02 Jul 2015 : Corrected physical host fetch bug in osif.
 				06 Jul 2015 : Version bump
 				11 Aug 2015 : Corrected bug in agent response processing (wa)
+				29 Jul 2015 : Tracker bug fixes (263,266) version bump.
+				03 Sep 2015 : Correct panic in network.go.
+				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
+				08 Oct 2015 : Correct bug causing all reservations to be pushed when reservation change state happenes.
+				09 Oct 2015 : Use 'admin' project for defaut phys host list.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu

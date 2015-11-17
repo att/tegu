@@ -18,7 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#! /bin/sh
 # Mnemonic:	tegu.rc.ksh
 # Abstract: This script is installed (copied) to /etc/init.d/tegu and then the command
 #			'insserv /etc/init.d/tegu' is run to add it to the list of things that are

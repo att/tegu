@@ -70,6 +70,9 @@
 #				28 May 2015 - Added match vlan support (-V)
 #				18 Jun 2015 - Better handling of -q allowing HTB shutoff to be affected completely by
 #								agent scripts (Tegu still thinks it's being set!)
+#				20 Oct 2015 - Correct bug that was not marking the protocol correctly (was putting on all src
+#								or all dest on both inbound and outbound fmods rather than src for one and
+#								dest for the other.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -111,6 +114,12 @@ operation="add"			# -X allows short time durations for deletes
 ip_type="-4"			# default to forcing an IP type match for outbound fmods; inbound fmods do NOT use this
 ex_local=1				# the external IP is "associated" with the local when 1 (-S) and with the remote when 0 (-D)
 
+ob_lproto=""            # out/inbound local protocol Set with -P
+ib_lproto=""
+ob_rproto=""            # out/inbound remote proto set sith -p
+ib_rproto=""
+
+
 while [[ $1 == -* ]]
 do
 	case $1 in
@@ -123,8 +132,19 @@ do
 		-k)		koe=1;;
 		-n)		forreal="-n";;
 		-o)		one_switch=1;;
-		-p)		pri_base=5; proto="-p $2"; shift;;		# source proto:port priority must increase to match over more generic f-mods
-		-P)		pri_base=5; proto="-P $2"; shift;;		# dest proto:port priority must increase to match over more generic f-mods
+
+		-P)     pri_base=5;                             # source proto:port priority must increase to match over more generic f-mods
+				ob_rproto="-P $2"                       # proto matches -d endpoint (remote), proto for outbound dest(P), inbound src(p)
+				ib_rproto="-p $2"
+				shift
+				;;
+
+		-p)     pri_base=5                              # dest proto:port priority must increase to match over more generic f-mods
+				ob_lproto="-p $2"                       # proto matches -s (local) endpoint: proto for outbound is src(p), inbound dest(P)
+				ib_lproto="-P $2"                       # proto matches -s (local) endpoint: proto for outbound is src(p), inbound dest(P)
+				shift
+				;;
+
 		-q)		queue="-q $2"; shift;;					# soon to change to meter
 		-s)		lmac="$2"; shift;;
 		-S)		ex_local=1;;								# external IP is "associaetd" with the lmac (-s) address.
@@ -186,7 +206,7 @@ fi
 if (( ! one_switch ))
 then
 	# inbound -- only if both are not on the same switch
-	send_ovs_fmod $forreal $host $timeout -p $(( 450 + pri_base )) --match $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $proto --action $queue $idscp -M 0x01 -R ,0 -N $operation $cookie $bridge
+	send_ovs_fmod $forreal $host $timeout -p $(( 450 + pri_base )) --match $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $ib_rproto $ib_rproto --action $queue $idscp -M 0x01 -R ,0 -N $operation $cookie $bridge
 	rc=$?
 else
 	if (( ! koe ))		# one switch and keep is off, no need to set dscp
@@ -196,7 +216,7 @@ else
 fi
 
 #outbound
-send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_vlan $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $proto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
+send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_vlan $ip_type -m 0x0/0x7 $oexip -s $lmac -d $rmac $ob_lproto $ob_rproto --action $queue $odscp -M 0x01  -R ,0 -N $operation $cookie $bridge
 rc=$(( rc + $? ))
 
 rm -f /tmp/PID$$.*

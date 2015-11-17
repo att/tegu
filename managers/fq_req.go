@@ -27,6 +27,7 @@
 	Mods:		24 Sep 2014 : Added support for vlan id setting.
 				16 Jan 2015 : Support port masks in flow-mods.
 				20 Apr 2015 : Correct bug - not passing direction of external IP address to agent.
+				01 Sep 2015 : Changed bleat level for bwow debugging message.
 */
 
 package managers
@@ -238,9 +239,9 @@ func ( fq *Fq_req ) To_bwow_map( ) ( fmap map[string]string ) {
 		}
 	}
 
-	if fq_sheep.Would_baa( 1 ) {
+	if fq_sheep.Would_baa( 2 ) {
 		for k, v := range fmap {
-			fq_sheep.Baa( 3, "fq_req to action id=%s %s = %s", fq.Id, k, v )
+			fq_sheep.Baa( 2, "fq_req to action id=%s %s = %s", fq.Id, k, v )
 		}
 	}
 

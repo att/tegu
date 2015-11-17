@@ -30,7 +30,7 @@
 	Date:		20 May 2015
 	Author:		E. Scott Daniels
 
-	Mods:		
+	Mods:		28 Jul 2015 : Added upper bounds check for expiry time.
 */
 
 package gizmos
@@ -62,6 +62,12 @@ func mk_pledge_window( commence int64, expiry int64 ) ( pw *pledge_window, err e
 
 	if expiry < commence {
 		err = fmt.Errorf( "bad expiry submitted, already expired: now=%d expiry=%d", now, expiry );
+		obj_sheep.Baa( 2, "pledge: %s", err )
+		return
+	}
+
+	if ! Valid_obtime( expiry ) {			// if expiry is less than max obligation time
+		err = fmt.Errorf( "bad expiry submitted, too far in the future: expiry=%d", expiry );
 		obj_sheep.Baa( 2, "pledge: %s", err )
 		return
 	}

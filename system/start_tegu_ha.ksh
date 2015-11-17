@@ -18,7 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#!/usr/bin/env ksh
 #
 #	Mnemonic:	start_tegu_ha
 #	Abstract:	Simple wrapper script to start the tegu_ha daemon and to ensure that

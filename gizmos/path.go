@@ -68,6 +68,10 @@ package gizmos
 import (
 	"fmt"
 	"os"
+	//"strings"
+	//"time"
+
+	//"github.com/att/gopkgs/clike"
 )
 
 type Path struct {

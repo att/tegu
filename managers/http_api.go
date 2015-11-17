@@ -96,6 +96,8 @@
 								Fixed mirroring references from config.
 				16 Jul 2015 : Correct typo in the default admin role string.
 				11 Aug 2015 : Added wa ping support.
+				12 Aug 2015 : Corrected debug message.
+				03 Sep 2015 : Added latency option to verbose.
 */
 
 package managers
@@ -245,10 +247,15 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 	req.Send_req( osif_ch, my_ch, REQ_HAS_ANY_ROLE, &dstr, nil )		// go check it out
 	req = <- my_ch														// hard wait for response
 
-	if req.State == nil {
+	if state, ok :=  req.Response_data.( bool ); ok && state == true {			// assert boolean and then test
+		http_sheep.Baa( 2, "token successfully validated for a role in list: %s", roles )
 		return true
 	} else {
-		http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s", *token, roles )
+		if req.State != nil {
+			http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s: %s", *token, roles, req.State )
+		} else {
+			http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s", *token, roles )
+		}
 	}
 
 	return false
@@ -272,12 +279,14 @@ func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed
 
 	switch *priv_auth {
 		case "none":
+			http_sheep.Baa( 2, "priv_auth set to none, request always allowed" )
 			return true
 
-		case "local":
-			fallthrough
-		case "localhost":
+		//case "local":
+			//fallthrough
+		case "local", "localhost":
 			if ! is_token {
+				http_sheep.Baa( 2, "priv_auth set to localhost, validating local address %s", *data )
 				return is_localhost( data )
 			}
 			fallthrough
@@ -287,8 +296,9 @@ func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed
 				http_sheep.Baa( 1, "internal mishap: validate auth called with nil role list" )
 				return false
 			}
-			return token_has_osroles( data, *valid_roles )
-			//return is_admin_token( data )
+			state := token_has_osroles( data, *valid_roles )
+			http_sheep.Baa( 2, "priv_auth set to token, validating with role list: %s: allow=%v", *valid_roles, state )
+			return state
 	}
 
 	return false
@@ -1110,6 +1120,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 									case "lib", "gizmos":
 										gizmos.Set_bleat_level( nv )
+
+									case "latency":											// openstack for now, maybe different later, so more generic
+										ostack.Set_latency_debugging( int( nv ) > 0  )		// show openstack api call latency (stdout, from libray) 1 turns on, 0 off
 
 									case "ostack_json":
 										ostack.Set_debugging( int( nv ) )			// this works backwards (setting 0 turns on for a short while)

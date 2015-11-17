@@ -51,7 +51,6 @@ import (
 	"sync"
 	"time"
 
-	//"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/gopkgs/ostack"
 )
@@ -63,7 +62,9 @@ import (
 type osif_project struct {
 	name		*string
 	lastfetch	int64						// timestamp of last map update to detect freshness
-	vmid2ip		map[string]*string			// translation maps for the project
+											// translation maps for the project
+	// REVAMP:   need a map of VMs interface uuids to IP addresses; endpoints use uuid of interface
+	vmid2ip		map[string]*string			
 	ip2vmid		map[string]*string
 	ip2vm		map[string]*string
 	vm2ip		map[string]*string			// vm name to ip; gateway IPs are used as names
@@ -346,7 +347,6 @@ func (p *osif_project) ip2cidr( ip4 *string ) ( *string ) {
 		k_toks := strings.Split( k, "/" )										// need to match on project too
 		if len( k_toks ) == 1  ||  k_toks[0] ==  project || project == "" {		// safe to check the cidr
 			c_toks := strings.Split( *v, "/" )
-			//if in_subnet( ip, c_toks[0], clike.Atoi( c_toks[1] ) ) {
 			if in_subnet( ip, c_toks[0],  c_toks[1] ) {
 				osif_sheep.Baa( 1, "mapped ip to CIDR for: %s  %s", *ip4, *v )
 				return v
@@ -858,6 +858,12 @@ func osif_gw2phost( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs 
 		msg.Response_ch <- msg
 		return
 	}
+	
+/*
+	osif_sheep.Baa( 2, "lazyupdate: Response_data = %s %s %s %s %s %s", safe( name ), safe( id ), safe( ip4 ), safe( phost ), safe( mac ), safe( gw ) )
+	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, fip4, gwmap )		// build the vm data block for network manager
+	msg.Response_ch <- msg																// and send it on its merry way
+*/
 
 	phost, err := p.gw2phost( &tokens[1], creds )			// dig from exising info, or request update from openstack if stale
 	if err == nil  &&  phost != nil {

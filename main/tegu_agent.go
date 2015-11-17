@@ -63,6 +63,7 @@
 				17 Jul 2015 : Merge with steering, reference wa scripts from /var/lib/tegu/bin rather
 					than /opt/app/bin.
 				11 Aug 2015 : Corrected initialisation of state value in port.
+				02 Sep 2015 : Pick up new agent script.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -985,6 +986,7 @@ func main() {
 			"/usr/bin/ovs_sp2uuid " +
 			"/usr/bin/purge_ovs_queues " +
 			"/usr/bin/ql_setup_irl " +
+			"/usr/bin/ql_setup_ipt " +
 			"/usr/bin/send_ovs_fmod " +
 			"/usr/bin/tegu_add_mirror " +
 			"/usr/bin/tegu_del_mirror " +

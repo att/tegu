@@ -18,9 +18,6 @@
 # ---------------------------------------------------------------------------
 #
 
-#!/usr/bin/env ksh
-# vi: ts=4 sw=4:
-
 #	Mnemonic:	start_tegu_qlite.ksh
 #	Abstract:	Start tegu and reload from the last checkpoint. We will try to discover where the tegu binary lives
 #				and assume that from it's bin directory there is a ../lib directory which might contain the associated

@@ -30,16 +30,17 @@
 							the checkpoint file.
 				13 May 2014 - Added support to enable an exit dscp value on a reservation.
 				05 Jun 2014 - Added support for pause.
-				20 Jun 2014 - Corrected bug that allowed future start time with an earlier expry time
-							to be accepted.
+				20 Jun 2014 - Corrected bug that allowed future start time with an earlier
+								expiry time to be accepted.
 				07 Jul 2014 - Added clone function.
 				24 Sep 2014 - Support for keep/delete toggle for dscp values
 				16 Jan 2014 - Conversion of transport port information to string to allow for mask.
 				17 Feb 2015 - Added mirroring
 				24 Feb 2015 - Corrected to_json reference of tpport values (pointers, not strings)
 				21 May 2015 - Converted from generic pledge type.
-				01 Jun 2015 - Addded equal() support
+				01 Jun 2015 - Added equal() support
 				26 Jun 2015 - Return nil pledge if one bw value is <= 0.
+				16 Aug 2015 - Move common code into Pledge_base
 */
 
 package gizmos
@@ -52,24 +53,20 @@ import (
 )
 
 type Pledge_bw struct {
+				Pledge_base	// common fields
 	host1		*string
 	host2		*string
 	protocol	*string		// tcp/udp:port
 	tpport1		*string		// transport port number or 0 if not defined
 	tpport2		*string		// thee match h1/h2 respectively
 	vlan1		*string		// vlan id to match with h1 match criteria
-	vlan2		*string		// vlan id to macth with h2
-	window		*pledge_window
+	vlan2		*string		// vlan id to match with h2
 	bandw_in	int64		// bandwidth to reserve inbound to host1
 	bandw_out	int64		// bandwidth to reserve outbound from host1
-	dscp		int			// dscp value that should be propigated
+	dscp		int			// dscp value that should be propagated
 	dscp_koe	bool		// true if the dscp value should be kept when a packet exits the environment
-	id			*string		// name that the client can use to manage (modify/delete)
 	qid			*string		// name that we'll assign to the queue which allows us to look up the pledge's queues
-	usrkey		*string		// a 'cookie' supplied by the user to prevent any other user from modifying
 	path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
-	pushed		bool		// set when pledge has been pushed into the openflow environment (skoogi)
-	paused		bool		// set if reservation has been paused
 	match_v6	bool		// true if we should force flow-mods to match on IPv6
 }
 
@@ -134,7 +131,7 @@ func Mk_bw_pledge(	host1 *string, host2 *string, p1 *string, p2 *string, commenc
 	if err != nil {
 		return
 	}
-	
+
 	if *host2 == "" || *host2 == "any" {			// no longer allowed
 		p = nil;
 		err = fmt.Errorf( "bad host2 name submitted: %s", *host2 )
@@ -148,19 +145,21 @@ func Mk_bw_pledge(	host1 *string, host2 *string, p1 *string, p2 *string, commenc
 	}
 
 	p = &Pledge_bw {
+		Pledge_base:Pledge_base{
+			id: id,
+			window: window,
+		},
 		host1: host1,
 		host2: host2,
 		tpport1: p1,
 		tpport2: p2,
 		bandw_in:	bandw_in,
 		bandw_out:	bandw_out,
-		id: id,
 		qid: &empty_str,
 		dscp: dscp,
 		protocol:	&empty_str,
 		dscp_koe: dscp_koe,
 		match_v6: false,
-		window: window,
 	}
 
 	if *usrkey != "" {
@@ -278,17 +277,6 @@ func (p *Pledge_bw) Get_path_list( ) ( []*Path ) {
 }
 
 /*
-	Return the commence and expiry times.
-*/
-func (p *Pledge_bw) Get_window( ) ( int64, int64 ) {
-	if p == nil {
-		return 0, 0
-	}
-
-	return p.window.get_values()
-}
-
-/*
 	Set the vlan IDs associated with the hosts (for matching)
 */
 func (p *Pledge_bw) Set_vlan( v1 *string, v2 *string ) {
@@ -297,7 +285,7 @@ func (p *Pledge_bw) Set_vlan( v1 *string, v2 *string ) {
 	}
 
 	p.vlan1 = v1
-	p.vlan2 = v2	
+	p.vlan2 = v2
 }
 
 /*
@@ -317,6 +305,12 @@ func (p *Pledge_bw) Get_vlan( ) ( v1 *string, v2 *string ) {
 */
 func (p *Pledge_bw) Clone( name string ) ( *Pledge_bw ) {
 	newpbw := &Pledge_bw {
+		Pledge_base:Pledge_base {
+			id:			&name,
+			usrkey:		p.usrkey,
+			pushed:		p.pushed,
+			paused:		p.paused,
+		},
 		host1:		p.host1,
 		host2:		p.host2,
 		tpport1: 	p.tpport1,
@@ -324,12 +318,8 @@ func (p *Pledge_bw) Clone( name string ) ( *Pledge_bw ) {
 		bandw_in:	p.bandw_in,
 		bandw_out:	p.bandw_out,
 		dscp:		p.dscp,
-		id:			&name,
-		usrkey:		p.usrkey,
 		qid:		p.qid,
 		path_list:	p.path_list,
-		pushed:		p.pushed,
-		paused:		p.paused,
 	}
 
 	newpbw.window = p.window.clone()
@@ -337,18 +327,18 @@ func (p *Pledge_bw) Clone( name string ) ( *Pledge_bw ) {
 }
 
 /*
-	Accepts another pledge (op) and compairs the two returning true if the following values are
+	Accepts another pledge (op) and compares the two returning true if the following values are
 	the same:
 		hosts, protocol, transport ports, vlan match value, window
 
 	The test for window involves whether the reservation overlaps. If there is any
-	overlap they are considerd equal windows, otherwise not.
+	overlap they are considered equal windows, otherwise not.
 
 	It gets messy.... if p1.h1 == p2.h2 (hosts reversed), then we must match the
 	reverse of port since port and host must align.
 */
 func (p *Pledge_bw) Equals( op *Pledge ) ( state bool ) {
-	
+
 	if p == nil {
 		return
 	}
@@ -440,7 +430,7 @@ func (p *Pledge_bw) From_json( jstr *string ) ( err error ){
 	p.bandw_in = jp.Bandwin
 
 	p.protocol = jp.Protocol
-	if p.protocol == nil {					// we don't tollerate nil ptrs
+	if p.protocol == nil {					// we don't tolerate nil ptrs
 		p.protocol = &empty_str
 	}
 
@@ -488,39 +478,6 @@ func (p *Pledge_bw) Set_matchv6( state bool ) {
 	p.match_v6 = state
 }
 
-/*
-	Sets a new expiry value on the pledge.
-*/
-func (p *Pledge_bw) Set_expiry ( v int64 ) {
-	p.window.set_expiry_to( v )
-	p.pushed = false		// force it to be resent to ajust times
-}
-
-// There is NOT a toggle pause on purpose; don't add one :)
-
-/*
-	Puts the pledge into paused state and optionally resets the pushed flag.
-*/
-func (p *Pledge_bw) Pause( reset bool ) {
-	if p != nil {
-		p.paused = true
-		if reset {
-			p.pushed = false;
-		}
-	}
-}
-
-/*
-	Puts the pledge into an unpaused (normal) state and optionally resets the pushed flag.
-*/
-func (p *Pledge_bw) Resume( reset bool ) {
-	if p != nil {
-		p.paused = false
-		if reset {
-			p.pushed = false;
-		}
-	}
-}
 
 /*
 	Accepts a host name and returns true if it matches either of the names associated with
@@ -584,11 +541,11 @@ func (p *Pledge_bw) To_json( ) ( json string ) {
 
 /*
 	Build a checkpoint string -- probably json, but it will contain everything including the user key.
-	We still won't use the json package because that means making all of the fileds available to outside
+	We still won't use the json package because that means making all of the fields available to outside
 	users.
 
 	There is no path information saved in the checkpt. If a reload from ckpt is needed, then we assume
-	that the network information was completely reset and the paths will be rebult using the host,
+	that the network information was completely reset and the paths will be rebuilt using the host,
 	commence, expiry and bandwidth information that was saved.
 
 	If the pledge is expired, the string "expired" is returned which seems a bit better than just returning
@@ -604,7 +561,7 @@ func (p *Pledge_bw) To_chkpt( ) ( chkpt string ) {
 		chkpt = "expired"
 		return
 	}
-	
+
 	commence, expiry := p.window.get_values()
 	v1, v2 := p.bw_vlan2string( )
 
@@ -624,151 +581,8 @@ func (p *Pledge_bw) Is_ptype( kind int ) ( bool ) {
 */
 
 /*
-	Sets the pushed flag to true.
-*/
-func (p *Pledge_bw) Set_pushed( ) {
-	if p != nil {
-		p.pushed = true
-	}
-}
-
-/*
-	Resets the pushed flag to false.
-*/
-func (p *Pledge_bw) Reset_pushed( ) {
-	if p != nil {
-		p.pushed = false
-	}
-}
-
-/*
-	Returns true if the pushed flag has been set to true.
-*/
-func (p *Pledge_bw) Is_pushed( ) (bool) {
-	if p == nil {
-		return false
-	}
-
-	return p.pushed
-}
-
-/*
-	Returns true if the reservation is paused.
-*/
-func (p *Pledge_bw) Is_paused( ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.paused
-}
-
-/*
-	Returns true if the pledge has expired (the current time is greather than
-	the expiry time in the pledge).
-*/
-func (p *Pledge_bw) Is_expired( ) ( bool ) {
-	if p == nil {
-		return true
-	}
-
-	return p.window.is_expired()
-}
-
-/*
-	Returns true if the pledge has not become active (the commence time is >= the current time).
-*/
-func (p *Pledge_bw) Is_pending( ) ( bool ) {
-	if p == nil {
-		return false
-	}
-	return p.window.is_pending()
-}
-
-/*
-	Returns true if the pledge is currently active (the commence time is <= than the current time
-	and the expiry time is > the current time.
-*/
-func (p *Pledge_bw) Is_active( ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.is_active()
-}
-
-/*
-	Returns true if pledge is active now, or will be active before elapsed seconds have passed.
-*/
-func (p *Pledge_bw) Is_active_soon( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.is_active_soon( window )
-}
-
-/*
-	Check the cookie passed in and return true if it matches the cookie on the
-	pledge.
-*/
-func (p *Pledge_bw) Is_valid_cookie( c *string ) ( bool ) {
-	return *c == *p.usrkey
-}
-
-/*
-	Returns true if pledge concluded between (now - window) and now-1.
-*/
-func (p *Pledge_bw) Concluded_recently( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.concluded_recently( window )
-}
-
-/*
-	Returns true if pledge expired long enough ago that it can safely be discarded.
-	The window is the number of seconds that the pledge must have been expired to
-	be considered extinct.
-*/
-func (p *Pledge_bw) Is_extinct( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.is_extinct( window )
-}
-
-/*
-	Returns true if pledge started recently (between now and now - window seconds) and
-	has not expired yet. If the pledge started within the window, but expired before
-	the call to this function false is returned.
-*/
-func (p *Pledge_bw) Commenced_recently( window int64 ) ( bool ) {
-	if p == nil {
-		return false
-	}
-
-	return p.window.commenced_recently( window )
-}
-
-/*
 	Return the type of pledge; one of the PT_ constants.
 func (p *Pledge_bw) Get_ptype( ) ( int ) {
 	return PT_BANDWIDTH
 }
 */
-
-/*
-	Returns a pointer to the ID string of the pledge.
-*/
-func (p *Pledge_bw) Get_id( ) ( *string ) {
-	if p == nil {
-		return nil
-	}
-
-	return p.id
-}
-
-
