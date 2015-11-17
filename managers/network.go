@@ -1620,6 +1620,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 
 					// should be deprecated with new_ep 
 					case REQ_ADD:							// insert new information into the various vm maps
+						/* --- deprecated
 						if req.Req_data != nil {
 							switch req.Req_data.( type ) {
 								case *Net_vm:
@@ -1633,13 +1634,13 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									}
 							}
 
-							// deprecated --- new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
-							new_net := build( nil, nil, cfg, hlist )
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 								act_net = new_net							// and finally use it
 							}
 						}
+						--- */
 
 											//----------------- end point management ------------------------
 					case REQ_EP2MAC:										// given an endpoint name return the mac address
