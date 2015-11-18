@@ -628,7 +628,7 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 
 	msg.Rdata = rdata[0:ridx]										// return just what was filled in
 	endt := time.Now().Unix()
-	sheep.Baa( 1, "map-mac2phost: timeout=%v %ds elapsed for %d hosts %d errors %d elements", timer_pop, endt - startt, len( req.Hosts ), errcount, len( msg.Rdata ) )
+	sheep.Baa( 1, "map-mac2phost: timeout=%v %ds elapsed for %d hosts %d errors %d no-response %d elements", timer_pop, endt - startt, len( req.Hosts ), errcount, wait4, len( msg.Rdata ) )
 
 	jout, err = json.Marshal( msg )
 	return

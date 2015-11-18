@@ -70,6 +70,7 @@
 #				22 Sep 2015 - Added support to suss out our URL from the keystaone catalogue 
 #					and use that if it's there. Corrected dscp value check (was numeric).
 #					Added ability to use %p in endpoint name for project (pulls from OS_ var).
+#				15 Oct 2015 - Changes to support endpoint uuid requirement as a part of the hostname.
 #				28 Oct 2015 - X-Auth-Tegu token now has /project appended in order to make
 #					verification quicker. 
 # ----------------------------------------------------------------------------------------
@@ -80,7 +81,7 @@ function usage {
 	version 2.0/19225
 	usage: $argv0 [-c] [-d] [-f] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-R region] [-r rname] [-S service] [-s] [-t token|-T] command parms
 
-	  -c Do not attempt to find our URL from the keystone catalogue. (see -h)
+	  -c do not attempt to find our URL from the keystone catalogue. (see -h)
 	  -d causes json output from tegu to be formatted in a dotted hierarch style
 	  -f force prompting for user and password if -T is used even if a user name or password is
 	     currrently set in the environment.
@@ -108,7 +109,7 @@ function usage {
 	     to cause the project name (assuming OS_TENANT_NAME is set) to be substituted.
 
 	commands and parms are one of the following:
-	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
+	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry host1,host2 cookie [dscp]
 	  $argv0 owreserve bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
 	  $argv0 cancel reservation-id [cookie]
 	  $argv0 listconns {name[ name]... | <file}
@@ -129,6 +130,27 @@ function usage {
 	  $argv0 steer  {[start-]end|+seconds} tenant src-host dest-host mbox-list cookie
 	  $argv0 verbose level [subsystem]
 
+	  Host specifiers:  host1 and host2, where applicable, are specified in one of
+	  the following formats:
+	      token/project/vm-name
+	      token/project/[vm-name@]ipv4-address[:port]
+	      token/project/[vm-name@]ipv6-address[:port]
+	      token/project/endpoint-uuid/ipv4-address[:port]
+	      token/project/endpoint-uuid/ipv6-address[:port]
+
+	  Tegu requires endpoint (interface) uuids and tegu_req provides a translation
+	  capability which will convert the "old style" token/project/vm-name style.
+	  When vm-name alone is supplied, tegu_req attempts to look the name up and will 
+	  use the first interface that it finds as the endpoint.  This is fine if the VM
+	  has only one interface, but probably isn't desired when the VM has multiple 
+	  interfaces. The vm-name@address form yields a faster lookup (2 seconds vs 8 seconds
+	  in the lab), and should be used over supplying just an ip address alone. If the
+	  interface endpoint UUID is known, that format doesn't require any lookup and 
+	  thus is the fastest to resolve. 
+
+	  IPv6 addresses must always be contained in square braces (e.g. [fe81::257], 
+	  [fe81::257]:80)
+ 
 	  If only bandwidth_out is supplied, then that amount of bandwidth is reserved
 	  in each direction. Otherwise, the bandwidth out value is used to reserve
 	  bandwidth from host1 (out) to host2 and the bandwidth in is used to reserve
@@ -180,6 +202,107 @@ function verbose
 	fi
 }
 
+#
+# Accepts a vm name, or ip address, and converts it to an interface uuid for the endpoint.
+# The openstack digger accepts multiple names/addresses to translate, but to use this
+# it requires a bunch of calls to openstack that produce no useful results. The fastest
+# way to translate this information (short of caching a local copy) is to hope the user
+# gave us the form vmname@ipaddress[:port] rather than an ip address.  This way, we can 
+# set the limit flag on the digger call which reduces the interface query to just one
+# api call. If the user gives us just IP address(es) then the call will take time. 
+# To run as quickly as possible we send individually limited calls for any host name we
+# can and a single batch call of the rest.  The batch calls take about 8 seconds on a 
+# test lab, so likely much longer in a real environment, while the limited call takes about 
+# 2 seconds in the same lab.  Typically, we'll be resolving at most 2 addresses, and if one
+# is an 'external' address (!//ip), then there is no call made for those.
+#
+# Using just a vm name (no ip address) is potentially disastrous (when the vm has more 
+# than one interface), but # for backward compatability, and convenience, we'll support that too.
+#
+# The string passed in better be of the form:  token/project/address|name. Output will be:
+# token/project/endpoint/address.
+# Sadly, openstack look-ups are _expensive_ (8 seconds on a tiny lab system), so we
+# assume that we'll be passed a bunch of names (all that need to be converted) and we'll
+# make one call to tegu_osdig to make one openstack requests.
+# For external addresses (!//ip) we expect the ip not to match in openstack and will 
+# generate !///ip which is what tegu expects.
+function name2epid
+{
+	if [[ ${1%%,*} == *"/"*"/"*"/"* ]]			# already in token/p/e/a format?
+	then
+		echo "$@"								# assume they all are, and just write them back
+		exit
+	fi
+
+	typeset i=0
+	typeset -A prefixes
+	typeset -A names
+	typeset lookup=""
+	typeset limiter=""
+	typeset result=""
+
+	while [[ -n $1 ]]
+	do
+		typeset prefix="${1%/*}"
+		typeset name="${1##*/}"
+
+		if [[ $name == *"@"* ]]			# if name@address given, we can make a quicker dig call in the loop
+		then
+			limiter="-l ${name%%@*}"	# limit the dig to just this VM name (faster)
+			name="${name#*@}"			# vm name is _not_ kept
+		else
+			limiter=""					# no vm name: we have to add this to the list that will be batched at the end
+		fi
+
+		case $name in 					# need to strip :port, and [/] if ipv6
+			\[*) 
+				typeset x="${name%%]*}"
+				this_lookup="${x#*\[}"
+				v6_flag="ipv6=true"		# needs to be supplied to tegu so flow-mods are marked for v6
+				;;	
+
+			*:*) this_lookup="${name%:*} " ;;
+
+			*)	 this_lookup="$name ";;
+		esac
+
+		this_lookup="${this_lookup%%\{*}"		# ditch any vlan specification that might trail the address
+
+		if [[ $prefix == "!"* ]]
+		then
+			result="$result${prefix}//${name} "
+		else
+			if [[ -z $limiter ]]			# could not limit this one, will have to do in batch later (slower)
+			then
+				prefixes[$i]="$prefix"
+				names[$i]="$name"
+	
+				(( i++ ))
+				lookup="$lookup$this_lookup "	# add to batch we'll need to do at the end
+			else
+				x=$( tegu_osdig $limiter epid $this_lookup )
+				result="$result${prefix}/${x}/${name} "
+			fi
+		fi
+
+		shift
+	done
+
+	if [[ -n $lookup ]]						# one last call to dig any that could not be limited by vm name
+	then
+		i=0
+		tegu_osdig -v epid $lookup |while read x
+		do
+			x=${x##* }											# -v ensures we get one for each with x: missing if not found
+			result="$result${prefixes[$i]}/${x/missing/}/${names[$i]} "
+	
+			(( i++ ))
+		done
+	fi
+
+	echo $result
+}
+
 # takes a string $3 and makes substitutions such that %t is replaced with $1 and %p is 
 # replaced with $2
 function expand_epname
@@ -207,7 +330,7 @@ cat <<endKat
        "name": "$OS_TENANT_NAME"
      }
    }
-   }
+  }
  }
 }
 endKat
@@ -481,12 +604,14 @@ region=${OS_REGION:=any}	# if not supplied, default to first region (any)
 bandwidth="tegu/bandwidth"		# http api collections
 steering="tegu/api"				# eventually this should become steering
 default="tegu/api"
+force_endpoints=1				# for backwards compatability -e will set/clear based on this default
 
 while [[ $1 == -* ]]
 do
 	case $1 in
 		-c)		skip_catalogue=1;;						# allow for default host (locahost)
 		-d)		opts+=" -d";;
+		-e)		force_endpoints=$(( abs( force_endpoints - 1 ) ));;
 		-f)		force=1;;
 		-F)		bandwidth="api"; steering="api";;		# force collection to old single set style
 		-h) 	skip_catalogue=1; host=$2; shift;;
@@ -661,20 +786,47 @@ case $1 in
 			esac
 		fi
 		#rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/$bandwidth"
-		rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry $(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) $4 $5" -t "$proto$host/$bandwidth"
+		#rjprt  $opts -m POST -D "reserve $kv_pairs $1 $expiry $(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) $4 $5" -t "$proto$host/$bandwidth"
+
+		if [[ $3 == *"{"*"}"* ]]				# vlan id not supported on regular bandwidth reservations
+		then
+			echo "vlan specification ({id}) not permitted on bandwidth reservations   [FAIL]"
+			exit 1
+		fi
+
+		if (( force_endpoints ))
+		then
+			hosts=$(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) 			# expand token/project bugs
+			hosts=$( name2epid ${hosts//,/ } )									# look up endpoint uuid and add
+			hosts="${hosts// /,}"												# tegu requires a single token, comma sep; make it so
+		else
+			hosts=$(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) 
+		fi
+
+		rjprt  $opts -m POST -D "reserve $v6_flag $kv_pairs $1 $expiry $hosts $4 $5" -t "$proto$host/$bandwidth"
 		;;
 
 	owres*|ow_res*)
 		shift
-			#teg command is: owreserve <bandwidth>[K|M|G] [<start>-]<end>  <host1-host2> [cookie [dscp]]
+			#tegu command is: owreserve <bandwidth>[K|M|G] [<start>-]<end>  <host1,host2> [cookie [dscp]]
 		if (( $# < 4 ))
 		then
 			echo "bad number of positional parms for owreserve  [FAIL]" >&2
 			usage >&2
 			exit 1
 		fi
+
+		if (( force_endpoints ))												# must ensure that endpoints are added to the host string(s)
+		then
+			hosts=$(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) 			# expand token/project bugs
+			hosts=$( name2epid ${hosts//,/ } )									# look up endpoint uuid and add
+			hosts="${hosts// /,}"												# tegu requires a single token, comma sep; make it so
+		else
+			hosts=$(expand_epname "$raw_token" "$OS_TENANT_NAME" $3) 
+		fi
+
 		expiry=$( str2expiry $2 )
-		rjprt  $opts -m POST -D "ow_reserve $kv_pairs $1 $expiry ${3//%t/$raw_token} $4 $5" -t "$proto$host/$bandwidth"
+		rjprt  $opts -m POST -D "ow_reserve $v6_flag $kv_pairs $1 $expiry $hosts $4 $5" -t "$proto$host/$bandwidth"
 		;;
 
 	setdiscount)
@@ -797,6 +949,13 @@ case $1 in
 
 	test)
 		shift
+		if (( force_endpoints ))
+		then
+			name2epid $@
+		else
+			echo "not forced"
+		fi
+
 		echo "test: raw_token=($raw_token)"
 		echo "test: options: ($opts)"
 		if [[ -n $1 ]]

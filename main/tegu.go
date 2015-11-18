@@ -135,6 +135,7 @@
 				29 Jul 2015 : Tracker bug fixes (263,266) version bump.
 				03 Sep 2015 : Correct panic in network.go.
 				08 Sep 2015 : Prevent checkpoint files with same timestamp (gh#22).
+				28 Sep 2015 : Major revsion to network management functions; endpoint support.
 				08 Oct 2015 : Correct bug causing all reservations to be pushed when reservation change state happenes.
 				09 Oct 2015 : Use 'admin' project for defaut phys host list.
 
@@ -143,6 +144,8 @@
 				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
 				3.1		- QoS-Lite with steering and mirroring added
 				3.2		- QoS-Lite with steering and WACC support added
+				4.1		- QoS-Lite with mirroring; major endpoint network changes
+				4.2		- QoS-Lite with wide area, mirroring; major endpoint network changes
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
 */
 
@@ -171,13 +174,13 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.2/18115"		// wide area version
+		version		string = "v4.2.0/1b175"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite) 4.1 endpt prod, 4.2 endpt/wa
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
 		needs_help 	*bool
 		fl_host		*string
-		super_cookie *string
+		//super_cookie *string
 		chkpt_file	*string
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
@@ -191,15 +194,16 @@ func main() {
 	)
 
 	sheep = bleater.Mk_bleater( 1, os.Stderr )
-	sheep.Set_prefix( "main/3.1" )
+	sheep.Set_prefix( "main/4.1" )
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
 	chkpt_file = flag.String( "c", "", "check-point-file" )
 	cfg_file = flag.String( "C", "", "configuration-file" )
-	fl_host = flag.String( "f", "", "floodlight_host:port" )
+	//fl_host = flag.String( "f", "", "floodlight_host:port" )
 	api_port = flag.String( "p", "29444", "api_port" )
-	super_cookie = flag.String( "s", "", "admin-cookie" )
+	//super_cookie = flag.String( "s", "", "admin-cookie" )			// deprecated -- security issue
+	topo_file := flag.String( "t", "", "topo_file" )
 	verbose = flag.Bool( "v", false, "verbose" )
 
 	flag.Parse()									// actually parse the commandline
@@ -215,10 +219,12 @@ func main() {
 	sheep.Baa( 1, "tegu %s started", version )
 	sheep.Baa( 1, "http api is listening on: %s", *api_port )
 
+	/*
 	if *super_cookie == "" {							// must have something and if not supplied this is probably not guessable without the code
 		x := "20030217"
 		super_cookie = &x
 	}
+	*/
 
 	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
 	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
@@ -232,10 +238,12 @@ func main() {
 		os.Exit( 1 )
 	}
 
+	managers.Message_mgr()											// right now just a funciton to start, but could be a thread at somepoint, so invoke here
+
 	go managers.Http_api( api_port, nw_ch, rmgr_ch )				// start early so we bind to port quickly, but don't allow requests until late
-	go managers.Res_manager( rmgr_ch, super_cookie ); 				// manage the reservation inventory
+	go managers.Res_manager( rmgr_ch )								// manage the reservation inventory
 	go managers.Osif_mgr( osif_ch )									// openstack interface; early so we get a list of stuff before we start network
-	go managers.Network_mgr( nw_ch, fl_host )						// manage the network graph
+	go managers.Network_mgr( nw_ch, topo_file )						// manage the network graph
 	go managers.Agent_mgr( am_ch )
 	go managers.Fq_mgr( fq_ch, fl_host );
 
@@ -245,16 +253,16 @@ func main() {
 	/*
 		Block until the network is initialised. We need to do this so that when the checkpoint file is read reservations
 		can be added without missing network pieces.  Even if there is no checkpoint file, or it's empty, blocking
-		prevents reservation rejections because the network graph isn't in working order.  At the moment, with lazy
-		udpating, the block is until we have a physical host map back from the agent world.  This can sometimes take
-		a minute or two.
+		prevents reservation rejections because the network graph isn't in working order.  With the implmentation of 
+		endpoint uuid the only thing that we wait on now is an initial endpoint list from openstack.  There isn't 
+		a requirement to get information from each physcial host.
 	*/
 	for {																	// hard block to wait on network readyness
 		req.Response_data = 0
 		req.Send_req( nw_ch, my_chan, managers.REQ_STATE, nil, nil )		// 'ping' network manager; it will respond after initial build
 		req = <- my_chan													// block until we have a response back
 
-		if req.Response_data.(int) == 2 {									// wait until we have everything that the network needs to build a reservation
+		if req.Response_data.(int) == 1 {									// wait until we have everything that the network needs to build a reservation
 			break
 		}
 

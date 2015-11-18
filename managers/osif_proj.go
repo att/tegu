@@ -39,6 +39,7 @@
 				01 Apr 2015 - Added ipv6 support for finding gateway/routers.
 				16 Jun 2015 - Turned down some of the bleat messages.
 				17 Jul 2015 - Merged steering changes in.
+				25 Sep 2015 - Added support to generate endpoint information.
 */
 
 package managers
@@ -53,6 +54,8 @@ import (
 
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/gopkgs/ostack"
+
+	"github.com/att/tegu/gizmos"
 )
 
 
@@ -810,60 +813,6 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 }
 
 /*
-	Get openstack host information.
-	Given a project-id/host as input, dig out all of the host's information and build a struct
-	that can be passed into the network manager as an add host to graph request. This
-	expects to run as a go routine and to write the response directly back on the channel
-	givn in the message block.
-*/
-/* ---- deprecated -------
-func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
-	if msg == nil || msg.Response_ch == nil {
-		return															// prevent accidents
-	}
-
-	msg.Response_data = nil
-
-	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
-	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
-		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s bad tokens",  *(msg.Req_data.( *string )) )
-		msg.State = fmt.Errorf( "invalid project/hostname string: %s", *(msg.Req_data.( *string )) )
-		msg.Response_ch <- msg
-		return
-	}
-
-	if tokens[0] == "!" { 					// !//ipaddress was given; we've got nothing, so bail now
-		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s lone bang",  *(msg.Req_data.( *string )) )
-		msg.Response_ch <- msg
-		return
-	}
-
-	p, pid, creds, err := pid2data( &tokens[0], os_refs, os_projs, id2pname, pname2id )
-	if err != nil {
-		osif_sheep.Baa( 1, "get host info: unable to map to a project: %s: %s",  *(msg.Req_data.( *string )), err )
-		msg.State = err
-		msg.Response_ch <- msg
-		return
-	}
-
-	osif_sheep.Baa( 2, "lazy update: get host info setup complete for (%s) %s", tokens[0], *(msg.Req_data.( *string )) )
-
-	search := *pid + "/" + tokens[1]							// search string must be id/hostname
-	name, id, ip4, fip4, mac, gw, cidr, phost, gwmap, _, err := p.Get_info( &search, creds, true )
-	if err != nil {
-		msg.State = fmt.Errorf( "unable to retrieve host info: %s", err )
-		msg.Response_ch <- msg
-		return
-	}
-	
-	msg.Response_data = Mk_netreq_vm( name, id, ip4, nil, phost, mac, gw, cidr, fip4, gwmap )		// build the vm data block for network manager
-	msg.Response_ch <- msg																// and send it on its merry way
-
-	return
-}
------ */
-
-/*
 	Invoked as a goroutine (asynch) to dig the needed subnet information from the current project block
 	and return it on the message channel indicated by the message. If the project block info is stale
 	then it is reloaded from openstack.  The data contained in the message is expected to be a string
@@ -1123,3 +1072,81 @@ func get_all_osvm_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_pr
 	msg.Response_ch <- msg
 }
 
+
+
+/*
+	Gathers the endpoint (VM) information for all endpoints in one or more projects. If "_all_proj" is given as the project name then
+	all projects  known to Tegu are fetched.
+
+	Expected to execute as a go routine and writes the resulting array to the channel specified in the message.
+*/
+func get_all_osep_info( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack ) {
+
+	if msg == nil || msg.Response_ch == nil {
+		return															// prevent accidents
+	}
+
+	msg.Response_data = nil
+	msg.State = nil
+
+	if msg.Req_data == nil {
+		osif_sheep.Baa( 1, "osep_info: request data didn't contain a project name or ID" )
+		msg.State = fmt.Errorf( "osep_info: request data didn't contain a project name or ID" )
+		msg.Response_ch <- msg
+		return
+	}
+
+	epmap := make( map[string]*gizmos.Endpt )						// map to send to request thread
+
+	pid := msg.Req_data.( *string )
+	if *pid == "_all_proj" {
+		for k := range os_refs {
+			if k != "_ref_" {
+				oseps, err := os_refs[k].Map_gw_endpoints( nil )				// get router endpoints first
+				if err == nil {
+					osif_sheep.Baa( 2, "fetching endpoints for %s (found %d router endponts)", k, len( oseps ) )
+					oseps, err = os_refs[k].Map_endpoints( oseps )				// get regular VM endpoints now
+				}
+				if err == nil {
+					osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", k, len( oseps ) )
+					for epid, v := range oseps {
+						epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
+						epmap[epid].Set_router( v.Is_router() )
+						epmap[epid].Set_meta_value( "netid", *(v.Get_netid()) )
+					}
+				} else {
+					osif_sheep.Baa( 1, "osep_info: could not dig out VM information for project: %s: %s", k, err )
+				}
+			}
+		}
+
+		msg.Response_data = epmap
+		if len( epmap ) <= 0 {
+			msg.State = fmt.Errorf( "osep_info: unable to dig any endpoint information for all projects" )
+		} else {
+			msg.State = fmt.Errorf( "osep_info: fetched endpoint info for all projects: %d elements", len( epmap ) )
+			msg.State = nil
+		}
+	} else {
+		osif_sheep.Baa( 1, "osep_info: huh" )
+		oref := os_refs[*pid]
+		if oref != nil {
+			oseps, err := oref.Map_endpoints( nil )					// get regular VM info
+			if err == nil {
+				oseps, err = oref.Map_gw_endpoints( oseps )		// get router info, add to previously returned map
+			}
+			if err == nil {
+				osif_sheep.Baa( 2, "osep_info: dug endpoint information for project: %s: %d endpoints", *pid, len( oseps ) )
+				for epid, v := range oseps {
+					epmap[epid] = gizmos.Mk_endpt( epid, *(v.Get_phost()), *(v.Get_project()), v.Get_ip_copy(), *(v.Get_mac()), nil, -128 )
+					epmap[epid].Set_router( v.Is_router() )
+					epmap[epid].Set_meta_value( "netid", *(v.Get_netid()) )
+				}
+			} else {
+				osif_sheep.Baa( 1, "osep_info: could not dig out VM information for project: %s: %s", *pid, err )
+			}
+		}
+	}
+
+	msg.Response_ch <- msg
+}

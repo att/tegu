@@ -264,21 +264,33 @@ func adjust_queues_agent( qlist []string, hlist *string, phsuffix *string ) {
 	info is local to fq-mgr b/c in the original Tegu it came straight
 	in from skoogi and it was fq-mgr's job to interface with skoogi.)
 */
-func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
-
-
+func send_bw_fmods( data *Fq_req, phost_suffix *string ) {
 	if data.Espq.Switch == "" {									// we must have a switch name to set bandwidth fmods
 		fq_sheep.Baa( 1, "unable to send bw-fmods request to agent: no switch defined in input data" )
 		return
 	}
 
+	data.Match.Smac = data.Match.Id1				// we send the source endpoint uuid to let agent convert and find vlan and ofport
+	fq_sheep.Baa( 2, "src endpoing: %s", *data.Match.Smac )
+
+	mac2 := epid2mac( data.Match.Id2 )				// must convert the 'remote' endpoint to a real mac as agent on phost won't have uuid knowledge
+	if mac2 == "" {
+		fq_sheep.Baa( 1, "could not map endpoint id (2) to mac: %s", *data.Match.Id2 )
+		return
+	}
+	data.Match.Dmac = &mac2
+	fq_sheep.Baa( 2, "dest mac address mapped: %s ==> %s", *data.Match.Id2, mac2 )
+
 	host := &data.Espq.Switch 									// Espq.Switch has real name (host) of switch
 	if phost_suffix != nil {										// we need to add the physical host suffix
 		host = add_phost_suffix( host, phost_suffix )
 	}
+	
 
-	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
-	data.Match.Dmac = ip2mac[*data.Match.Ip2]					// add to data for To_bw_map() call later
+	//FIXME:  do we? must add a way to pass IP addresses on match
+
+	//data.Match.Smac = ip2mac[*data.Match.Id1]					// res-mgr thinks in IP, flow-mods need mac; convert
+	//data.Match.Dmac = ip2mac[*data.Match.Id2]					// add to data for To_bw_map() call later
 
 	msg := &agent_cmd{ Ctype: "action_list" }					// create a message for agent manager to send to an agent
 	msg.Actions = make( []action, 1 )							// just a single action
@@ -289,14 +301,13 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 
 	json, err := json.Marshal( msg )						// bundle into a json string
 	if err != nil {
-		fq_sheep.Baa( 0, "unable to build json to set flow mod" )
+		fq_sheep.Baa( 0, "unable to build json to set flow mod: %s", err )
 	} else {
 		tmsg := ipc.Mk_chmsg( )
 		tmsg.Send_req( am_ch, nil, REQ_SENDSHORT, string( json ), nil )		// send as a short request to one agent
 	}
 
 	fq_sheep.Baa( 2, "bandwidth endpoint flow-mod request sent to agent manager: %s", json )
-	
 }
 
 /*
@@ -309,7 +320,7 @@ func send_bw_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *strin
 	Yes, this probably _could_ be pushed up into the reservation manager;
 	see comments above.
 */
-func send_bwow_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *string ) {
+func send_bwow_fmods( data *Fq_req, phost_suffix *string ) {
 	if data == nil {
 		fq_sheep.Baa( 1, "fq_req: internal mishap: unable to send bwow-fmods data to bwow function was nil" )
 		return
@@ -325,9 +336,27 @@ func send_bwow_fmods( data *Fq_req, ip2mac map[string]*string, phost_suffix *str
 		host = add_phost_suffix( host, phost_suffix )
 	}
 
-	data.Match.Smac = ip2mac[*data.Match.Ip1]					// res-mgr thinks in IP, flow-mods need mac; convert
-	if data.Match.Ip2 != nil {
-		data.Match.Dmac = ip2mac[*data.Match.Ip2]					// this may come up nil and that's ok
+	/*
+	mac1 := epid2mac( data.Match.Id1 )
+	if mac1 == "" {
+		fq_sheep.Baa( 1, "oneway: unable to map endpoint (1) uuid (%s) to mac address", *data.Match.Id1 )
+		return
+	}
+	data.Match.Smac = &mac1
+	*/
+	data.Match.Smac = data.Match.Id1							// we pass the endpoint uuid and let agent convert to mac/vlan/ofport tuple
+	
+
+	mac2 := ""
+	if data.Match.Id2 != nil {														// if ep2 is external, then it's ok to be nil
+		//--deprecated data.Match.Dmac = ip2mac[*data.Match.Id2]					// this may come up nil and that's ok
+		mac2 = epid2mac( data.Match.Id2 )											// dest must be converted to mac as agent won't have remote phost info
+		if mac2 == "" {																// but if it comes in, it better xlate
+			fq_sheep.Baa( 1, "oneway: unable to map endpoint (2) uuid (%s) to mac address", *data.Match.Id1 )
+			return
+		}
+
+		data.Match.Dmac = &mac2
 	} else {
 		data.Match.Dmac = nil
 	}
@@ -427,10 +456,10 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 	smac := data.Match.Smac								// smac wins if both smac and sip are given
 	if smac == nil {
-		if data.Match.Ip1 != nil {						// src supplied, match on src
-			smac = ip2mac[*data.Match.Ip1]
+		if data.Match.Id1 != nil {						// src supplied, match on src
+			smac = ip2mac[*data.Match.Id1]
 			if smac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Ip1 )
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: src IP did not translate to MAC: %s  [TGUFQM005]", *data.Match.Id1 )
 				fq_sheep.Baa( 1, "ip2mac has %d entries", len( ip2mac ) )
 				return
 			}
@@ -442,10 +471,10 @@ func send_gfmod_agent( data *Fq_req, ip2mac map[string]*string, hlist *string, p
 
 	dmac := data.Match.Dmac								// dmac wins if both dmac and sip are given
 	if dmac == nil {
-		if data.Match.Ip2 != nil {						// src supplied, match on src
-			dmac = ip2mac[*data.Match.Ip2]
+		if data.Match.Id2 != nil {						// src supplied, match on src
+			dmac = ip2mac[*data.Match.Id2]
 			if dmac == nil {
-				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s  [TGUFQM006]", *data.Match.Ip2 )
+				fq_sheep.Baa( 0, "ERR: cannot set fmod: dst IP did not translate to MAC: %s  [TGUFQM006]", *data.Match.Id2 )
 				return
 			}
 		}
@@ -631,8 +660,8 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		ip2mac		map[string]*string		// translation from ip address to mac
 		switch_hosts *string				// from config file and overrides openstack list if given (mostly testing)
 		ssq_cmd		*string					// command string used to set switch queues (from config file)
-		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
-		alt_table	int = DEF_ALT_TABLE		// meta data marking table
+		//send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
+		//alt_table	int = DEF_ALT_TABLE		// meta data marking table
 		phost_suffix *string = nil			// physical host suffix added to each host name in the list from openstack (config)
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
@@ -643,22 +672,29 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 	tegu_sheep.Add_child( fq_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
 	// -------------- pick up config file data if there --------------------------------
-	if *sdn_host == "" {													// not supplied on command line, pull from config	
+	/* ---- deprecated
+	if sdn_host != nil && *sdn_host == "" {													// not supplied on command line, pull from config	
 		if sdn_host = cfg_data["default"]["sdn_host"];  sdn_host == nil {	// no default; when not in config, then it's turned off and we send to agent
 			sdn_host = &empty_str
 		}
 	}
+	---- */
+	sdn_host = &empty_str		// FIXME
 
 	if cfg_data["default"]["queue_type"] != nil {					
+		/*
 		if *cfg_data["default"]["queue_type"] == "endpoint" {
 			send_all = false
 		} else {
 			send_all = true
 		}
+		*/
 	}
+	/*
 	if p := cfg_data["default"]["alttable"]; p != nil {			// this is the base; we use alt_table to alt_table + (n-1) when we need more than 1 table
 		alt_table = clike.Atoi( *p )
 	}
+	*/
 	
 
 	if cfg_data["fqmgr"] != nil {								// pick up things in our specific setion
@@ -734,74 +770,19 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 			case REQ_BWOW_RESERVE:						// oneway bandwidth flow-mod generation
 				msg.Response_ch = nil					// nothing goes back from this
 				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
-				send_bwow_fmods( fdata, ip2mac, phost_suffix )
+				send_bwow_fmods( fdata, phost_suffix )
 
 			case REQ_BW_RESERVE:						// bandwidth endpoint flow-mod creation; single agent script creates all needed fmods
 				fdata = msg.Req_data.( *Fq_req ); 		// pointer at struct with all of the expected goodies
-				send_bw_fmods( fdata, ip2mac, phost_suffix )
+				send_bw_fmods( fdata, phost_suffix )
+				//send_bw_fmods( fdata, ip2mac, phost_suffix )
 				msg.Response_ch = nil					// nothing goes back from this
 
 			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod  (this is likely deprecated as of 3/21/2015 -- resmgr invokes the bw_fmods script via agent)
-				fdata = msg.Req_data.( *Fq_req ); 		// user view of what the flow-mod should be
-
-				if uri_prefix != "" {						// an sdn controller -- skoogi -- is enabled
-					msg.State = gizmos.SK_ie_flowmod( &uri_prefix, *fdata.Match.Ip1, *fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
-
-					if msg.State == nil {					// no error, no response to requestor
-						fq_sheep.Baa( 2,  "proactive reserve successfully sent: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d dscp=%d",
-									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
-						msg.Response_ch = nil
-					} else {
-						// do we need to suss out the id and mark it failed, or set a timer on it,  so as not to flood reqmgr with errors?
-						fq_sheep.Baa( 1,  "ERR: proactive reserve failed: uri=%s h1=%s h2=%s exp=%d qnum=%d swid=%s port=%d  [TGUFQM008]",
-									uri_prefix, fdata.Match.Ip1, fdata.Match.Ip2, fdata.Expiry, fdata.Espq.Queuenum, fdata.Espq.Switch, fdata.Espq.Port )
-					}
-				} else {
-																// q-lite now generates one flowmod  in each direction because of the ITONS requirements
-					if send_all || fdata.Espq.Queuenum > 1 {	// if sending all fmods, or this has a non-intermediate queue
-						cdata := fdata.Clone()					// copy so we can alter w/o affecting sender's copy
-						if cdata.Espq.Port == -128 {			// we'll assume in this case that the switch given is the host name and we need to set the switch to br-int
-							swid := "br-int"
-							cdata.Swid = &swid
-						}
-
-						if cdata.Resub == nil {
-							resub_list := ""						 // resub to alternate table to set a meta mark, then to table 0 to hit openstack junk
-							if cdata.Single_switch || fdata.Dir_in {					// must use the base table for inbound traffic OR same switch traffic (bug 2015/1/26)
-								resub_list = fmt.Sprintf( "%d 0", alt_table )			// base alt_table is for 'local' traffic (trafic that doesn't go through br-rl
-							} else {
-								resub_list = fmt.Sprintf( "%d 0", alt_table + 1 )		// base+1 is for OUTBOUND only traffic that must go through the rate limiting bridge
-							}
-							cdata.Resub = &resub_list
-						}
-				
-						meta := "0x00/0x07"						// match-value/mask; match only when meta neither of our two bits, nor the agent bit (0x04) are set
-						cdata.Match.Meta = &meta
-
-						if fdata.Dir_in  {						// inbound to this switch we need to revert dscp from our settings to the 'origianal' settings
-							if cdata.Single_switch {
-								cdata.Match.Dscp =  -1				// there is no match if both on same switch
-								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
-							} else {
-								cdata.Match.Dscp = cdata.Dscp						// match the dscp that was added on ingress
-								if ! cdata.Dscp_koe {								// dropping the value on exit
-									cdata.Action.Dscp = 0							// set action to turn it off, otherwise we let it ride (no overt action)
-								}
-
-								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
-							}
-						} else {													// outbound from this switch set the dscp value specified on the reservation
-							cdata.Match.Dscp =  -1									// on outbound there is no dscp match, ensure this is off
-							if cdata.Single_switch {
-								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )		// in single switch mode there is no dscp value needed
-							} else {
-								cdata.Action.Dscp = cdata.Dscp						// otherwise set the value and send
-								send_gfmod_agent( cdata,  ip2mac, host_list, phost_suffix )
-							}
-						}
-					}
-
-					msg.Response_ch = nil
+				fq_sheep.Baa( 0, "CRI: invalid fqmgr function (reserve) invoked and was ignored" )
+				msg.Response_data = nil
+				if msg.Response_ch != nil {
+					msg.State = fmt.Errorf( "deprecated request ignored (reserve)" )
 				}
 
 			case REQ_ST_RESERVE:							// reservation fmods for traffic steering

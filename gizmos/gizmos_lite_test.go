@@ -53,7 +53,8 @@ func TestLoadLinks( t *testing.T ) {			// must use bloody camel case to be recog
 
 	fmt.Fprintf( os.Stderr, "-------- q-lite tests ---------------\n" )
 	
-	links, err := gizmos.Read_json_links( "static_links.json" )
+	fname := "static_links.json"
+	links, err := gizmos.Read_json_links( &fname )
 	if err == nil  {
 		fmt.Fprintf( os.Stdout, "Successful %d\n", len( links ) )
 		for i := range links {

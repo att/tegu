@@ -43,6 +43,7 @@
 				20 Mar 2015 - Added REQ_GET_PHOST_FROM_MAC
 				31 Mar 2015 - Added REQ_GET_PROJ_HOSTS
 				21 Sep 2015 - Added REQ_GET_PHOST_FROM_PORTUUID
+				25 Sep 2015 - Added REQ_GET_ENDPTS
 */
 
 /*
@@ -113,6 +114,8 @@ const (
 	REQ_IP2VMID					// xlate map IP address to VM-ID
 	REQ_VMID2PHOST				// xlate map VM-ID to physical host name
 	REQ_IP2MAC					// xlate map IP address to mac
+	REQ_EP2PROJ					// given an end point id, return the project (net)
+	REQ_EP2MAC					// xlate endpoint name to MAC address (net)
 	REQ_GEN_EPQMAP				// generate queue map for end points only (no intermediate queues are generated)
 	REQ_SENDALL					// send message to all
 	REQ_SENDSHORT				// send a long running request to a single agent (uses only one agent to handle all long running requests
@@ -120,8 +123,8 @@ const (
 	REQ_IP2MACMAP				// generate an ip to mac translation table and return to requester
 	REQ_MAC2PHOST				// request contains mac to physical host data
 	REQ_INTERMEDQ				// setup queues and flowmods on intermediate switches
-	REQ_IP2FIP					// request contains a translation of tenant/ip to floating ip
-	REQ_FIP2IP					// request contains a translation of floating ip to tenant/ip
+	REQ_IP2FIP					// request contains a translation of project/ip to floating ip
+	REQ_FIP2IP					// request contains a translation of floating ip to project/ip
 	REQ_STATE					// generate some kind of state data back to message sender
 	REQ_PAUSE					// put things into a paused mode
 	REQ_RESUME					// take things out of a paused mode and resume normal reservation operation.
@@ -131,9 +134,8 @@ const (
 	REQ_HOSTINFO				// given a vm name generate a *string with ip, mac, switch-id and switch port
 	REQ_VALIDATE_TOKEN			// given a token/user-space  string, validate the token and translate user-space name to ID
 	REQ_VALIDATE_TEGU_ADMIN		// given a token validate that it is for the tegu user defined in our config
-	REQ_PNAME2ID				// translate project (user, tenant, etc.) to ID
+	REQ_PNAME2ID				// translate project (user, project, etc.) to ID
 	REQ_SETULCAP				// set a user link capacity
-	REQ_GETGW					// give a tenant ID and get it's gateway
 	REQ_GETPHOST				// givn an IP address, get it's physical host
 	REQ_XLATE_HOST				// translate a [token/][project/]hostname into ID/hostname without validation of token if it exits.
 	REQ_PLEDGE_LIST				// causes res mgr to generate a list of pledges based on a host name
@@ -153,11 +155,15 @@ const (
 	REQ_GET_PHOST_FROM_MAC		// used by mirroring to find the phost that goes with a MAC
 	REQ_GET_PHOST_FROM_PORTUUID // used by mirroring to find the phost that goes with a neutron UUID
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
+	REQ_GET_ENDPTS				// generate a map of endpoints for one or all projects keyed by endpoint uuid
+	REQ_NEW_ENDPT
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 	REQ_SETDISC					// set the discount value
 	REQ_DUPCHECK				// check for duplicate (resmgr)
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
+
+	//--- deprecated - http uses osif for direct query REQ_GETGW					// give a project ID and get it's gateway
 )
 
 const (
@@ -269,8 +275,8 @@ type Subnet_info struct {
 	agent.
 */
 type Fq_parms struct {
-	Ip1		*string				// ip of hosts or endpoints. if order is important ip1 is src
-	Ip2		*string
+	Id1		*string				// ids of hosts or endpoints. If order is important id1 is src. Could be uuid or mac
+	Id2		*string
 	Tpsport	*string				// transport layer source port (strings to allow mask)
 	Tpdport *string				// transport layer dest port
 	Swport	int					// the switch port
@@ -295,7 +301,7 @@ type Fq_req struct {
 
 	Dir_in	bool				// true if direction is inbound (bandwidth fmods)
 	Spq		int					// switch's port for queue
-	Extip	*string				// exterior IP address necessary for inter-tenant reservations
+	Extip	*string				// exterior IP address necessary for inter-project reservations
 	Exttyp	*string				// external IP type (either -D or -S)
 	Protocol	*string			// protocol (steering) udp[4|6]:port or tcp[4|6]:port, port may be 0
 

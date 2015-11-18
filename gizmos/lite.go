@@ -36,7 +36,7 @@ package gizmos
 import (
 	//"bufio"
 	"encoding/json"
-	//"fmt"
+	"fmt"
 	"os"
 	//"strings"
 	//"time"
@@ -47,9 +47,13 @@ import (
 	Reads the file which is assumed to contain nothing but the json link
 	in floodlight syntax.
 */
-func Read_json_links( fname string ) ( links []FL_link_json, err error ) {
+func Read_json_links( fname *string ) ( links []FL_link_json, err error ) {
 
-    f, err := os.Open( fname )
+	if fname == nil {
+		return nil, fmt.Errorf( "no filename for static topo" )
+	}
+
+    f, err := os.Open( *fname )
 	links = nil
 
     if err != nil {
