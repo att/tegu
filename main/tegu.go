@@ -167,7 +167,7 @@ var (
 
 func usage( version string ) {
 	fmt.Fprintf( os.Stdout, "tegu %s\n", version )
-	fmt.Fprintf( os.Stdout, "usage: tegu [-C config-file] [-c ckpt-file] [-f floodlight-host] [-p api-port] [-s super-cookie] [-v]\n" )
+	fmt.Fprintf( os.Stdout, "usage: tegu [-C config-file] [-c ckpt-file] [-p api-port] [-v]\n" )
 }
 
 func main() {
@@ -198,9 +198,7 @@ func main() {
 
 	chkpt_file = flag.String( "c", "", "check-point-file" )
 	cfg_file = flag.String( "C", "", "configuration-file" )
-	//fl_host = flag.String( "f", "", "floodlight_host:port" )
 	api_port = flag.String( "p", "29444", "api_port" )
-	//super_cookie = flag.String( "s", "", "admin-cookie" )			// deprecated -- security issue
 	topo_file := flag.String( "t", "", "topo_file" )
 	verbose = flag.Bool( "v", false, "verbose" )
 
