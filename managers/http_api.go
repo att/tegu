@@ -724,10 +724,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						}
 					}
 
-				case "listhosts":											// list known host information
+				case "listeps", "listhosts":											// list endpoint information (formerly hosts)
 					if validate_auth( &auth_data, is_token, sysproc_roles ) {
-						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 						/* ----
+						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 							deprecated with endpoint
 						if tmap["project"] != nil {
 							http_sheep.Baa( 1, "listhosts is forcing update of all VMs for the project: %s", *tmap["project"] )
