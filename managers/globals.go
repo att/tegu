@@ -44,6 +44,7 @@
 				31 Mar 2015 - Added REQ_GET_PROJ_HOSTS
 				21 Sep 2015 - Added REQ_GET_PHOST_FROM_PORTUUID
 				25 Sep 2015 - Added REQ_GET_ENDPTS
+				12 Nov 2015 - Pulled in httplogger from steering branch.
 */
 
 /*
@@ -73,6 +74,7 @@ import (
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/config"
+	"github.com/att/gopkgs/http_logger"
 	"github.com/att/gopkgs/ipc"
 
 	"github.com/att/tegu/gizmos"
@@ -152,6 +154,7 @@ const (
 	REQ_GET_ENDPTS				// generate a map of endpoints for one or all projects keyed by endpoint uuid
 	REQ_NEW_ENDPT
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
+	REQ_HAS_ANY_ROLE2			// given token and role list return user,project if token lists any role presented
 	REQ_SETDISC					// set the discount value
 	REQ_DUPCHECK				// check for duplicate (resmgr)
 	REQ_SWITCHINFO				// request switch info from all hosts
@@ -232,6 +235,8 @@ var (
 	rm_sheep	*bleater.Bleater
 	http_sheep	*bleater.Bleater
 	qm_sheep	*bleater.Bleater
+
+	httplogger *http_logger.Http_Logger	// access logger for HTTP API requests
 
 	/*
 		http manager needs globals because the http callback doesn't allow private data to be passed
@@ -362,6 +367,10 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 	}
 
 	return
+}
+
+func Log_Restart( version string ) {
+	tegu_sheep.Baa( 1, "***** Tegu %s restarted. *****", version )
 }
 
 /*

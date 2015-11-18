@@ -54,7 +54,7 @@
 					that are needed when we are not using floodlight.
 				19 May 2014 - Changes to support floating ip translation map generation.
 				05 Jun 2014 - Added support for pulling all tenants rather than just those
-					listed with credientials and building project to ID map.
+					listed with credentials and building project to ID map.
 				07 Jun 2014 - Added function to validate hosts if supplied with token and
 					to translate project (tenant) name into an ID.
 				09 Jun 2014 - Converted the openstack cred list to a map.
@@ -73,7 +73,7 @@
 				30 Sep 2014 - For what ever reason, the ccp environment wasn't returning a
 					full complement of mac addresses on  a single call, so we now revert to
 					making a call for each project.
-				02 Oct 2014 - TGUOSI007 message eliminated as it duplcated 005.
+				02 Oct 2014 - TGUOSI007 message eliminated as it duplicated 005.
 				14 Oct 2014 - Corrected error count reset in gen_maps. Added additional check
 					to ensure that empty maps are ignored.
 				17 Nov 2014 - Changes to allow for lazy updating of maps.
@@ -101,11 +101,12 @@
 						is validated.
 				25 Aug 2015 - Avoid making Mk_mac_map call during credential refresh.
 				18 Sep 2015 - Added code to map a neutron port UUID to a phost
-				09 Oct 2015 - Now grab a host list using just the admin project as it didn't scale to 
+				09 Oct 2015 - Now grab a host list using just the admin project as it didn't scale to
 						try to build a host list from all projects. It does fall back to the old way
 						if using the admin project fails to build a list.
+				16 Nov 2015 - Added REQ_HAS_ANY_ROLE2, updated has_any_role()
 
-	Deprecated messages -- do NOT resuse the number as it already maps to something in ops doc!
+	Deprecated messages -- do NOT reuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
 */
 
@@ -140,7 +141,7 @@ import (
 	an API call for each, until we find one that works or we exhaust the list.  Bottom line
 	is that we'll fail only if we cannot figure it out someway.
 
-	Dispite openstack doc, which implies that a token has a project scope, it does not.
+	Despite openstack doc, which implies that a token has a project scope, it does not.
 	this forces us to loop through every project we know about to see if the token is
 	valid for the user and the project.   This could very easily return the wrong
 	project if the token can be used to access more than one set of project information.
@@ -178,9 +179,9 @@ func token2project(  os_refs map[string]*ostack.Ostack, token *string ) ( pname 
 	If the token was not valid, then the resulting string is nil and error will be set.
 
 	If token is omitted from the raw string, and is not required, the project name is
-	translated to a tenant ID in the resulting string (if supplied). If the token is reqired,
+	translated to a tenant ID in the resulting string (if supplied). If the token is required,
 	the input is considered invalid if it is missing and nil is returned with an appropriate
-	eror message in error.
+	error message in error.
 
 	If tok_req is true, then the raw string passed in _must_ contain a valid token and
 	is considered invalid if it does not.
@@ -269,7 +270,7 @@ func validate_token( raw *string, os_refs map[string]*ostack.Ostack, pname2id ma
 				}
 			}
 			if *pname != tokens[1] && *idp != tokens[1] {			// must try both
-				osif_sheep.Baa( 1, "invalid token/tenant: expected %s opnestack reports: %s/%s", tokens[1], *pname, *idp )
+				osif_sheep.Baa( 1, "invalid token/tenant: expected %s openstack reports: %s/%s", tokens[1], *pname, *idp )
 				return nil, fmt.Errorf( "invalid token/tenant pair" )
 			}
 
@@ -302,17 +303,17 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 
 /*
 	Given a token, return true if the token is valid for one of the roles listed in role.
-	Role is a list of space separated role names.  If token is actually tokken/project, then
+	Role is a list of space separated role names.  If token is actually token/project, then
 	we will test only with the indicated project. Otherwise we will test the token against
 	every project we know about and return true if any of the roles in the list is defined
 	for the user in any project.  This _is_ needed to authenticate Tegu requests which are not
 	directly project oriented (e.g. set capacities, graph, etc.), so it is legitimate for
 	a token to be submitted without a leading project/ string.
 */
-func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( has_role bool, err error ) {
+func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( userproj string, err error ) {
 	rtoks := strings.Split( *roles, "," )		// simple tokenising of role list
 
-	has_role = false
+	userproj = ""
 	if strings.Contains( *token, "/" ) {				// assume it's token/project
 		const p int = 1			// order in split tokens (project)
 		const t int = 0			// order in split tokens (actual token)
@@ -320,7 +321,7 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 		toks := strings.Split( *token, "/" )
 		if toks[p] == "" {
 			osif_sheep.Baa( 2, "has_any_role: project/token had empty project" )
-			return false, fmt.Errorf( "project portion of token/project was empty" )
+			return "", fmt.Errorf( "project portion of token/project was empty" )
 		}
 
 		stuff, err := admin.Crack_ptoken( &toks[t], &toks[p], false )			// crack user info based on project and token
@@ -328,14 +329,14 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 			state := gizmos.Map_has_any( stuff.Roles, rtoks )				// true if any from rtoks list matches any in Roles
 			if state {
 				osif_sheep.Baa( 2, "has_any_role: token/project validated for roles: %s", *roles )
-				return true, nil
+				return (stuff.User + "," + stuff.TenantId), nil
 			} else {
 				err = fmt.Errorf( "none matched" );
 			}
 		}
 
 		osif_sheep.Baa( 2, "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
-		return false, fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
+		return "", fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
 	}
 
 	for _, v := range os_refs {
@@ -345,11 +346,12 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 		stuff, err := admin.Crack_ptoken( token, pname, false )			// return a stuff struct with details about the token
 
 		if err == nil {
-			err = fmt.Errorf( "role not defined; %s", *roles )			// asume error
+			err = fmt.Errorf( "role not defined; %s", *roles )			// assume error
 			state := gizmos.Map_has_any( stuff.Roles, rtoks )			// true if any role token matches anything from ostack
 			if state {
 				osif_sheep.Baa( 2, "has_any_role: verified in %s", *pname )
-				return true, nil
+				osif_sheep.Baa( 2, "has_any_role: user=%s, tenant=%s", stuff.User, stuff.TenantId )
+				return (stuff.User + "," + stuff.TenantId), nil
 			}
 		} else {
 			osif_sheep.Baa( 2, "has_any_role: crack failed for project=%s: %s", *pname, err )
@@ -361,7 +363,7 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 	}
 
 	osif_sheep.Baa( 1, "unable to verify role: %s: %s", *roles, err )
-	return false, err
+	return "", err
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
@@ -535,7 +537,7 @@ func get_admin_creds( url *string, usr *string, passwd *string, project *string,
 
 /*
 	Build a set of openstack objects for each project (tenant) that we have access to.
-	Retuns the list of creds and both ID->project and project->ID maps
+	Returns the list of creds and both ID->project and project->ID maps
 
 	We build a new map each time, copying existing references, so that if a parallel thread
 	has a copy and is working from it a change to the map isn't disruptive.
@@ -605,7 +607,7 @@ func update_project( os_admin *ostack.Ostack, old_os_refs map[string]*ostack.Ost
 
 	if update_list  {																	// asked to update the os_refs too
 		os_refs, _ = refresh_creds( os_admin, old_os_refs, id2pname )					// periodic update of project cred list
-		add2projects( os_projects, os_refs, pname2id, 2 )								// add refernces to the projects list
+		add2projects( os_projects, os_refs, pname2id, 2 )								// add references to the projects list
 		if osif_sheep.Would_baa( 2 ) {
 			for _, v := range os_projects {
 				osif_sheep.Baa( 2, "update project sees: %s", *v.name )
@@ -684,7 +686,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		if p != nil {
 			refresh_delay = clike.Atoi( *p )
 			if refresh_delay < 15 {
-				osif_sheep.Baa( 1, "resresh was too small (%ds), setting to 15", refresh_delay )
+				osif_sheep.Baa( 1, "refresh was too small (%ds), setting to 15", refresh_delay )
 				refresh_delay = 15
 			}
 		}
@@ -704,7 +706,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 		p = cfg_data["osif"]["ostack_list"] 				// preferred placement in osif section
 		if p == nil {
-			p = cfg_data["default"]["ostack_list"] 			// originally in default, so backwards compatable
+			p = cfg_data["default"]["ostack_list"] 			// originally in default, so backwards compatible
 		}
 		if p != nil {
 			os_list = *p
@@ -746,7 +748,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		if os_list == "all" {
 			os_refs, _ = refresh_creds( os_admin, os_refs, id2pname )		// for each project in id2pname get current ostack struct (auth)
 			for k := range os_refs {
-				osif_sheep.Baa( 1, "inital os_list member: %s", k )
+				osif_sheep.Baa( 1, "initial os_list member: %s", k )
 			}
 		} else {
 			if strings.Index( os_list, "," ) > 0 {
@@ -783,7 +785,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		}
 
 		os_projects = make( map[string]*osif_project )
-		add2projects( os_projects, os_refs, pname2id, 0 )							// add refernces to the projects list
+		add2projects( os_projects, os_refs, pname2id, 0 )							// add references to the projects list
 	}
 
 	// ---------------- end config parsing ----------------------------------------
@@ -835,7 +837,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				if err == nil {
 					osif_sheep.Baa( 2, "sending ip2mac map to fq_mgr" )
 					freq.Send_req( fq_ch, nil, REQ_IP2MACMAP, data, nil )	// request data forward
-					msg.State = nil											// response ok back to requestor
+					msg.State = nil											// response ok back to requester
 				} else {
 					msg.State = err											// error goes back to requesting process
 				}
@@ -928,6 +930,22 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 					d := msg.Req_data.( *string )
 					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
 					if len( dtoks ) > 1 {
+						// this version returns a boolean
+						t, e := has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
+						msg.Response_data = (t != "")
+						msg.State = e
+					} else {
+						msg.State = fmt.Errorf( "has_any_role: bad input data" )
+						msg.Response_data = false
+					}
+				}
+
+			case REQ_HAS_ANY_ROLE2:							// given a token and list of roles, returns true if any role listed is listed by openstack for the token
+				if msg.Response_ch != nil {
+					d := msg.Req_data.( *string )
+					dtoks := strings.Split( *d, " " )					// data assumed to be token <space> role[,role...]
+					if len( dtoks ) > 1 {
+						// this version returns a string
 						msg.Response_data, msg.State = has_any_role( os_refs, os_admin, &dtoks[0], &dtoks[1] )
 					} else {
 						msg.State = fmt.Errorf( "has_any_role: bad input data" )
@@ -939,7 +957,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				if msg.Response_ch != nil {
 					msg.Response_data = pname2id[*(msg.Req_data.( *string ))]
 					if msg.Response_data.( *string ) == nil  {						// maybe it was an ID that came in
-						if id2pname[*(msg.Req_data.( *string ))] != nil {			// if in id map, then return the stirng (the id) they passed (#202)
+						if id2pname[*(msg.Req_data.( *string ))] != nil {			// if in id map, then return the string (the id) they passed (#202)
 							msg.Response_data = msg.Req_data.( *string )
 						} else {
 							msg.Response_data = nil									// couldn't translate
@@ -949,12 +967,21 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_GET_PHOST_FROM_PORTUUID:                       // try to map a UUID to a phost -- used for mirroring
 				if msg.Response_ch != nil {
-					uuid := msg.Req_data.( *string )
-					for _, v := range os_refs {		
-						porthost, err := v.FetchHostInfo( uuid )
+					t := msg.Req_data.( *string )
+					uuids := strings.Split(*t, ",")
+					puuid := uuids[0]
+					tuuid := ""
+					if len(uuids) > 1 {
+						tuuid = uuids[1]
+					}
+					for _, v := range os_refs {
+						portinfo, err := v.FetchPortInfo( &puuid )
 						if err == nil {
-							msg.Response_data = porthost
-							break
+							if tuuid == "" || tuuid == portinfo.Tenant_id {
+								msg.Response_data = &portinfo.Bind_host_id
+								break
+							}
+							msg.State = fmt.Errorf("Port "+puuid + " does not belong to this tenant.")
 						} else {
 							msg.State = err
 						}
@@ -972,8 +999,8 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 		if msg != nil  { 						// if msg wasn't passed off to a go routine
 			osif_sheep.Baa( 3, "processing request complete: %d", msg.Msg_type )
 
-			if msg.Response_ch != nil {			// if a reqponse channel was provided
-				msg.Response_ch <- msg			// send our result back to the requestor
+			if msg.Response_ch != nil {			// if a response channel was provided
+				msg.Response_ch <- msg			// send our result back to the requester
 			}
 		}
 	}
