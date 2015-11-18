@@ -24,14 +24,16 @@
 
 	Author:		Robert Eby
 
-	Mods:		23 Feb 2015 : Created.
+	Mods:		23 Feb 2015 - Created.
 				26 May 2015 - Changes to support pledge as an interface.
+				16 Nov 2015 - Add save_mirror_response()
 */
 
 package managers
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/tegu/gizmos"
@@ -98,4 +100,27 @@ func undo_mirror_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chms
 	msg := ipc.Mk_chmsg( )
 	msg.Send_req( am_ch, nil, REQ_SENDSHORT, json, nil )		// send this as a short request to one agent	
 	p.Set_pushed()
+}
+
+/*
+ *  Save the returned response from an agent into the mirror pledge.  This is a gigantic hack,
+ *  but the present design of the agents doesn't provide an easy way to do this.
+ */
+func save_mirror_response( stdout []string, stderr []string ) {
+	// Try to figure out which mirror these responses are for.
+	// Look for a valid mirror name in any output
+	re := regexp.MustCompile(`mir-[0-9a-f]{8}_[0-9]`)
+	for _, s := range append(stdout, stderr...) {
+		name := re.FindString(s)
+		if name != "" {
+			// Fetch the mirror and save the stdout/err
+			m := lookupMirror( name, *super_cookie )
+			if m != nil {
+				rm_sheep.Baa( 1, "Saving output for mirror %s", name )
+				m.Set_Output( stdout, stderr )
+			}
+			return
+		}
+	}
+	rm_sheep.Baa( 1, "save_mirror_response: could not find the mirror name" )
 }

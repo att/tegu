@@ -43,6 +43,7 @@
 				20 Mar 2015 - Added REQ_GET_PHOST_FROM_MAC
 				31 Mar 2015 - Added REQ_GET_PROJ_HOSTS
 				21 Sep 2015 - Added REQ_GET_PHOST_FROM_PORTUUID
+				12 Nov 2015 - Pulled in httplogger from steering branch.
 */
 
 /*
@@ -72,6 +73,7 @@ import (
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/config"
+	"github.com/att/gopkgs/http_logger"
 	"github.com/att/gopkgs/ipc"
 
 	"github.com/att/tegu/gizmos"
@@ -148,6 +150,7 @@ const (
 	REQ_GET_PHOST_FROM_PORTUUID // used by mirroring to find the phost that goes with a neutron UUID
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
+	REQ_HAS_ANY_ROLE2			// given token and role list return user,project if token lists any role presented
 	REQ_SETDISC					// set the discount value
 	REQ_DUPCHECK				// check for duplicate (resmgr)
 	REQ_SWITCHINFO				// request switch info from all hosts
@@ -226,6 +229,8 @@ var (
 	rm_sheep	*bleater.Bleater
 	http_sheep	*bleater.Bleater
 	qm_sheep	*bleater.Bleater
+
+	httplogger *http_logger.Http_Logger	// access logger for HTTP API requests
 
 	/*
 		http manager needs globals because the http callback doesn't allow private data to be passed
@@ -356,6 +361,10 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 	}
 
 	return
+}
+
+func Log_Restart( version string ) {
+	tegu_sheep.Baa( 1, "***** Tegu %s restarted. *****", version )
 }
 
 /*

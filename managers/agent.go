@@ -36,6 +36,7 @@
 				29 Oct 2014 : Corrected potential core dump if agent msg received is less than
 					100 bytes.
 				17 Jun 2105 : Added oneway reservation support.
+				16 Nov 2105 : Handle response from remote mirror agents
 */
 
 package managers
@@ -90,9 +91,10 @@ type agent_data struct {
 type agent_msg struct {
 	Ctype	string			// command type -- should be response, ack, nack etc.
 	Rtype	string			// type of response (e.g. map_mac2phost, or specific id for ack/nack)
-	Rdata	[]string		// response data
+	Rdata	[]string		// response stdout data
+	Edata	[]string		// response error data
 	State	int				// if an ack/nack some state information
-	Vinfo	string			// agent verion (dbugging mostly)
+	Vinfo	string			// agent version (debugging mostly)
 	Rid		uint32			// original request id
 }
 
@@ -158,7 +160,7 @@ func (ad *agent_data) sendbytes2one( smgr *connman.Cmgr,  msg []byte ) {
 	if l <= 0 {
 		return
 	}
-	
+
 	smgr.Write( ad.agent_list[ad.aidx].id,  msg )
 	ad.aidx++
 	if ad.aidx >= l {
@@ -173,14 +175,13 @@ func (ad *agent_data) sendbytes2one( smgr *connman.Cmgr,  msg []byte ) {
 	Send the message to the designated 'long running' agent (lra); the
 	agent that has been designated to handle all long running tasks
 	that are not time sensitive (such as intermediate queue setup/checking).
-	
 */
 func (ad *agent_data) sendbytes2lra( smgr *connman.Cmgr,  msg []byte ) {
 	l := len( ad.agents )
 	if l <= 0 {
 		return
 	}
-	
+
 	smgr.Write( ad.agent_list[0].id,  msg )
 }
 
@@ -188,14 +189,13 @@ func (ad *agent_data) sendbytes2lra( smgr *connman.Cmgr,  msg []byte ) {
 	Send the message to the designated 'long running' agent (lra); the
 	agent that has been designated to handle all long running tasks
 	that are not time sensitive (such as intermediate queue setup/checking).
-	
 */
 func (ad *agent_data) send2lra( smgr *connman.Cmgr,  msg string ) {
 	l := len( ad.agents )
 	if l <= 0 {
 		return
 	}
-	
+
 	smgr.Write( ad.agent_list[0].id,  []byte( msg ) )
 }
 
@@ -231,7 +231,7 @@ func ( a *agent ) process_input( buf []byte ) {
 			am_sheep.Baa( 2, "offending json: %s", string( buf ) )
 		} else {
 			am_sheep.Baa( 1, "%s/%s received from agent", req.Ctype, req.Rtype )
-	
+
 			switch( req.Ctype ) {					// "command type"
 				case "response":					// response to a request
 					if req.State == 0 {
@@ -239,8 +239,12 @@ func ( a *agent ) process_input( buf []byte ) {
 							case "map_mac2phost":
 								msg := ipc.Mk_chmsg( )
 								msg.Send_req( nw_ch, nil, REQ_MAC2PHOST, req.Rdata, nil )		// send into network manager -- we don't expect response
-			
-							default:	
+
+							case "mirrorwiz":
+								// Stuff the response back in the mirror object - quick and dirty and probably not "right"
+								save_mirror_response( req.Rdata, req.Edata )
+
+							default:
 								am_sheep.Baa( 2, "WRN:  success response data from agent was ignored for: %s  [TGUAGT001]", req.Rtype )
 								if am_sheep.Would_baa( 2 ) {
 									am_sheep.Baa( 2, "first few ignored messages from response:" )
@@ -270,7 +274,7 @@ func ( a *agent ) process_input( buf []byte ) {
 			}
 		}
 
-		jblob = a.jcache.Get_blob()								// get next blob if the buffer completed one and containe a second
+		jblob = a.jcache.Get_blob()								// get next blob if the buffer completed one and contains a second
 	}
 
 	return
@@ -286,7 +290,7 @@ func (ad *agent_data) send_mac2phost( smgr *connman.Cmgr, hlist *string ) {
 		am_sheep.Baa( 2, "no host list, cannot request mac2phost" )
 		return
 	}
-	
+
 /*
 	req_str := `{ "ctype": "action_list", "actions": [ { "atype": "map_mac2phost", "hosts": [ `
 	toks := strings.Split( *hlist, " " )
@@ -321,7 +325,7 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 	if hlist == nil || *hlist == "" {
 		return
 	}
-	
+
 	msg := &agent_cmd{ Ctype: "action_list" }				// create command struct then convert to json
 	msg.Actions = make( []action, 1 )
 	msg.Actions[0].Atype = "intermed_queues"
@@ -342,14 +346,14 @@ func (ad *agent_data) send_intermedq( smgr *connman.Cmgr, hlist *string, dscp *s
 
 /*
 	Accepts a string of space separated dscp values and returns a string with the values
-	approprately shifted so that they can be used by the agent in a flow-mod command.  E.g.
+	appropriately shifted so that they can be used by the agent in a flow-mod command.  E.g.
 	a dscp value of 40 is shifted to 160.
 */
 func shift_values( list string ) ( new_list string ) {
 	new_list = ""
 	sep := ""
 	toks := strings.Split( list, " " )
-	
+
 	for i := range toks {
 		n := clike.Atoi( toks[i] )
 		new_list += fmt.Sprintf( "%s%d", sep, n<<2 )
@@ -402,10 +406,10 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 			dscp_list = *p
 			am_sheep.Baa( 1, "dscp priority list from config file: %s", dscp_list )
 		} else {
-			am_sheep.Baa( 1, "dscp priority list not in config file, using defauts: %s", dscp_list )
+			am_sheep.Baa( 1, "dscp priority list not in config file, using defaults: %s", dscp_list )
 		}
 	}
-	
+
 	dscp_list = shift_values( dscp_list )				// must shift values before giving to agent
 
 														// enforce some sanity on config file settings
@@ -418,7 +422,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 
 	sess_chan := make( chan *connman.Sess_data, 1024 )					// channel for comm from agents (buffers, disconns, etc)
 	smgr := connman.NewManager( port, sess_chan );
-	
+
 
 	for {
 		select {							// wait on input from either channel
@@ -480,7 +484,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							adata.send_mac2phost( smgr, &host_list )
 							adata.send_intermedq( smgr, &host_list, &dscp_list )
 						}
-				
+
 					case connman.ST_DISC:
 						am_sheep.Baa( 1, "agent dropped: %s", sreq.Id )
 						if _, not_nil := adata.agents[sreq.Id]; not_nil {
@@ -489,7 +493,7 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 							am_sheep.Baa( 1, "did not find an agent with the id: %s", sreq.Id )
 						}
 						adata.build_list()			// rebuild the list to drop the agent
-						
+
 					case connman.ST_DATA:
 						if _, not_nil := adata.agents[sreq.Id]; not_nil {
 							cval := 100
@@ -505,4 +509,3 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		}			// end select
 	}
 }
-
