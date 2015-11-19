@@ -98,6 +98,7 @@
 				11 Aug 2015 : Added wa ping support.
 				12 Aug 2015 : Corrected debug message.
 				03 Sep 2015 : Added latency option to verbose.
+				12 Nov 2015 : Pulled in httplogger from steering branch.
 */
 
 package managers
@@ -113,10 +114,11 @@ import (
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
-	"github.com/att/gopkgs/token"
+	"github.com/att/gopkgs/http_logger"
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/gopkgs/ostack"
 	"github.com/att/gopkgs/security"
+	"github.com/att/gopkgs/token"
 
 	"github.com/att/tegu/gizmos"
 )
@@ -195,7 +197,7 @@ func validate_ep_proj( ep_uuid *string, proj *string ) ( bool ) {
 	address:port, we'll require the syntax [address]:port if a port is to be supplied
 	with an IPv6 address.
 
-	We now support the suffix of {n} to indiate a VLAN id that is to be associated
+	We now support the suffix of {n} to indicate a VLAN id that is to be associated
 	with the host and port.  If not there -1 is returned.
 
 	If the resulting host names match (project/host[:port]) then we return an error
@@ -208,9 +210,11 @@ func validate_ep_proj( ep_uuid *string, proj *string ) ( bool ) {
 
 		!///IP:port  for external addresses
 */
+////// func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, v1 *string, v2 *string, err error ) {
 func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) {
 	
 	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
+
 	defer close( my_ch )									// close it on return
 	h2_isreal := true										// set to false if !// found so we don't validate it
 
@@ -226,6 +230,7 @@ func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) 
 	}
 	
 	http_sheep.Baa( 1, "validating hosts: (%s) (%s)", h1, h2 )
+
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this token/project pair for host
 	req = <- my_ch													// hard wait for response (response is token stripped (proj/endpt/ip-stuff
@@ -333,10 +338,10 @@ func is_admin_token( token *string ) ( bool ) {
 */
 func token_has_osroles( token *string, roles string ) ( bool ) {
 	dstr := *token + " " + roles					// osif expects single string, space separated token and list
-	
+
 	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
 	defer close( my_ch )									// close it on return
-	
+
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_HAS_ANY_ROLE, &dstr, nil )		// go check it out
 	req = <- my_ch														// hard wait for response
@@ -355,13 +360,38 @@ func token_has_osroles( token *string, roles string ) ( bool ) {
 	return false
 }
 
+func token_has_osroles_with_UserProject( token *string, roles string ) ( string ) {
+	dstr := *token + " " + roles					// osif expects single string, space separated token and list
+
+	my_ch := make( chan *ipc.Chmsg )				// allocate channel for responses to our requests
+	defer close( my_ch )							// close it on return
+
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_HAS_ANY_ROLE2, &dstr, nil )		// go check it out
+	req = <- my_ch														// hard wait for response
+
+	state, ok := req.Response_data.( string )
+	if ok && state != "" {			// assert boolean and then test
+		http_sheep.Baa( 2, "token successfully validated for a role in list: %s", roles )
+		return state
+	} else {
+		if req.State != nil {
+			http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s: %s", *token, roles, req.State )
+		} else {
+			http_sheep.Baa( 2, "token didn't have any acceptable role: %s %s", *token, roles )
+		}
+	}
+
+	return ""
+}
+
 /*
-	This function will validate the requestor is authorised to make the request based on the setting
+	This function will validate the requester is authorised to make the request based on the setting
 	of priv_auth. When localhost, the request must have originated from the localhost or have a
 	valid token. When token the user _must_ have sent a valid token (regardless of where the
 	request originated). A valid token is a token which contains a role name that is listed
 	in the for the roles string passed in. The valid_roles string is a comma separated list
-	(e.g. admin,tegu_admin).  If 'none' is inicated in the config file, then we always return
+	(e.g. admin,tegu_admin).  If 'none' is indicated in the config file, then we always return
 	true without doing any validation.
 
 	Returns true if the command can be allowed; false if not.
@@ -464,7 +494,7 @@ func dig_data( resp *http.Request ) ( data []byte ) {
 	wants two reason strings and a count of errors in order to report an overall status and a status of
 	each request that was received from the outside world.
 
-	This function will also check for a duplicate pledge aloready in the inventory and reject it
+	This function will also check for a duplicate pledge already in the inventory and reject it
 	if a dup is found.
 */
 func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, jreason string, nerrors int ) {
@@ -525,7 +555,7 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 }
 
 /*
-	Complete a one-way bandwdith reservation.
+	Complete a one-way bandwidth reservation.
 */
 func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
@@ -603,8 +633,8 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 		listconns <hostname|hostip>
 
 
-	Because this is drien from within the go http support library, we expect a few globals
-	to be in our envronment to make things easier.
+	Because this is driven from within the go http support library, we expect a few globals
+	to be in our environment to make things easier.
 		accept_requests	bool	set to true if we can accept and process requests. if false any
 								request is failed.
 */
@@ -690,9 +720,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							req = <- my_ch
 							if req.Response_data == nil {
 								http_sheep.Baa( 1, "failed to load all vm data: %s: %s", *tmap["project"], req.State )
-								jreason = fmt.Sprintf( "unable to load project data: %s", req.State )	
+								jreason = fmt.Sprintf( "unable to load project data: %s", req.State )
 							} else {
-								req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )	// send list to network to insert; must block until done so graph reqeust gets update
+								req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )	// send list to network to insert; must block until done so graph request gets update
 								req = <- my_ch
 							}
 						}
@@ -736,9 +766,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 							req = <- my_ch
 							if req.Response_data == nil {
 								http_sheep.Baa( 1, "failed to load all vm data: %s: %s", *tmap["project"], req.State )
-								jreason = fmt.Sprintf( "unable to load project data: %s", req.State )	
+								jreason = fmt.Sprintf( "unable to load project data: %s", req.State )
 							} else {
-								req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )	// send list to network to insert; must block until done so listhosts reqeust gets update
+								req.Send_req( nw_ch, my_ch, REQ_ADD, req.Response_data, nil )	// send list to network to insert; must block until done so listhosts request gets update
 								req = <- my_ch
 							}
 						}
@@ -812,7 +842,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					jreason = fmt.Sprintf( "\"pong: %s\"", version )
 					state = "OK"
 
-				case "qdump":					// dumps a list of currently active queues from network and writes them out to requestor (debugging mostly)
+				case "qdump":					// dumps a list of currently active queues from network and writes them out to requester (debugging mostly)
 					if validate_auth( &auth_data, is_token, admin_roles ) {
 						req = ipc.Mk_chmsg( )
 						req.Send_req( nw_ch, my_ch, REQ_GEN_QMAP, time.Now().Unix(), nil )		// send to network to verify a path
@@ -828,7 +858,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 						jreason += " ] }"
 						reason = "active queues"
 					}
-					
+
 				case "refresh":								// refresh reservations for named VM(s)
 					if validate_auth( &auth_data, is_token, admin_roles ) {
 						state = "OK"
@@ -855,7 +885,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 											switch sp := p.(type) {
 												case *gizmos.Pledge_bw:
 													rcount++
-													h1, h2 := sp.Get_hosts( ) 							// get the pldege hosts so we can update the graph
+													h1, h2 := sp.Get_hosts( ) 							// get the pledge hosts so we can update the graph
 													update_graph( h1, false, false )						// pull all of the VM information from osif then send to netmgr
 													update_graph( h2, true, true )							// this call will block until netmgr has updated the graph and osif has pushed updates into fqmgr
 
@@ -1122,7 +1152,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					if req.State == nil {											// all middle boxes were validated
 						//ip := gizmos.Pledge( res )									// must pass an interface to resmgr
 						req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )			// push it into the reservation manager which will drive flow-mods etc
-						req = <- my_ch										
+						req = <- my_ch
 					} else {
 						http_sheep.Baa( 1, "unable to validate all middle boxes" )
 					}
@@ -1207,7 +1237,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 									case "net", "network":
 										http_sheep.Set_level( nv )
-										
+
 									case "agent":
 										am_sheep.Set_level( nv )
 
@@ -1226,7 +1256,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 									default:
 										state = "ERROR"
 										http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2] )
-										jreason = fmt.Sprintf( `"unrecognsed subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
+										jreason = fmt.Sprintf( `"unrecognised subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
 								}
 
 								if state == "OK" {
@@ -1320,7 +1350,7 @@ func delete_reservation( tokens []string ) ( err error ) {
 		req := ipc.Mk_chmsg( )
 		req.Send_req( rmgr_ch, my_ch, REQ_DEL, del_data, nil )	// delete from the resmgr point of view		// res mgr sends delete on to network mgr (2014.07.07)
 		req = <- my_ch										// wait for delete response
-	
+
 		if req.State == nil {
 			err = nil
 			ckptreq := ipc.Mk_chmsg( )								// request checkpoint but no need to wait on it
@@ -1335,7 +1365,7 @@ func delete_reservation( tokens []string ) ( err error ) {
 
 /*
 	Delete something. Currently only reservation is supported, but there might be other
-	things in future to delete, so we require a token 0 that indiccates what.
+	things in future to delete, so we require a token 0 that indicates what.
 
 	Supported delete actions:
 		reservation <name> [<cookie>]
@@ -1424,7 +1454,7 @@ func parse_get( out http.ResponseWriter, recs []string, sender string ) (state s
 	Deal with input from the other side sent to tegu/api. See http_mirror_api.go for
 	the mirror api handler and related functions.
 	this is invoked directly by the http listener.
-	Because we are driven as a callback, and cannot controll the parameters passed in, we
+	Because we are driven as a callback, and cannot control the parameters passed in, we
 	must (sadly) rely on globals for some information; sigh. (There might be a way to deal
 	with this using a closure, but I'm not taking the time to go down that path until
 	other more important things are implemented.)
@@ -1500,12 +1530,15 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 	http_sheep.Set_prefix( "http_api" )
 	tegu_sheep.Add_child( http_sheep )					// we become a child so that if the master vol is adjusted we'll react too
 
+	// Apache style logger
+	httplogger = http_logger.Mk_Http_Logger( cfg_data["default"]["log_dir"] )
+
 	dup_str := "localhost"
 	priv_auth = &dup_str
 
-	ar_str := "admin,tegu_admin"						// default roles which are allowed to run privledged requests (ulcap etc)
+	ar_str := "admin,tegu_admin"						// default roles which are allowed to run privileged requests (ulcap etc)
 	admin_roles = &ar_str
-	sp_str := ",tegu_sysproc"							// default roles which for system processes (limited set of privledged requests, e.g. listhosts)
+	sp_str := ",tegu_sysproc"							// default roles which for system processes (limited set of privileged requests, e.g. listhosts)
 	sysproc_roles = &ar_str
 	mr_str := "tegu_mirror"
 	mirror_roles =  &mr_str
@@ -1568,7 +1601,7 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 
 	enable_mirroring := false										// off if section is missing all together
 	if cfg_data["mirror"] != nil {									// yes, mirror, not mirroring
-		enable_mirroring = true										// on by default if section is presernt
+		enable_mirroring = true										// on by default if section is present
 		if p := cfg_data["mirror"]["enable"]; p != nil {			// allow explicit disable with enable=no
 			if *p == "no" || *p == "No" || *p == "false" || *p == "False" {
 				enable_mirroring = false
