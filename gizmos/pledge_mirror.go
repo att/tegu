@@ -31,6 +31,7 @@
 				26 May 2015 - Broken out of main pledge to allow for pledge to become an interface.
 				01 Jun 2015 - Added equal() support
 				16 Aug 2015 - Move common code into Pledge_base
+				16 Nov 2015 - Add tenant_id, stdout, stderr to Pledge_mirror
 */
 
 package gizmos
@@ -59,6 +60,10 @@ type Pledge_mirror struct {
 	//mbox_list	[]*Mbox		// list of middleboxes if the pledge is a steering pledge
 	//mbidx		int			// insertion point into mblist
 	match_v6	bool		// true if we should force flow-mods to match on IPv6
+	tenant_id	*string
+
+	stdout		[]string	// stdout/err from last remote command -- not saved in checkpoints!
+	stderr		[]string
 }
 
 /*
@@ -83,6 +88,7 @@ type Json_pledge struct {
 	Ptype		int
 	//Mbox_list	[]*Mbox
 	Match_v6	bool
+	Tenant_id	*string
 }
 
 // ---- private -------------------------------------------------------------------
@@ -92,7 +98,7 @@ type Json_pledge struct {
 /*
  *	Makes a mirroring pledge.
  */
-func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string, vlan *string ) ( p Pledge, err error ) {
+func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string, vlan *string, tenant *string ) ( p Pledge, err error ) {
 	err = nil
 
 	window, err := mk_pledge_window( commence, expiry )		// will adjust commence forward to now if needed, returns nil if expiry has past
@@ -116,6 +122,9 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 		host1:		&t,				// mirror input ports (space sep)
 		host2:		out_port,		// mirror output port
 		qid:		phost,			// physical host (overloaded field)
+		tenant_id:	tenant,
+		stdout:		make([]string, 0),
+		stderr:		make([]string, 0),
 	}
 
 	if *usrkey == "" {
@@ -147,6 +156,9 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 		//dscp:		p.dscp,
 		qid:		p.qid,
 		//path_list:	p.path_list,
+		tenant_id:	p.tenant_id,
+		stdout:		make([]string, 0),
+		stderr:		make([]string, 0),
 	}
 
 	newp.window = p.window.clone()
@@ -188,6 +200,7 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 	//p.dscp_koe = jp.Dscp_koe
 	p.usrkey = jp.Usrkey
 	p.qid = jp.Qid
+	p.tenant_id = jp.Tenant_id
 	//p.bandw_out = jp.Bandwout
 	//p.bandw_in = jp.Bandwin
 
@@ -242,6 +255,18 @@ func (p *Pledge_mirror) Get_proto( ) ( *string ) {
 }
 */
 
+func (p *Pledge_mirror) Get_Tenant() *string {
+	return p.tenant_id
+}
+
+func (p *Pledge_mirror) Set_Output( stdout []string, stderr []string ) {
+	p.stdout = stdout
+	p.stderr = stderr
+}
+
+func (p *Pledge_mirror) Get_Output() ( []string, []string ) {
+	return p.stdout, p.stderr
+}
 
 // --------- humanisation or export functions --------------------------------------------------------
 
@@ -274,8 +299,8 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 
 	state, _, diff := p.window.state_str( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "ptype": %d }`,
-		state, diff, *p.host1, *p.host2, *p.id, PT_MIRRORING )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "ptype": %d }`,
+		state, diff, *p.host1, *p.host2, *p.id, *p.tenant_id, PT_MIRRORING )
 
 	return
 }
@@ -302,8 +327,8 @@ func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 	c, e := p.window.get_values( )
 
 	chkpt = fmt.Sprintf(
-		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "ptype": %d }`,
-		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, PT_MIRRORING )
+		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id", %q, "ptype": %d }`,
+		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, *p.tenant_id, PT_MIRRORING )
 
 	return
 }

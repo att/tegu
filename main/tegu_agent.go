@@ -40,7 +40,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		05 May 2014 : Added ability to support the map_mac2phost request
-					which generaets data back to tegu.
+					which generates data back to tegu.
 				06 May 2014 : Added support to drive setup_ovs_intermed script.
 				13 Jun 2014 : Corrected typo in warning message.
 				29 Sep 2014 : Better error messages from (some) scripts.
@@ -64,6 +64,7 @@
 					than /opt/app/bin.
 				11 Aug 2015 : Corrected initialisation of state value in port.
 				02 Sep 2015 : Pick up new agent script.
+				12 Nov 2015 : Updated to return stdout/stderr for do_mirrorwiz()
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -91,7 +92,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.1.1/18115"		// wide area support added with broker
+	version		string = "v2.3/1b165"
 	sheep *bleater.Bleater
 	// the next two should be deprecated with broker
 	shell_cmd	string = "/bin/ksh"
@@ -104,7 +105,7 @@ var (
 
 /*
 	Structures used to unpack json. These provide a generic
-	struture set into which all types of requests can be unpacked.
+	structure set into which all types of requests can be unpacked.
 */
 type json_action struct {
 	Atype	string				// action type e.g. intermed_queues, flowmod, etc.
@@ -332,7 +333,7 @@ func (act *json_action ) do_wa_cmd( cmd_type string, broker *ssh_broker.Broker, 
 	or "False", then an empty string is returned.  Opt is the -X or --longname option to use. If
 	opt ends in an equal sign, (e.g. --longname=), then no space will separate the key and value
 	in the resulting string.  If opt is empty (""), then that results in just the value being placed
-	in the return string such that -x could be sent in the map, or positional paramters sussed out
+	in the return string such that -x could be sent in the map, or positional parameters sussed out
 	this way too.
 */
 
@@ -343,7 +344,7 @@ func build_opt( value string, opt string ) ( parm string ) {
 		return
 	}
 
-	if opt == "" {					// value is assumed to be -x or someething of the sort that can stand alone; just return it
+	if opt == "" {					// value is assumed to be -x or something of the sort that can stand alone; just return it
 		return value + " "
 	}
 
@@ -370,14 +371,12 @@ func build_opt( value string, opt string ) ( parm string ) {
 
 		default:
 			parm = fmt.Sprintf( fmt_str, opt, value )
-		
 	}
-	
+
 	return
-	
 }
 
-/*	
+/*
 	Bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which
 	eliminates the need for Tegu to understand/know things like command line parms, bridge names and
 	such.  Parms in the map are converted to script command line options.
@@ -386,7 +385,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
     var (
 		cmd_str string
     )
-	
+
 	pstr := ""
 	if path != nil {
 		pstr = fmt.Sprintf( "PATH=%s:$PATH ", *path )		// path to add if needed
@@ -472,7 +471,7 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	return
 }
 
-/*	
+/*
 	Oneway bandwidth flow-mod generation rolls the creation of a set of flow-mods into a single script which
 	eliminates the need for Tegu to understand/know things like command line parms, bridge names and
 	such.  Parms in the map are converted to script command line options.
@@ -481,7 +480,7 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
     var (
 		cmd_str string
     )
-	
+
 	pstr := ""
 	if path != nil {
 		pstr = fmt.Sprintf( "PATH=%s:$PATH ", *path )		// path to add if needed
@@ -845,7 +844,7 @@ func do_fmod( req json_action, broker *ssh_broker.Broker, path *string, timeout 
 /*
  *  Invoke the tegu_add_mirror or tegu_del_mirror command on a remote host in order to add/remove a mirror.
  */
-func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) {
+func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) ( jout []byte, err error ) {
 	startt := time.Now().UnixNano()
 
 	cstr := ""
@@ -860,14 +859,29 @@ func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) {
 		case "del":
 			cstr = fmt.Sprintf( `PATH=%s:$PATH tegu_del_mirror %s`, *path, req.Qdata[1] )
 	}
+	msg := agent_msg {
+		Ctype: "response",
+		Rtype: req.Atype,
+		Rdata: nil,
+		Edata: nil,
+		State: 0,					// assume success
+		Vinfo: version,
+		Rid:   req.Aid,				// response id so tegu can map back to requestor
+	}
 	if cstr != "" {
     	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[0], cstr )
-		_, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )
+		stdout, stderr, err := broker.Run_cmd( req.Hosts[0], cstr )
 		if err != nil {
 			sheep.Baa( 0, "ERR: send mirror cmd failed host=%s: %s	[TGUAGN005]", req.Hosts[0], err )
 		} else {
-        	sheep.Baa( 2, "mirror cmd succesfully sent: %s", cstr )
+        	sheep.Baa( 2, "mirror cmd successfully sent: %s", cstr )
 		}
+		rdata := make( []string, 8192 )								// response output converted to strings
+		edata := make( []string, 8192 )
+		ix := buf_into_array( *stdout, rdata, 0 )
+		msg.Rdata = rdata[0:ix]
+		ix  = buf_into_array( *stderr, edata, 0 )
+		msg.Edata = edata[0:ix]
 		if sheep.Would_baa( 2 ) || err != nil {
 			dump_stderr( *stderr, "addmirror" + req.Hosts[0] )			// always dump on error, or if chatty
 		}
@@ -876,13 +890,15 @@ func do_mirrorwiz( req json_action, broker *ssh_broker.Broker, path *string ) {
 	}
 	endt := time.Now().UnixNano()
 	sheep.Baa( 1, "do_mirrorwiz: %d ms elapsed", (endt - startt) / 1000 )
+	jout, err = json.Marshal( msg )
+	return
 }
 
 /*
 	Unpacks the json blob into the generic json request structure and validates that the ctype
-	is one of the epected types.  The only supported ctype at the moment is action_list; this
+	is one of the expected types.  The only supported ctype at the moment is action_list; this
 	function will then split out the actions and invoke the proper do_* function to
-	exeute the action.
+	execute the action.
 
 	Returns a list of responses that should be written back to tegu, or nil if none of the
 	requests produced responses.
@@ -938,7 +954,11 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					}
 
 			case "mirrorwiz":
-					do_mirrorwiz(req.Actions[i], broker, path)
+					p, err := do_mirrorwiz(req.Actions[i], broker, path)
+					if err == nil {
+						resp[ridx] = p
+						ridx++
+					}
 
 			case "bw_fmod":									// new bandwidth flow-mod
 					p, err := req.Actions[i].do_bw_fmod( req.Actions[i].Atype, broker, path, 15 )

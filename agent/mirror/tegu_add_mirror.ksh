@@ -55,6 +55,7 @@
 #                  17 Sep 2015 - Add ability to use neutron UUID for ports
 #                  19 Oct 2015 - Add options:in_key to GRE ports to allow multiple GRE ports.
 #                                Allow mirrors on bridges other than br-int
+#                  16 Nov 2015 - Put mirror name in all error messages
 #
 
 function valid_ip4
@@ -147,7 +148,7 @@ $echo $sudo ovs-vsctl --columns=ports list bridge
 brports=`$sudo ovs-vsctl --columns=ports list bridge 2>/dev/null | sed 's/.*://' | tr -d '[] ' | tr , '\012'`
 if [ $? -ne 0 ]
 then
-	echo "tegu_add_mirror: cannot list ports on openvswitch." >&2
+	echo "tegu_add_mirror: $mirrorname: cannot list ports on openvswitch." >&2
 	exit 2
 fi
 
@@ -163,7 +164,7 @@ do
 			realports="$realports,$uuid"
 			bridgename=$(findbridge $uuid)
 		else
-			echo "tegu_add_mirror: there is no port with UUID=$p on this machine." >&2
+			echo "tegu_add_mirror: $mirrorname: there is no port with UUID=$p on this machine." >&2
 			exit 2
 		fi
 		;;
@@ -176,13 +177,13 @@ do
 			realports="$realports,$uuid"
 			bridgename=$(findbridge $uuid)
 		else
-			echo "tegu_add_mirror: there is no port with MAC=$p on this machine." >&2
+			echo "tegu_add_mirror: $mirrorname: there is no port with MAC=$p on this machine." >&2
 			exit 2
 		fi
 		;;
 
 	*)
-		echo "tegu_add_mirror: port $p is invalid (must be a UUID or a MAC)." >&2
+		echo "tegu_add_mirror: $mirrorname: port $p is invalid (must be a UUID or a MAC)." >&2
 		exit 2
 		;;
 	esac
@@ -202,7 +203,7 @@ vlan:[0-9]+)
 		outputtype=gre
 		remoteip=$output
 	else
-		echo "tegu_add_mirror: $output is not a valid IPv4 address." >&2
+		echo "tegu_add_mirror: $mirrorname: $output is not a valid IPv4 address." >&2
 		exit 2
 	fi
 	;;
@@ -213,7 +214,7 @@ vlan:[0-9]+)
 	then
 		outputtype=port
 	else
-		echo "tegu_add_mirror: there is no port with UUID=$output on this machine." >&2
+		echo "tegu_add_mirror: $mirrorname: there is no port with UUID=$output on this machine." >&2
 		exit 2
 	fi
 	;;
@@ -229,7 +230,7 @@ vlan:[0-9]+)
 			outputtype=port
 			output="$uuid"
 		else
-			echo "tegu_add_mirror: there is no port with MAC=$output on this machine." >&2
+			echo "tegu_add_mirror: $mirrorname: there is no port with MAC=$output on this machine." >&2
 			exit 2
 		fi
 	else
@@ -238,14 +239,14 @@ vlan:[0-9]+)
 			outputtype=gre
 			remoteip=$output
 		else
-			echo "tegu_add_mirror: $output is not a valid IPv6 address." >&2
+			echo "tegu_add_mirror: $mirrorname: $output is not a valid IPv6 address." >&2
 			exit 2
 		fi
 	fi
 	;;
 
 *)
-	echo "tegu_add_mirror: $output is not a valid output destination." >&2
+	echo "tegu_add_mirror: $mirrorname: $output is not a valid output destination." >&2
 	exit 2
 	;;
 esac
@@ -255,7 +256,7 @@ for v in `echo $vlan | tr , ' '`
 do
 	if [ "$v" -lt 0 -o "$v" -gt 4095 ]
 	then
-		echo "tegu_add_mirror: vlan $v is invalid (must be >= 0 and <= 4095)." >&2
+		echo "tegu_add_mirror: $mirrorname: vlan $v is invalid (must be >= 0 and <= 4095)." >&2
 		exit 2
 	fi
 done
