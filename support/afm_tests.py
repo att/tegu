@@ -361,7 +361,7 @@ interactive = False                     # -i sets to show countdown during pause
 verify_cmd = "/tmp/verify_bw_fmods.ksh"
 tegu_req = "/usr/bin/tegu_req"          # default tegu_req command (use -r to override for new/old version)
 
-while argi < argc and sys.argv[argi][0] == "-":
+while argi < argc and len( sys.argv[argi] ) > 0 and sys.argv[argi][0] == "-":
     if sys.argv[argi] == "-h":
         argi += 1
         tegu_host = "-h " + sys.argv[argi]

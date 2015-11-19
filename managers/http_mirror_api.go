@@ -41,6 +41,7 @@
 				22 Jun 2015 - write error messages in JSON, to play nice with tegu_req
 				29 Jun 2015 - Fixed fallout from config section name change.
 				18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
+				16 Nov 2015 - Add tenant checks, HTTP logging, error reporting
 */
 
 package managers
@@ -233,6 +234,11 @@ func convertToJSON(mirror *gizmos.Pledge_mirror, scheme string, host string) (st
 	if vlan != "" {
 		bs.WriteString(fmt.Sprintf("  \"vlan\": \"%s\",\n", vlan))
 	}
+
+	stdout, stderr := mirror.Get_Output()
+	appendList(bs, stdout, "standard_output")
+	appendList(bs, stderr, "standard_error")
+
 	// Other, informational (non-API) fields
 	bs.WriteString(fmt.Sprintf("  \"physical_host\": \"%s\",\n", *mirror.Get_qid()))
 	bs.WriteString(fmt.Sprintf("  \"pushed\": %t,\n",   mirror.Is_pushed()))
@@ -243,6 +249,17 @@ func convertToJSON(mirror *gizmos.Pledge_mirror, scheme string, host string) (st
 	bs.WriteString(fmt.Sprintf("  \"url\": \"%s://%s/tegu/mirrors/%s/\"\n", scheme, host, *mirror.Get_id()))
 	bs.WriteString("}\n")
 	return bs.String()
+}
+func appendList(bs *bytes.Buffer, list []string, label string ) {
+	if len(list) > 0 {
+		bs.WriteString(fmt.Sprintf("  \"%s\": [", label))
+		pfx := "\n"
+		for _, v := range list {
+			bs.WriteString(fmt.Sprintf("%s    \"%s\"", pfx, v))
+			pfx = ",\n"
+		}
+		bs.WriteString("\n  ],\n")
+	}
 }
 
 type MirrorInfo struct {
@@ -256,14 +273,14 @@ type MirrorInfo struct {
  * Validates the array of ports passed in.  Returns an array of MirrorInfo, one
  * per physical host, with a mirror name assigned, and a list of ports on that host.
  */
-func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, err error) {
+func validatePorts(ports []string, name string, tenant_id *string) (plist *map[string]MirrorInfo, err error) {
 	valid := false
 	namemap := make( map[string]MirrorInfo )
 	plist = &namemap
 	ix := 0
 	badports := *new( []string )
 	for _, p := range ports {
-		vm, err := validatePort(&p)		// vm is a Net_vm
+		vm, err := validatePort(&p, tenant_id)		// vm is a Net_vm
 		if err == nil {
 			if vm.phost != nil {
 				// get info for port set physhost
@@ -322,7 +339,7 @@ func validatePorts(ports []string, name string) (plist *map[string]MirrorInfo, e
 /*
  * Validate a port.
  */
-func validatePort(port *string) (vm *Net_vm, err error) {
+func validatePort(port *string, tenant_id *string) (vm *Net_vm, err error) {
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close ( my_ch )
 
@@ -349,11 +366,12 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 	// Handle neutron port UUID
 	if gizmos.IsUUID(*port) {
 		// Verify port UUID - note: this goes to the openstack interface manager, since the network manager
-		// does not sem to keep track of port uuids
-		uuid := *port
+		// does not seem to keep track of port UUIDs
+		uuid := *port + "," + *tenant_id
 		req := ipc.Mk_chmsg( )
 		req.Send_req( osif_ch, my_ch, REQ_GET_PHOST_FROM_PORTUUID, &uuid, nil )	// request UUID -> phost translation
 		req = <- my_ch
+		uuid = *port
 		if req.Response_data == nil {
 			err = fmt.Errorf("Cannot find Port UUID: " + uuid + ", " + req.State.Error())
 		} else {
@@ -363,7 +381,7 @@ func validatePort(port *string) (vm *Net_vm, err error) {
 		return
 	}
 
-	// handle project/host form
+	// Handle project/host form
 	req := ipc.Mk_chmsg( )
 	req.Send_req( osif_ch, my_ch, REQ_GET_HOSTINFO, port, nil )				// request data
 	req = <- my_ch
@@ -414,7 +432,7 @@ func validateAllowedOutputIP(port *string) (err error) {
 	return
 }
 
-func validateOutputPort(port *string) (newport *string, err error) {
+func validateOutputPort(port *string, tenant_id *string) (newport *string, err error) {
 	if port == nil {
 		err = fmt.Errorf("no output port specified.")
 		return
@@ -453,7 +471,7 @@ func validateOutputPort(port *string) (newport *string, err error) {
 		return
 	}
 
-	vm, err := validatePort(port)		// must capture the translation to mac
+	vm, err := validatePort(port, tenant_id)		// must capture the translation to mac
 	if err == nil {
 		if vm.mac != nil {
 			newport = vm.mac
@@ -468,10 +486,10 @@ func validateOutputPort(port *string) (newport *string, err error) {
 /*
  * Handle a PUT request (not supported currently).
  */
-func mirror_put( out http.ResponseWriter, data []byte ) (code int, msg string) {
+func mirror_put( out http.ResponseWriter ) (code int, msg string) {
+	code = http.StatusMethodNotAllowed
 	msg = "PUT /tegu/mirrors/ requests are unsupported"
 	http_sheep.Baa( 1, msg )
-	code = http.StatusMethodNotAllowed
 	return
 }
 
@@ -497,7 +515,7 @@ func mirror_put( out http.ResponseWriter, data []byte ) (code int, msg string) {
  *		  ....
  *		]
  */
-func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code int, msg string) {
+func mirror_post( in *http.Request, out http.ResponseWriter, projid string, data []byte ) (code int, msg string) {
 	http_sheep.Baa( 5, "Request data: " + string(data))
 	code = http.StatusOK
 
@@ -547,7 +565,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 	}
 
 	// 4. Validate input ports, and assign into groups
-	plist, err := validatePorts(req.Port, req.Name)
+	plist, err := validatePorts(req.Port, req.Name, &projid)
 	if err != nil {
 		// no valid ports, give up
 		code = http.StatusBadRequest
@@ -556,7 +574,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 	}
 
 	// 5. Validate output port
-	newport, err := validateOutputPort(&req.Output)
+	newport, err := validateOutputPort(&req.Output, &projid)
 	if err != nil {
 		code = http.StatusBadRequest
 		msg = err.Error()
@@ -577,7 +595,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 			// Make a pledge
 			phost := key
 			nam   := mirror.name
-			res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &nam, &req.Cookie, &phost, &req.Vlan )
+			res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &nam, &req.Cookie, &phost, &req.Vlan, &projid )
 			if res != nil {
 				req := ipc.Mk_chmsg( )
 				my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
@@ -645,7 +663,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, data []byte ) (code
 /*
  * Handle a DELETE /tegu/mirrors/<name>/[?cookie=<cookie>] request.
  */
-func mirror_delete( in *http.Request, out http.ResponseWriter, data []byte ) (code int, msg string) {
+func mirror_delete( in *http.Request, out http.ResponseWriter, projid string ) (code int, msg string) {
 	name, cookie := getNameAndCookie(in)
 	mirror := lookupMirror(name, cookie)
 	if mirror == nil {
@@ -656,6 +674,11 @@ func mirror_delete( in *http.Request, out http.ResponseWriter, data []byte ) (co
 	if ! mirror.Is_valid_cookie(&cookie) {
 		code = http.StatusUnauthorized
 		msg = "Unauthorized."
+		return
+	}
+	if *mirror.Get_Tenant() != projid {
+		code = http.StatusUnauthorized
+		msg = "Unauthorized: you don't own this mirror."
 		return
 	}
 
@@ -680,7 +703,7 @@ func mirror_delete( in *http.Request, out http.ResponseWriter, data []byte ) (co
  * Handle a GET /tegu/mirrors/ or GET /tegu/mirrors/<name>/[?cookie=<cookie>] request.
  * The first form lists all mirrors, the second form list details of one mirror.
  */
-func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code int, msg string) {
+func mirror_get( in *http.Request, out http.ResponseWriter, projid string ) (code int, msg string) {
 	name, cookie := getNameAndCookie(in)
 	scheme := "http"
 	if (isSSL) {
@@ -693,8 +716,11 @@ func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code 
 		bs := bytes.NewBufferString("[")
 		for _, s := range list {
 			if s != "" {
-				bs.WriteString(fmt.Sprintf(`%s { "name": "%s", "url": "%s://%s/tegu/mirrors/%s/" }`, sep, s, scheme, in.Host, s))
-				sep = ",\n"
+				mirror := lookupMirror(s, cookie)
+				if mirror != nil && *mirror.Get_Tenant() == projid{
+					bs.WriteString(fmt.Sprintf(`%s { "name": "%s", "url": "%s://%s/tegu/mirrors/%s/" }`, sep, s, scheme, in.Host, s))
+					sep = ",\n"
+				}
 			}
 		}
 		bs.WriteString("\n]\n")
@@ -712,6 +738,11 @@ func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code 
 			msg = "Unauthorized: cookie not valid."
 			return
 		}
+		if *mirror.Get_Tenant() != projid {
+			code = http.StatusUnauthorized
+			msg = "Unauthorized: you don't own this mirror."
+			return
+		}
 		code = http.StatusOK
 		msg = convertToJSON(mirror, scheme, in.Host)
 	}
@@ -724,6 +755,8 @@ func mirror_get( in *http.Request, out http.ResponseWriter, data []byte ) (code 
 func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 	code := http.StatusOK	// response code to return
 	msg  := ""				// data to go in response (assumed to be JSON, if code = StatusOK or StatusCreated)
+	userid := "-"
+	projid := ""
 
 	authorised := false 				// all mirror commands must have an authentication token
 	if accept_requests  {
@@ -732,8 +765,15 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 
 		if in.Header != nil && in.Header["X-Auth-Tegu"] != nil {
 			auth := in.Header["X-Auth-Tegu"][0]
-			if token_has_osroles( &auth, *mirror_roles ) {	// if token has one of the roles listed in config file
+			uproj := token_has_osroles_with_UserProject( &auth, *mirror_roles )
+			if uproj != "" {	// if token has one of the roles listed in config file
+				parts := strings.Split( uproj, "," )
+				userid = parts[0]
+				projid = parts[1]
 				authorised = true
+			} else {
+				code = http.StatusUnauthorized
+				msg = "A valid token with a tegu_admin role is required to execute group commands"
 			}
 		}
 	} else {
@@ -751,16 +791,16 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 			http_sheep.Baa( 1, "Request from %s: %s %s", in.RemoteAddr, in.Method, in.RequestURI )
 			switch in.Method {
 				case "PUT":
-					code, msg = mirror_put( out, data )
+					code, msg = mirror_put( out )
 
 				case "POST":
-					code, msg = mirror_post( in, out, data )
+					code, msg = mirror_post( in, out, projid, data )
 
 				case "DELETE":
-					code, msg = mirror_delete( in, out, data )
+					code, msg = mirror_delete( in, out, projid )
 
 				case "GET":
-					code, msg = mirror_get( in, out, data )
+					code, msg = mirror_get( in, out, projid )
 
 				default:
 					http_sheep.Baa( 1, "mirror_handler called for unrecognised method: %s", in.Method )
@@ -779,4 +819,5 @@ func mirror_handler( out http.ResponseWriter, in *http.Request ) {
 	}
 	out.WriteHeader(code)
 	out.Write([]byte(msg))
+	httplogger.LogRequest(in, userid, code, len(msg))
 }
