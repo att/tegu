@@ -212,7 +212,6 @@ func validate_ep_proj( ep_uuid *string, proj *string ) ( bool ) {
 func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) {
 	
 	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
-	var ht *string
 
 	defer close( my_ch )									// close it on return
 	h2_isreal := true										// set to false if !// found so we don't validate it
@@ -755,8 +754,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 				case "listhosts":											// list known host information
 					if validate_auth( &auth_data, is_token, sysproc_roles ) {
-						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 						/* ----
+						tmap := gizmos.Mixtoks2map( tokens[1:], "" )			// look for project=pname[,pname] on the request
 							deprecated with endpoint
 						if tmap["project"] != nil {
 							http_sheep.Baa( 1, "listhosts is forcing update of all VMs for the project: %s", *tmap["project"] )
