@@ -119,6 +119,7 @@ import (
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/chkpt"
 	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/datacache"
 	"github.com/att/tegu/gizmos"
 )
 
@@ -377,8 +378,10 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 		return false, last
 	}
 
+	dc := datacache.Mk_dcache( nil, nil )		// link to the datacache
 	for nm, v := range i.ulcap_cache {							// write out user link capacity limits that have been set
 		fmt.Fprintf( i.chkpt, "ucap: %s %d\n", nm, v ) 			// we'll check the overall error state on close
+		dc.Set_ulcap( nm, v )
 	}
 
 	for key, p := range i.cache {
@@ -428,6 +431,8 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	}
 	defer f.Close( )
 
+	i.build_ulcaps()					// build these from the datacache and pass to network manager
+
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
 		rec, err = br.ReadString( '\n' )
@@ -436,10 +441,13 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 
 			switch rec[0:5] {
 				case "ucap:":
+					rm_sheep.Baa( 1, "ignoring ulcap from chkpt file" )
+					/*
 					toks := strings.Split( rec, " " )
 					if len( toks ) == 3 {
 						i.add_ulcap( &toks[1], &toks[2] )
 					}
+					*/
 
 				default:
 					p, err = gizmos.Json2pledge( &rec )			// convert any type of json pledge to Pledge
@@ -564,6 +572,28 @@ func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 		} else {
 			rm_sheep.Baa( 1, "user link capacity not set %d is out of range (1-100)", val )
 		}
+	}
+}
+
+/*
+	Fetch the user cap map from the datacache and pass it to network manager so it can 
+	build fences. 
+*/
+func (inv *Inventory) build_ulcaps( ) {
+
+	dc := datacache.Mk_dcache( nil, nil )
+	ulm, _ := dc.Map_ulcaps() 				// pull all from the datacache
+
+	for k, v := range ulm {
+		rm_sheep.Baa( 2, "sending user cap from datacache: %s %d", k, v )
+		inv.ulcap_cache[k] = v
+
+		pdata := make( []*string, 2 )		// parameters for message to network
+		s := fmt.Sprintf( "%d", v )
+		pdata[0] = &k
+		pdata[1] = &s
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the network environment
 	}
 }
 

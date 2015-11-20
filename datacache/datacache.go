@@ -54,19 +54,6 @@ import (
 	"github.com/gocql/gocql"			// cassandra db interface (requires go 1.4 or later)
 )
 
-const (
-	DCR_NOOP	int = 0						// request values
-	DCR_GET_EP	int = iota					// find an endpoint based on uuid
-	DCR_MAP_EPS								// return a map of all endpoints
-	DCR_SET_EP								// add an endpoint
-	DCR_GET_ULCAP							// get a ulcap for one project
-	DCR_MAP_ULCAPS							// map user limit capacties
-	DCR_SET_ULCAP							// write a project's new cap
-	DCR_STATE								// returns true if connected
-	DCR_CONN
-)
-
-
 /*
 	Our needed configuration information. Some from the tegu config and other
 	stuff gathered along the way.
@@ -161,7 +148,7 @@ func ( dc *Dcache ) set_keyspace( ) ( err error ) {
 
 	dc.cluster.Keyspace = dc.tcn								// back to our space now
 
-	return err
+	return nil
 }
 
 /*
@@ -173,7 +160,7 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 
 
 	// TODO: add the rest of tegu tables
-	return err
+	return nil
 }
 
 func ( dc *Dcache ) connect( ) (state bool, err error) {
@@ -221,6 +208,7 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 
 	err = dc.set_keyspace()									// must ensure that our keyspace exists
 	if err != nil {
+		dc.sheep.Baa( 0, "CRI: unable to set keyspace: %s", err )
 		return false, err
 	}
 
@@ -282,6 +270,31 @@ func ( dc *Dcache ) Get_ulcap( project string ) ( pctg int, err error ) {
 	}
 
 	return pctg, err
+}
+
+/*
+	Returns a map of all user limit capacities keyed by project id.
+*/
+func ( dc *Dcache ) Map_ulcaps( ) ( m map[string]int, err error ) {
+	if dc == nil {
+		return nil, fmt.Errorf( "datacache struct was nil" )
+	}
+
+	var	(
+		proj string
+		pctg int
+	)
+
+	m = make( map[string]int, 64 )			// 64 is a hint not a hard limit
+
+	dc.sheep.Baa( 1, "building map...." )
+    iter := dc.sess.Query( `select project, pctg  from ulcaps` ).Consistency(gocql.One).Iter()
+    for iter.Scan( &proj, &pctg )  {
+		m[proj] = pctg
+		dc.sheep.Baa( 2, "dug ulcap from datacache: %s = %d", proj, pctg )
+    }
+
+	return m, nil
 }
 
 /*
