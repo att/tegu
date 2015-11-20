@@ -70,6 +70,7 @@ package managers
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
@@ -77,6 +78,7 @@ import (
 	"github.com/att/gopkgs/http_logger"
 	"github.com/att/gopkgs/ipc"
 
+	"github.com/att/tegu/datacache"
 	"github.com/att/tegu/gizmos"
 )
 
@@ -358,12 +360,19 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 		cfg_data = nil
 	}
 
+	dc := datacache.Mk_dcache( cfg_data, tegu_sheep )				// set up the datacache 
+
 	tegu_sheep.Add_child( gizmos.Get_sheep( ) )						// since we don't directly initialise the gizmo environment we ask for its sheep
 	if *log_dir  != "stderr" {										// if overriden in config
 		lfn := tegu_sheep.Mk_logfile_nm( log_dir, 86400 )
 		tegu_sheep.Baa( 1, "switching to log file: %s", *lfn )
 		tegu_sheep.Append_target( *lfn, false )						// switch bleaters to the log file rather than stderr
 		go tegu_sheep.Sheep_herder( log_dir, 86400 )				// start the function that will roll the log now and again
+	}
+
+	for ! dc.Is_connected( ) {
+		tegu_sheep.Baa( 1, "blocked: not connected to data cache" )
+		time.Sleep( 10 * time.Second )
 	}
 
 	return
