@@ -42,6 +42,7 @@ package datacache
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,6 +125,79 @@ func Mk_dcache( cfg_data map[string]map[string]*string, master_sheep *bleater.Bl
 }
 
 
+// ---------------------- utility  ------------------------------------------------------------------------------
+/*
+	Takes a map and generates a string that is properly quoted for a cassandra map table entry.
+	This function does _NOT_ add the leading trailing braces as the caller may need to build several
+	strings for one submission.  
+*/
+func smap2string( m map[string]string ) (string) {
+	s := ""
+	sep := ""
+	for k, v := range m {
+		s += fmt.Sprintf( `%s '%s':'%s'`, sep, k, v )
+		sep = ","
+	}
+
+	return s
+}
+
+/*
+	Takes a map of string (key) to string pointers and gernerates a cassandra map table entry.
+	This function does _NOT_ add the leading trailing braces as the caller may need to build several
+	strings for one submission.  
+*/
+func spmap2string( m map[string]*string ) (string) {
+	s := ""
+	sep := ""
+	for k, v := range m {
+		s += fmt.Sprintf( `%s '%s':'%s'`, sep, k, *v )
+		sep = ","
+	}
+
+	return s
+}
+
+/*
+	Takes a map of string (key) to interface and builds a cassandra map table entry.
+	This function does _NOT_ add the leading trailing braces as the caller may need to build several
+	strings for one submission.  
+*/
+func imap2string( imap map[string]interface{} ) ( string ) {
+	s := ""
+	sep := ""
+	vs := ""
+	for k, v := range imap {
+		switch sv := v.(type) {					// convert to specific value type and process
+			case int, int64:
+				vs = fmt.Sprintf( "%d", sv )
+
+			case float64:
+				vs = fmt.Sprintf( "%f", sv )
+
+			case string:
+				vs = sv
+
+			case *string:
+				 vs = *sv
+
+			case bool:
+				vs = fmt.Sprintf( "%v", sv )
+
+			case map[string]string:
+				vs = smap2string( sv )
+
+			case map[string]*string:
+				vs = spmap2string( sv )
+		}
+
+		s += fmt.Sprintf( `%s '%s':'%s'`, sep, k, vs )
+		sep = ","
+	}
+
+	return s
+}
+
 // ---------------------- private  ------------------------------------------------------------------------------
 
 
@@ -148,7 +222,16 @@ func ( dc *Dcache ) set_keyspace( ) ( err error ) {
 
 	dc.cluster.Keyspace = dc.tcn								// back to our space now
 
-	return nil
+	if err != nil {
+		if strings.Index(  err.Error(), "Cannot add existing keyspace" ) == 0 {
+			return nil 
+		}
+		dc.sheep.Baa( 1, "keyspace create returned: %s", err )
+	} else {
+		dc.sheep.Baa( 2, "keyspace exists in datacache" )
+	}
+
+	return err
 }
 
 /*
@@ -156,8 +239,24 @@ func ( dc *Dcache ) set_keyspace( ) ( err error ) {
 	but maybe not. 
 */
 func ( dc *Dcache ) ensure_tables() ( err error ) {
+	
 	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE ulcaps ( project text PRIMARY KEY, pctg int)` ) ).Exec()
+	if err != nil {
+		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
+			dc.sheep.Baa( 1, "table create failed: %s", err )
+			return err
+		}
+	} 
+	dc.sheep.Baa( 1, "ulcap table exists" )
 
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE endpts ( epid text PRIMARY KEY, epdata map<text,text> )` ) ).Exec()
+	if err != nil {
+		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
+			dc.sheep.Baa( 1, "table create failed: %s", err )
+			return err
+		}
+	} 
+	dc.sheep.Baa( 1, "endpts table exists" )
 
 	// TODO: add the rest of tegu tables
 	return nil
@@ -230,6 +329,7 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 }
 
 // ---------------------- public ------------------------------------------------------------------------------
+// these are ogranised by thing (endpoint, ulcap, etc) rather than alpha.
 
 /*
 	Returns the current connectivity state and if not connected kicks our listener to try another
@@ -287,7 +387,6 @@ func ( dc *Dcache ) Map_ulcaps( ) ( m map[string]int, err error ) {
 
 	m = make( map[string]int, 64 )			// 64 is a hint not a hard limit
 
-	dc.sheep.Baa( 1, "building map...." )
     iter := dc.sess.Query( `select project, pctg  from ulcaps` ).Consistency(gocql.One).Iter()
     for iter.Scan( &proj, &pctg )  {
 		m[proj] = pctg
@@ -315,17 +414,125 @@ func ( dc *Dcache ) Set_ulcap( project string, val int ) ( err error ) {
 
 	if val > 100 {
 		val = 100
+	} 
+
+	if val >= 0 {
+    	err = dc.sess.Query( `INSERT INTO ulcaps (project, pctg) VALUES (?, ?)`, project, val ).Exec()
+    	if err != nil {
+			dc.sheep.Baa( 2, "unable to set ulcap for project: %s", project )
+    	}
 	} else {
-		if val < 0 {
-			val = 0
+    	err = dc.sess.Query( `DELETE FROM  ulcaps WHERE project = ?`, project ).Exec()
+    	if err != nil {
+			dc.sheep.Baa( 2, "unable to delete user cap for project: %s: %s", project, err )
+			return err
+    	} else {
+			dc.sheep.Baa( 1, "user cap for project was deleted: %s", project )
 		}
 	}
-
-    err = dc.sess.Query( `INSERT INTO ulcaps (project, pctg) VALUES (?, ?)`, project, val ).Exec()
-    if err != nil {
-		dc.sheep.Baa( 2, "unable to set ulcap for project: %s", project )
-    }
 
 	return  nil
 }
 
+// -------------------------------------------------------------------------------------------------------------------------
+
+/*
+	Saves the endpoint information into the datacache.
+	epm is assumed to be a copy of the map which includes port and router info as strings.
+*/
+func ( dc *Dcache ) Set_endpt( epid string, epm map[string]string ) ( err error ) {
+	if dc == nil {
+		return fmt.Errorf( "no struct passed to set_endpt" )
+	}
+
+	if epid ==""  {
+		return fmt.Errorf( "invalid endpoint id" )
+	}
+
+	if !dc.connected {
+		if  ok, err := dc.connect(); ! ok {
+			return err
+		}
+	}
+
+	if epm != nil {
+		dc.sheep.Baa( 1, "sending to datacache for endpoint: %s", epid )
+    	err = dc.sess.Query( `INSERT INTO endpts (epid, epdata) VALUES (?, ?)`, epid, epm ).Exec()
+    	if err != nil {
+			dc.sheep.Baa( 1, "unable to set endpoint: key=%s: %s", epid, err )
+			return err
+    	}
+	} else {
+    	err = dc.sess.Query( `DELETE FROM endpts WHERE epid = ?`, epid ).Exec()
+		if err != nil {
+			dc.sheep.Baa( 1, "unable to delete endpoint: key=%s: %s", epid, err )
+			return err
+		} else {
+			dc.sheep.Baa( 1, "endpoint deleted from datacache: %s", epid )
+		}
+	}
+
+	return nil
+}
+
+/*
+	Returns a list of endpoints that are currently in the datacache.
+*/
+func ( dc *Dcache ) Get_endpt_list( ) ( eplist []string, err error ) {
+	var (
+		epid	string
+	)
+
+	if dc == nil {
+		return nil, fmt.Errorf( "no struct passed to get_endpt_list" )
+	}
+
+	if !dc.connected {
+		if  ok, err := dc.connect(); ! ok {
+			return nil, err
+		}
+	}
+
+	size := 64
+	eplist = make( []string, 0, size )			// initial cap set at size, it will grow if needed
+    iter := dc.sess.Query( `select  epid  from endpts` ).Consistency(gocql.One).Iter()
+    for iter.Scan( &epid )  {
+		eplist = append( eplist, epid )			// this will grow if we reach capacity so we must reassign
+    }
+
+	dc.sheep.Baa( 2, "%d endpoints exist in the datacache", len( eplist ) )
+	return eplist[0:len( eplist )], nil
+}
+
+/*
+	Fetch a single endpoint from the datacache. Returns a map.
+*/
+func ( dc *Dcache ) Get_endpt( epid string ) ( epm map[string]string, err error ) {
+	var (
+		epdata map[string]string
+	)
+
+	if dc == nil {
+		return nil, fmt.Errorf( "no struct passed to get_endpt" )
+	}
+
+	if !dc.connected {
+		if  ok, err := dc.connect(); ! ok {
+			return nil, err
+		}
+	}
+
+	if epid == "" {
+		return nil, fmt.Errorf( "invalid epid" )
+	}
+
+	err = dc.sess.Query( `SELECT epdata FROM endpts WHERE epid = ? LIMIT 1`, epid ).Consistency(gocql.One).Scan( &epdata )
+    if err != nil {
+		return nil, err
+	}
+
+	dc.sheep.Baa( 2, "pulled endpt from datacache: %d fields", len( epdata ) )
+
+		
+	return epdata, nil
+}

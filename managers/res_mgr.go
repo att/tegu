@@ -431,8 +431,6 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 	}
 	defer f.Close( )
 
-	i.build_ulcaps()					// build these from the datacache and pass to network manager
-
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
 		rec, err = br.ReadString( '\n' )
@@ -937,7 +935,7 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is insanely low (%ds) and was changed to 1800s", rr_rate )
 					rr_rate = 1800
 				} else {
-					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is too low: %ds", rr_rate )
+					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is too low: %ds; consider increasing to 900 or more", rr_rate )
 				}
 			}
 		}
@@ -947,7 +945,8 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 	res_refresh = time.Now().Unix() + int64( rr_rate )				// set first refresh in an hour (ignored if hto_limit not set
 	inv = Mk_inventory( )
-	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )
+	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )						// make a checkpoint object (deprecated)
+	inv.build_ulcaps()												// fetch ulcaps from the datacache and pass to network manager
 
 	last_qcheck = time.Now().Unix()
 	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )			// push reservations to agent just before they go live

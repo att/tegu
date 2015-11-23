@@ -34,6 +34,8 @@ package gizmos
 
 import (
 	"fmt"
+	"strings"
+	"github.com/att/gopkgs/clike"
 )
 
 
@@ -95,6 +97,44 @@ func Mk_endpt( uuid string, phost string, project string, ip interface{}, mac st
 }
 
 /*
+	Builds an endpoint from the given map.  If "uuid" isn't in the map, then a nil pointer 
+	is returned. Probably used to rebuild the endpoint after sucking the stuff out of the 
+	datacache. The one thing that cannot come from the map is the connection point. The 
+	caller will have to make a separate call to supply that value as it's not in gizmo's 
+	scope.
+*/
+func Endpt_from_map( epm map[string]string ) ( ep *Endpt ) {
+	if epm == nil || epm["uuid"] == "" {
+		return nil
+	}
+
+	ep = &Endpt {}
+	ep.ip_addrs = make( []*string, 0, 10 )		// initially room for 10; add function extends if needed
+	ep.meta = make( map[string]string )
+
+	for k, v := range epm {
+		ep.meta[k] = v
+	}
+
+	if s := ep.meta["ip_addrs"]; s != "" {
+		tokens := strings.Split(  s, " " )
+		for i := range tokens {
+			ep.Add_addr( tokens[i] )
+		}		
+	}
+	
+	if s := ep.meta["port"]; s != "" {
+		ep.port = clike.Atoi( s )
+	}
+
+	if s := ep.meta["router"]; s != "" {
+		ep.router = s == "true"
+	}
+
+	return ep
+}
+
+/*
 	Destruction.
 */
 func ( ep *Endpt ) Nuke() {
@@ -105,21 +145,10 @@ func ( ep *Endpt ) Nuke() {
 }
 
 /*
-	Adds an address to the list, growing the slice if needed.
+	Adds an address to the list.
 */
 func ( ep *Endpt ) Add_addr( ip string ) {
-	/*
-	n := len( ep.ip_addrs )
-	if n == cap( ep.ip_addrs ) {
-		ns := make( []*string, n, cap( ep.ip_addrs ) * 2 )
-		copy( ns[:], ep.ip_addrs )
-		ep.ip_addrs = ns
-	}
-
-	ep.ip_addrs = ep.ip_addrs[0:n+1]
-	ep.ip_addrs[n] = &ip
-	*/
-	ep.ip_addrs = append( ep.ip_addrs, &ip )
+	ep.ip_addrs = append( ep.ip_addrs, &ip )			// this will grow if we reach capacity
 }
 
 /*
@@ -154,7 +183,8 @@ func ( ep *Endpt ) Get_meta_value( key string ) ( *string ) {
 }
 
 /*
-	Returns a copy of the meta map; adds port and router as 'strings'.
+	Returns a copy of the meta map; adds port and router as 'strings' and 
+	the name/id of the switch.
 */
 func ( ep *Endpt ) Get_meta_copy( ) ( map[string]string ) {
 	if ep == nil {
@@ -166,8 +196,23 @@ func ( ep *Endpt ) Get_meta_copy( ) ( map[string]string ) {
 		meta_cpy[k] = v
 	}
 
-	meta_cpy["port"] = string( ep.port )
+	meta_cpy["port"] = fmt.Sprintf( "%d",  ep.port )
+
 	meta_cpy["router"] = fmt.Sprintf( "%v", ep.router )
+	if ep.conn_pt != nil {
+		meta_cpy["conn_pt_id"] = *(ep.conn_pt.Get_id())
+	}
+
+	if len( ep.ip_addrs ) > 0 {
+		s := ""
+		sep := ""
+		for i := range ep.ip_addrs {
+			s += fmt.Sprintf( "%s%s", sep, *ep.ip_addrs[i] )
+			sep = " "
+		}
+
+		meta_cpy["ip"] = s
+	}
 
 	return meta_cpy
 }

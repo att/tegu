@@ -98,6 +98,7 @@ import (
 	"github.com/att/gopkgs/ipc/msgrtr"
 
 	"github.com/att/tegu/gizmos"
+	"github.com/att/tegu/datacache"
 )
 
 // -- configuration management -----------------------------------------------------------
@@ -1245,6 +1246,51 @@ func (net *Network) xfer_maps( old_net *Network ) {
 */
 }
 
+/*
+	Loads any endpoints that were tucked away in the data cache. Returns a map that can be given to 
+	the build process. If a non-nill map is passed in, then the entries are added to that map (allows
+	the map we get from openstack to be added to before we build the network).
+*/
+func load_endpts( umap map[string]*gizmos.Endpt ) ( m map[string]*gizmos.Endpt, err error ) {
+	var endpts map[string]*gizmos.Endpt 
+
+	dc := datacache.Mk_dcache( nil, nil )
+	if dc == nil {
+		return nil, fmt.Errorf( "unable to link to datacache" )
+	}
+
+	epl, err := dc.Get_endpt_list()		// get list of endpoint ids
+	if epl == nil {
+		if err != nil {
+			net_sheep.Baa( 1, "error fetching endpoint list from datacache: %s", err )
+		} else {
+			net_sheep.Baa( 1, "no endpoints listed in datacache" );
+		}
+
+		return nil, err
+	}
+
+	if umap == nil {						// no map, create one, otherwise just add to it
+		endpts = make( map[string]*gizmos.Endpt, len( epl ) )
+	} else {
+		endpts = umap
+	}
+
+	net_sheep.Baa( 1, "building endpoints from %d listed in datacache", len( epl ) )
+	for i := range( epl ) {
+		epm, err := dc.Get_endpt( epl[i] )
+		if err == nil {
+			endpts[epl[i]] = gizmos.Endpt_from_map( epm )
+	net_sheep.Baa( 1, ">>>> adding endpoint from dc: %s",  endpts[epl[i]] )
+		} else {
+			net_sheep.Baa( 1, "unable to fetch endpoint from datacahce: %s: %s", epl[i], err )
+		}
+			
+	}
+
+	return endpts, nil
+}
+
 
 // --------- public -------------------------------------------------------------------------------------------
 
@@ -1321,7 +1367,8 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 		net_sheep.Baa( 1, "end point list received from osif with %d entries scheduling another request", len( eps_list ) )
 		req_ep_list( nch, false )										// rquest list response will come back and be processed in the loop below
 	} else {
-		net_sheep.Baa( 1, "end point list received from osif with %d entries (unblocking)", len( eps_list ) )
+		net_sheep.Baa( 1, "end point list received from osif with %d entries", len( eps_list ) )
+		eps_list, _ = load_endpts( eps_list )											// add anything from the datacahce to it
 	}
 
 	act_net = build( nil, eps_list, cfg, &empty_str )
@@ -1706,7 +1753,12 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 							net_sheep.Baa( 1, "no data on endpoint response" )
 						} else {
 							if m, ok := req.Response_data.( map[string]*gizmos.Endpt ); ok {		// pick up the map if it is the expected type
-								act_net, req_again = update_net( act_net, m, cfg, hlist )
+								if len( m ) > 0 {
+									load_endpts( m )												// add any from the cache
+									act_net, req_again = update_net( act_net, m, cfg, hlist )
+								} else {
+									req_again = false
+								}
 							} else {
 								net_sheep.Baa( 1, "response from ostack endpoint request was not expected map type" )
 							}

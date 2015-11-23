@@ -154,6 +154,7 @@ const (
 	REQ_GET_PHOST_FROM_PORTUUID // used by mirroring to find the phost that goes with a neutron UUID
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
 	REQ_GET_ENDPTS				// generate a map of endpoints for one or all projects keyed by endpoint uuid
+	REQ_DEL_ENDPT				// add/delete an endpoint
 	REQ_NEW_ENDPT
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 	REQ_HAS_ANY_ROLE2			// given token and role list return user,project if token lists any role presented
