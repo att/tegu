@@ -33,8 +33,8 @@
 #				to the tty device. The -j and -d options control the format of the output.
 #
 #				NOTE: this script was dumbed down to work with bash; it may still not
-#					function correctly with bash and before complaining just install ksh
-#					and use that.
+#				function correctly with bash; before complaining just install ksh
+#				and use that.
 #
 #	Date:		01 Jan 2014
 #	Author:		E. Scott Daniels
@@ -67,23 +67,24 @@
 #				30 Jun 2015 - Fixed a bunch of typos.
 #				01 Jul 2015 - Correct bug in mirror timewindow parsing.
 #				20 Jul 2015 - Corrected potential bug with v2/3 selection.
-#				22 Sep 2015 - Added support to suss out our URL from the keystaone catalogue 
+#				22 Sep 2015 - Added support to suss out our URL from the keystone catalogue
 #					and use that if it's there. Corrected dscp value check (was numeric).
 #					Added ability to use %p in endpoint name for project (pulls from OS_ var).
 #				28 Oct 2015 - X-Auth-Tegu token now has /project appended in order to make
-#					verification quicker. 
+#					verification quicker.
+#				24 Nov 2015 - Add options to add-mirror
 # ----------------------------------------------------------------------------------------
 
 function usage {
 	cat <<endKat
 
-	version 2.0/19225
-	usage: $argv0 [-c] [-d] [-f] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-R region] [-r rname] [-S service] [-s] [-t token|-T] command parms
+	version 2.0/1b245
+	usage: $argv0 [-c] [-d] [-f] [-h tegu-host[:port] [-j] [-K] [-k key=value] [-o options] [-R region] [-r rname] [-S service] [-s] [-t token|-T] command parms
 
 	  -c Do not attempt to find our URL from the keystone catalogue. (see -h)
 	  -d causes json output from tegu to be formatted in a dotted hierarch style
 	  -f force prompting for user and password if -T is used even if a user name or password is
-	     currrently set in the environment.
+	     currently set in the environment.
 	  -h is needed when tegu is running on a different host than is being used to run tegu_req
 	     and/or when tegu is listening on a port that isn't the default. Implies -c.
 	  -j causes raw json to be spilled to the standard out device
@@ -91,8 +92,9 @@ function usage {
 	     can be supplied when needed.
 	  -K Use keystone command line interface, rather than direct API, to generate a token
 	     (ignored unless -T is used)
+	  -o pass options to a subcommand
 	  -R name  Allows a region name to be supplied to override the OS_REGION environment variable.
-	     If OS_REGION is not defined, and this option is not given, the the first region in the 
+	     If OS_REGION is not defined, and this option is not given, then the first region in the
 	     list returned by Openstack will be used (specify the region if you must be sure!).
 	  -r allows a 'root' name to be supplied for the json output when humanised
 	  -S name  Overrides the QL_SERVICE name defined in the environment and uses name as
@@ -136,7 +138,7 @@ function usage {
 	  G/M/K suffixes (e.g. 10M,20M).
 
 	  The dscp value is one of three strings, (voice, data, control) with an optional
-	  global_ as a prefix.  This causes the reserved traffic to be marked with one 
+	  global_ as a prefix.  This causes the reserved traffic to be marked with one
 	  of the three ITONs values.  Adding global_ causes the marking to be left
 	  on the traffic as it passes out of the cloud environment.
 
@@ -151,7 +153,7 @@ function usage {
 	  For verbose, this controls the amount of information that is written to the log
 	  (stderr) by Tegu.  Values may range from 0 to 9. Supplying the subsystem causes
 	  the verbosity level to be applied just to the named subsystem.  Subsystems are:
-	  net, resmgr, fqmgr, http, agent, fqmgr, or tegu
+	  net, resmgr, fqmgr, http, agent, osif, lib, latency, ostack_json or tegu.
 
 	Admin Token
 	  The admin token can be supplied using the -t parameter and is required for all
@@ -180,7 +182,7 @@ function verbose
 	fi
 }
 
-# takes a string $3 and makes substitutions such that %t is replaced with $1 and %p is 
+# takes a string $3 and makes substitutions such that %t is replaced with $1 and %p is
 # replaced with $2
 function expand_epname
 {
@@ -264,7 +266,7 @@ function ensure_osvars
 # We assume that the service name is QL_SERVICE in the environment or netqos by
 # default.  We depend on rjprt as we use the dotted output format which makes
 # it fairly straight forward to parse.  Echo nothing from this function as the
-# url is written to stdout for the caller.  As a side effect of this funciton we
+# url is written to stdout for the caller.  As a side effect of this function we
 # do get the user's token
 function suss_url
 {
@@ -294,7 +296,7 @@ function suss_url
 				next;
 
 			idx = b[2]+0			# [len] will map to 0
-	
+
 			if( index( a[4], "type" ) > 0  ) {
 				cat_type[idx] = strip( $NF );
 			} else {
@@ -306,7 +308,7 @@ function suss_url
 						split( a[4], b, "[" );
 						if( b[2] != "len" ) {
 							ep_idx = b[2] + 0;
-		
+
 							if( index( a[5], url_type ) > 0  ) {
 								ep_url[idx,ep_idx] = strip( $NF );
 							} else {
@@ -481,6 +483,7 @@ region=${OS_REGION:=any}	# if not supplied, default to first region (any)
 bandwidth="tegu/bandwidth"		# http api collections
 steering="tegu/api"				# eventually this should become steering
 default="tegu/api"
+options=""
 
 while [[ $1 == -* ]]
 do
@@ -493,6 +496,7 @@ do
 		-j)		opts+=" -j";;
 		-k)		kv_pairs+="$2 "; shift;;
 		-K)		use_keystone=1;;
+		-o)		options=$2; shift;;
 		-R)		region=$2; shift;;
 		-r)		root="$2"; shift;;
 		-s)		proto="https://";;
@@ -653,7 +657,7 @@ case $1 in
 			case $5 in
 				voice|data|control) ;;			# valid
 				global_voice|global_data|global_control) ;;  # valid
-				
+
 				*)
 						echo "dscp value ($5) must be one of [global_]voice, [global_]data or [global_]control  [FAIL]" >&2
 						exit 1
@@ -752,6 +756,10 @@ case $1 in
 		if (( $# >= 5 ))
 		then
 			json="$json, \"vlan\": \"$5\""
+		fi
+		if [[ -n "$options" ]]
+		then
+			json="$json, \"options\": \"$options\""
 		fi
 		json="$json }"
 		rjprt $opts -m POST -D "$json" -t "$proto$host/tegu/mirrors/"
