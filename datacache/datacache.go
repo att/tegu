@@ -31,6 +31,11 @@
 					experiments with using json to insert things into cassandra have provend to 
 					be frustrating at best. Don't use json for insert/update.
 
+
+				The functions in this module provide the base interface to the datacache. Other
+				modules in the package prodvide the funcitons for specific data types (e.g.
+				endpoints and reservations).
+
 	Date:		19 November 2015
 	Author:		E. Scott Daniels
 
@@ -264,7 +269,7 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 
 		//chkpt = fmt.Sprintf( `{ 
 
-	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwres ( resid text PRIMARY KEY, project text, resdata map<text,text> )` ) ).Exec()
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwres ( resid text PRIMARY KEY, expiry int, project text, resdata map<text,text> )` ) ).Exec()
 	if err != nil {
 		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
 			dc.sheep.Baa( 1, "bwres table create failed: %s", err )
@@ -273,7 +278,7 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 	} 
 	dc.sheep.Baa( 1, "bwres table exists" )
 
-	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwowres ( resid text PRIMARY KEY, project text, resdata map<text,text> )` ) ).Exec()
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwowres ( resid text PRIMARY KEY, expiry int, project text, resdata map<text,text> )` ) ).Exec()
 	if err != nil {
 		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
 			dc.sheep.Baa( 1, "bwowres table create failed: %s", err )
@@ -282,7 +287,7 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 	} 
 	dc.sheep.Baa( 1, "bwowres table exists" )
 
-	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE mirres ( resid text PRIMARY KEY, project text, resdata map<text,text> )` ) ).Exec()
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE mirres ( resid text PRIMARY KEY, expiry int, project text, resdata map<text,text> )` ) ).Exec()
 	if err != nil {
 		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
 			dc.sheep.Baa( 1, "mirres table create failed: %s", err )
@@ -361,268 +366,47 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 	return true, nil
 }
 
-// ---------------------- public ------------------------------------------------------------------------------
-// these are ogranised by thing (endpoint, ulcap, etc) rather than alpha.
+//------ generic access functions (internal) ---------------------------------------------------------------------------
 
 /*
-	Returns the current connectivity state and if not connected kicks our listener to try another
-	time to connect.
+	A generic get one map (a field stored as a map) from the datacache function. Parms:
+		dataname - the field to pull from the matching record
+		keyname - the field name that is used (where keyname =
+		keyval -  the value of the key name (where keyname = keyval)
+		table - the table name in our space
+		target - a pointer to the struct to populate with the data.
+
+	err is nil on return when succcessful.
+
 */
-func ( dc * Dcache ) Is_connected( ) ( bool ) {
-	if !dc.connected {
-		ok, _ :=  dc.connect( )
-		return ok
-	}
-
-	return true
-}
-
-/*
-	Fetch the ulcap for the project from the datacache.
-*/
-func ( dc *Dcache ) Get_ulcap( project string ) ( pctg int, err error ) {
-
-	pctg = 0
+func ( dc *Dcache ) get_one_map( table string, keyname string, keyvalue string, dataname string, target interface{} ) ( err error ) {
+	var (
+		rdata map[string]string				// stuff that comes back from the datacache is a map
+	)
 
 	if dc == nil {
-		return 0, fmt.Errorf( "nil ptr to struct passed" )
+		return fmt.Errorf( "no struct passed to get_one_res" )
 	}
 
-	if ! dc.connected {
-		if ok, err :=  dc.connect(); ! ok {
-			return 0, err
+	if !dc.connected {
+		if  ok, err := dc.connect(); ! ok {
+			return err
 		}
 	}
 
-	err = dc.sess.Query( `SELECT pctg FROM ulcaps WHERE project = ? LIMIT 1`, project ).Consistency(gocql.One).Scan( &pctg )
+	err = dc.sess.Query( fmt.Sprintf( `SELECT %s FROM %s WHERE %s = ? LIMIT 1`, dataname, table, keyname ), keyvalue ).Consistency(gocql.One).Scan( &rdata )
     if err != nil {
-		dc.sheep.Baa( 2, "unable to find ulcap for project: %s", project )
-		err = fmt.Errorf( "ulcap not found for %s: %s", project, err )
+		msg := fmt.Sprintf( "dcache/get_one_map: unable to find field %s for %s=%s in %s: %s ", dataname, keyname, keyvalue, table, err )
+		dc.sheep.Baa( 2, msg )
+		err = fmt.Errorf( msg )
+		return  err
     } else {
-		dc.sheep.Baa( 1, ">>>> found ulcap in datacache: %s %d", project, pctg )
+		dc.sheep.Baa( 1, "found field %s for %s=%s in %s: %s ", dataname, keyname, keyvalue, table, err )
 	}
 
-	return pctg, err
+	
+	transform.Map_to_struct( rdata, target, "dcache" )		// transform the map into the struct
+
+	return err
 }
 
-/*
-	Returns a map of all user limit capacities keyed by project id.
-*/
-func ( dc *Dcache ) Map_ulcaps( ) ( m map[string]int, err error ) {
-	if dc == nil {
-		return nil, fmt.Errorf( "datacache struct was nil" )
-	}
-
-	var	(
-		proj string
-		pctg int
-	)
-
-	m = make( map[string]int, 64 )			// 64 is a hint not a hard limit
-
-    iter := dc.sess.Query( `select project, pctg  from ulcaps` ).Consistency(gocql.One).Iter()
-    for iter.Scan( &proj, &pctg )  {
-		m[proj] = pctg
-		dc.sheep.Baa( 2, "dug ulcap from datacache: %s = %d", proj, pctg )
-    }
-
-	return m, nil
-}
-
-/*
-	Put the ulcap for the project into the datacache.
-	Data is expected to be a string with project,value.
-*/
-func ( dc *Dcache ) Set_ulcap( project string, val int ) ( err error ) {
-
-	if dc == nil {
-		return fmt.Errorf( "no struct passed to set_ulcap" )
-	}
-
-	if !dc.connected {
-		if  ok, err := dc.connect(); ! ok {
-			return err
-		}
-	}
-
-	if val > 100 {
-		val = 100
-	} 
-
-	if val >= 0 {
-    	err = dc.sess.Query( `INSERT INTO ulcaps (project, pctg) VALUES (?, ?)`, project, val ).Exec()
-    	if err != nil {
-			dc.sheep.Baa( 2, "unable to set ulcap for project: %s", project )
-    	}
-	} else {
-    	err = dc.sess.Query( `DELETE FROM  ulcaps WHERE project = ?`, project ).Exec()
-    	if err != nil {
-			dc.sheep.Baa( 2, "unable to delete user cap for project: %s: %s", project, err )
-			return err
-    	} else {
-			dc.sheep.Baa( 1, "user cap for project was deleted: %s", project )
-		}
-	}
-
-	return  nil
-}
-
-// ------ endpoint ---------------------------------------------------------------------------------------------------------
-
-/*
-	Saves the endpoint information into the datacache.
-	epm is assumed to be a copy of the map which includes port and router info as strings.
-*/
-func ( dc *Dcache ) Set_endpt( epid string, epm map[string]string ) ( err error ) {
-	if dc == nil {
-		return fmt.Errorf( "no struct passed to set_endpt" )
-	}
-
-	if epid ==""  {
-		return fmt.Errorf( "invalid endpoint id" )
-	}
-
-	if !dc.connected {
-		if  ok, err := dc.connect(); ! ok {
-			return err
-		}
-	}
-
-	if epm != nil {
-		dc.sheep.Baa( 1, "sending to datacache for endpoint: %s", epid )
-    	err = dc.sess.Query( `INSERT INTO endpts (epid, epdata) VALUES (?, ?)`, epid, epm ).Exec()
-    	if err != nil {
-			dc.sheep.Baa( 1, "unable to set endpoint: key=%s: %s", epid, err )
-			return err
-    	}
-	} else {
-    	err = dc.sess.Query( `DELETE FROM endpts WHERE epid = ?`, epid ).Exec()
-		if err != nil {
-			dc.sheep.Baa( 1, "unable to delete endpoint: key=%s: %s", epid, err )
-			return err
-		} else {
-			dc.sheep.Baa( 1, "endpoint deleted from datacache: %s", epid )
-		}
-	}
-
-	return nil
-}
-
-/*
-	Returns a list of endpoints that are currently in the datacache.
-*/
-func ( dc *Dcache ) Get_endpt_list( ) ( eplist []string, err error ) {
-	var (
-		epid	string
-	)
-
-	if dc == nil {
-		return nil, fmt.Errorf( "no struct passed to get_endpt_list" )
-	}
-
-	if !dc.connected {
-		if  ok, err := dc.connect(); ! ok {
-			return nil, err
-		}
-	}
-
-	size := 64
-	eplist = make( []string, 0, size )			// initial cap set at size, it will grow if needed
-    iter := dc.sess.Query( `select  epid  from endpts` ).Consistency(gocql.One).Iter()
-    for iter.Scan( &epid )  {
-		eplist = append( eplist, epid )			// this will grow if we reach capacity so we must reassign
-    }
-
-	dc.sheep.Baa( 2, "%d endpoints exist in the datacache", len( eplist ) )
-	return eplist[0:len( eplist )], nil
-}
-
-/*
-	Fetch a single endpoint from the datacache. Returns a map.
-*/
-func ( dc *Dcache ) Get_endpt( epid string ) ( epm map[string]string, err error ) {
-	var (
-		epdata map[string]string
-	)
-
-	if dc == nil {
-		return nil, fmt.Errorf( "no struct passed to get_endpt" )
-	}
-
-	if !dc.connected {
-		if  ok, err := dc.connect(); ! ok {
-			return nil, err
-		}
-	}
-
-	if epid == "" {
-		return nil, fmt.Errorf( "invalid epid" )
-	}
-
-	err = dc.sess.Query( `SELECT epdata FROM endpts WHERE epid = ? LIMIT 1`, epid ).Consistency(gocql.One).Scan( &epdata )
-    if err != nil {
-		return nil, err
-	}
-
-	dc.sheep.Baa( 2, "pulled endpt from datacache: %d fields", len( epdata ) )
-
-		
-	return epdata, nil
-}
-
-// ------ bandwidth  ---------------------------------------------------------------------------------------------------------
-
-
-/*
-	Generic bandwidth save should work for all.
-*/
-func ( dc *Dcache ) set_reservation( resid string, project string, res interface{}, table string ) ( err error ) {
-	if dc == nil {
-		return fmt.Errorf( "no struct passed to set_bwres" )
-	}
-
-	if resid ==""  {
-		return fmt.Errorf( "invalid reservation id" )
-	}
-
-	if !dc.connected {
-		if  ok, err := dc.connect(); ! ok {
-			return err
-		}
-	}
-
-	if res != nil {
-		dc.sheep.Baa( 2, "saving bandwidth reservation in datacache: %s", resid )
-		resm := transform.Struct_to_map( res, "dcache" )							// transform the exported datacache fields from struct into a map
-dc.sheep.Baa( 1, " map has %d elements", len( resm ) )
-for k, v := range resm {
-	dc.sheep.Baa( 1, "res: %s = %s", k, v )	
-}
-    	err = dc.sess.Query( fmt.Sprintf( "INSERT INTO %s (resid, project, resdata) VALUES (?, ?, ?)", table ), resid, project, resm ).Exec()
-    	if err != nil {
-			dc.sheep.Baa( 1, "unable to set bandwidth reservation: key=%s proj=%s err=%s", resid, project, err )
-			return err
-    	} else {
-			dc.sheep.Baa( 1, "reservation successfully added to datacache: resid=%s proj=%s", resid, project )
-		}
-	} else {
-    	err = dc.sess.Query( fmt.Sprintf( "`DELETE FROM %s WHERE resid = ?`", table), resid ).Exec()
-		if err != nil {
-			dc.sheep.Baa( 1, "unable to delete bandwidth reservation: key=%s err=%s", resid, err )
-			return err
-		} else {
-			dc.sheep.Baa( 1, "bandwidth reservation deleted from datacache: %s", resid )
-		}
-	}
-
-	return nil
-}
-
-/*
-	Saves a reservation into the datacache.
-	If res is nil, then the reservation is deleted. The entry is keyed on reservation id and the project
-	id to make by project listing easier.
-*/
-func ( dc *Dcache ) Set_bwres( resid string, project string, res interface{} ) ( err error ) {
-	return dc.set_reservation( resid, project, res, "bwres" )
-}
