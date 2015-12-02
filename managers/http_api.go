@@ -530,8 +530,8 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 		req = <- my_ch										// wait for completion
 
 		if req.State == nil {
-			ckptreq := ipc.Mk_chmsg( )
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+			//ckptreq := ipc.Mk_chmsg( )	//res mgr will stash the res in datacache when added
+			//ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 			reason = fmt.Sprintf( "reservation accepted; reservation path has %d entries", len( path_list ) )
 			jreason =  res.To_json()
 		} else {

@@ -349,7 +349,76 @@ func (i *Inventory) reset_push() {
 	}
 }
 
+// ---------------------- checkpoint/datacache support --------------------------------------------------------------
+
 /*
+	Take a user limit capacity setting and add it to the datacache.
+*/
+func stash_ulcap( project *string, value *string ) {
+	dc := datacache.Mk_dcache( nil, nil )					// link to the datacache
+	rm_sheep.Baa( 1,  "stash ucap: %s %s\n", project, value )
+	dc.Set_ulcap( *project, clike.Atoi( *value ) )
+}
+
+/*
+	Push the reservation off into the datacache.
+	The project associated with the reservation is the project associated with host1.
+*/
+func stash_res( gres *gizmos.Pledge ) {
+
+	dc := datacache.Mk_dcache( nil, nil )				// link to the datacache
+
+	switch res := (*gres).( type ) {					// datacache maintains reervations in different tables thus has different calls
+
+		case *gizmos.Pledge_bw:
+			ep, _ := res.Get_hosts()							// get the endpoint names;  should be proj/ep/vmname:port
+			tokens := strings.Split( *ep, "/" )
+			project := tokens[0]
+			/*
+			my_ch := make( chan *ipc.Chmsg )					// channel for network response
+			req := ipc.Mk_chmsg( )
+			req.Send_req( nw_ch, my_ch, REQ_EP2PROJ, ep, nil )
+			req = <- my_ch
+		
+			project := "unknown"
+			if req != nil && req.State == nil {
+				switch p := req.Response_data.( type ) {
+					case string: 
+						if p == "" {
+							rm_sheep.Baa( 1, "could not map endpoint to project: %s", *ep )
+						} else {
+							project = p
+						}
+			
+					case *string:
+						if p == nil || *p == "" {
+							rm_sheep.Baa( 1, "could not map endpoint to project: %s", *ep )
+						} else {
+							project = *p
+						}
+				}
+			}
+			*/
+				
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s\n", *resid )
+			dc.Set_bwres( *resid, project, res )
+
+
+		case *gizmos.Pledge_mirror:
+			rm_sheep.Baa( 1, "datacache of mirror pledge skipped -- not implemented" )
+
+		case *gizmos.Pledge_bwow:
+			rm_sheep.Baa( 1, "datacache of bwow pledge skipped -- not implemented" )
+
+		default:
+			rm_sheep.Baa( 1, "internal mishap: pledge NOT stashed -- unrecognised pledge type! %v", res )
+	}
+}
+
+/*
+	soon to be deprecated.....
+
 	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.
 	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
 	seconds).
@@ -378,11 +447,13 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 		return false, last
 	}
 
+	/*
 	dc := datacache.Mk_dcache( nil, nil )		// link to the datacache
 	for nm, v := range i.ulcap_cache {							// write out user link capacity limits that have been set
 		fmt.Fprintf( i.chkpt, "ucap: %s %d\n", nm, v ) 			// we'll check the overall error state on close
 		dc.Set_ulcap( nm, v )
 	}
+	*/
 
 	for key, p := range i.cache {
 		s := (*p).To_chkpt()
@@ -642,6 +713,7 @@ func (inv *Inventory) Add_res( pi interface{} ) (err error) {
 	}
 
 	inv.cache[*id] = p
+	stash_res( p )
 
 	rm_sheep.Baa( 1, "resgmgr: added reservation: %s", (*p).To_chkpt() )
 	return
@@ -859,11 +931,11 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 		msg	*ipc.Chmsg
 		ckptd	string
 		last_qcheck	int64 = 0			// time that the last queue check was made to set window
-		last_chkpt	int64 = 0			// time that the last checkpoint was written
-		retry_chkpt bool = false		// checkpoint needs to be retried because of a timing issue
+		//last_chkpt	int64 = 0			// time that the last checkpoint was written
+		//retry_chkpt bool = false		// checkpoint needs to be retried because of a timing issue
 		queue_gen_type = REQ_GEN_EPQMAP
 		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
-		all_sys_up	bool = false;		// set when we receive the all_up message; some functions (chkpt) must wait for this
+		//all_sys_up	bool = false;		// set when we receive the all_up message; some functions (chkpt) must wait for this
 		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
 		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
 		rr_rate		int = 3600			// refresh rate (1 hour)
@@ -951,7 +1023,7 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 	last_qcheck = time.Now().Unix()
 	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )			// push reservations to agent just before they go live
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
-	tklr.Add_spot( 5, my_chan, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
+	//tklr.Add_spot( 5, my_chan, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
@@ -967,23 +1039,27 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
-				all_sys_up = true
+				//all_sys_up = true
 				// periodic checkpointing turned off with the introduction of tegu_ha
 				//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
 			case REQ_RTRY_CHKPT:									// called to attempt to send a queued checkpoint request
+				/*
 				if all_sys_up {
 					if retry_chkpt {
 						rm_sheep.Baa( 3, "invoking checkpoint (retry)" )
 						retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
 					}
 				}
+				*/
 
 			case REQ_CHKPT:											// external thread has requested checkpoint
+				/*
 				if all_sys_up {
 					rm_sheep.Baa( 3, "invoking checkpoint" )
 					retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
 				}
+				*/
 
 			case REQ_DEL:											// user initiated delete -- requires cookie
 				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
@@ -1055,8 +1131,10 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
 				data := msg.Req_data.( []*string )
-				inv.add_ulcap( data[0], data[1] )
-				retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
+				inv.add_ulcap( data[0], data[1] )		// add and send to network manager
+				stash_ulcap( data[0], data[1] )		// stuff it into the datacache
+
+				//retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
 
 			// CAUTION: the requests below come back as asynch responses rather than as initial message
 			case REQ_IE_RESERVE:						// an IE reservation failed

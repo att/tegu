@@ -115,9 +115,9 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 	}
 	pm := &Pledge_mirror {
 		Pledge_base:Pledge_base{
-			id: id,
-			usrkey: usrkey,			// user "cookie"
-			window: window,
+			Id: id,
+			Usrkey: usrkey,			// user "cookie"
+			Window: window,
 		},
 		host1:		&t,				// mirror input ports (space sep)
 		host2:		out_port,		// mirror output port
@@ -128,7 +128,7 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 	}
 
 	if *usrkey == "" {
-		pm.usrkey = &empty_str
+		pm.Usrkey = &empty_str
 	}
 
 	p = pm
@@ -142,10 +142,10 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 	newp := &Pledge_mirror {
 		Pledge_base:Pledge_base{
-			id:			p.id,
-			usrkey:		p.usrkey,			// user "cookie"
-			pushed:		p.pushed,
-			paused:		p.paused,
+			Id:			p.Id,
+			Usrkey:		p.Usrkey,			// user "cookie"
+			Pushed:		p.Pushed,
+			Paused:		p.Paused,
 		},
 		host1:		p.host1,
 		host2:		p.host2,
@@ -161,7 +161,7 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 		stderr:		make([]string, 0),
 	}
 
-	newp.window = p.window.clone()
+	newp.Window = p.Window.clone()
 	return newp
 }
 
@@ -171,9 +171,9 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 func (p *Pledge_mirror) Nuke( ) {
 	p.host1 = nil
 	p.host2 = nil
-	p.id = nil
+	p.Id = nil
 	p.qid = nil
-	p.usrkey = nil
+	p.Usrkey = nil
 }
 
 /*
@@ -194,11 +194,11 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 	p.host1, p.tpport1 = Split_port( jp.Host1 )		// suss apart host and port
 	p.host2, p.tpport2 = Split_port( jp.Host2 )
 
-	p.window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
+	p.Window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
 	//p.protocol = jp.Protocol
-	p.id = jp.Id
+	p.Id = jp.Id
 	//p.dscp_koe = jp.Dscp_koe
-	p.usrkey = jp.Usrkey
+	p.Usrkey = jp.Usrkey
 	p.qid = jp.Qid
 	p.tenant_id = jp.Tenant_id
 	//p.bandw_out = jp.Bandwout
@@ -279,12 +279,12 @@ func (p *Pledge_mirror) To_str( ) ( s string ) {
 
 func (p *Pledge_mirror) String( ) ( s string ) {
 
-	state, caption, diff := p.window.state_str( )
-	c, e := p.window.get_values( )
+	state, caption, diff := p.Window.state_str( )
+	c, e := p.Window.get_values( )
 
 	//NEVER put the usrkey into the string!
 	s = fmt.Sprintf( "%s: togo=%ds %s ports=%s output=%s id=%s st=%d ex=%d push=%v ptype=mirroring", state, diff, caption,
-		*p.host1, *p.host2, *p.id, c, e, p.pushed )
+		*p.host1, *p.host2, *p.Id, c, e, p.Pushed )
 
 	return
 }
@@ -297,10 +297,10 @@ func (p *Pledge_mirror) String( ) ( s string ) {
 */
 func (p *Pledge_mirror) To_json( ) ( json string ) {
 
-	state, _, diff := p.window.state_str( )
+	state, _, diff := p.Window.state_str( )
 
 	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "ptype": %d }`,
-		state, diff, *p.host1, *p.host2, *p.id, *p.tenant_id, PT_MIRRORING )
+		state, diff, *p.host1, *p.host2, *p.Id, *p.tenant_id, PT_MIRRORING )
 
 	return
 }
@@ -319,16 +319,16 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 */
 func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 
-	if p.window.is_expired( ) {			// will show expired if window is nil, so safe without check
+	if p.Window.is_expired( ) {			// will show expired if window is nil, so safe without check
 		chkpt = "expired"
 		return
 	}
 
-	c, e := p.window.get_values( )
+	c, e := p.Window.get_values( )
 
 	chkpt = fmt.Sprintf(
 		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id", %q, "ptype": %d }`,
-		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, *p.tenant_id, PT_MIRRORING )
+		*p.host1, *p.host2, c, e, *p.Id, *p.qid, *p.Usrkey, *p.tenant_id, PT_MIRRORING )
 
 	return
 }
@@ -391,7 +391,7 @@ func (p *Pledge_mirror) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *
 		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
 	}
 
-	c, e := p.window.get_values( )
+	c, e := p.Window.get_values( )
 	return p.host1, p.host2, p.tpport1, p.tpport2, c, e, 0, 0
 }
 
@@ -410,7 +410,7 @@ func (p *Pledge_mirror) Equals( p2 *Pledge ) ( bool ) {
 		if ! Strings_equal( p.host2, p2m.host2 ) { return false }
 		if ! Strings_equal( p.qid, p2m.qid ) { return false }
 
-		if !p.window.overlaps( p2m.window ) {
+		if !p.Window.overlaps( p2m.Window ) {
 			return false;
 		}
 

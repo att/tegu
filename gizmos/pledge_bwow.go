@@ -130,8 +130,8 @@ func Mk_bwow_pledge(	src *string, dest *string, p1 *string, p2 *string, commence
 
 	p = &Pledge_bwow {
 		Pledge_base:Pledge_base{
-			id: id,
-			window: window,
+			Id: id,
+			Window: window,
 		},
 		src: src,
 		dest: dest,
@@ -145,9 +145,9 @@ func Mk_bwow_pledge(	src *string, dest *string, p1 *string, p2 *string, commence
 	}
 
 	if *usrkey != "" {
-		p.usrkey = usrkey
+		p.Usrkey = usrkey
 	} else {
-		p.usrkey = &empty_str
+		p.Usrkey = &empty_str
 	}
 
 	return
@@ -207,7 +207,7 @@ func (p *Pledge_bwow) Get_values( ) ( src *string, dest *string, p1 *string, p2 
 		return &empty_str, &empty_str, &zero_str, &zero_str, 0, 0
 	}
 
-	c, e = p.window.get_values()
+	c, e = p.Window.get_values()
 	return p.src, p.dest, p.src_tpport, p.dest_tpport, c, e
 }
 
@@ -262,10 +262,10 @@ func (p *Pledge_bwow) Get_vlan( ) ( v1 *string ) {
 func (p *Pledge_bwow) Clone( name string ) ( *Pledge_bwow ) {
 	newp := &Pledge_bwow {
 		Pledge_base:Pledge_base {
-			id:			&name,
-			usrkey:		p.usrkey,
-			pushed:		p.pushed,
-			paused:		p.paused,
+			Id:			&name,
+			Usrkey:		p.Usrkey,
+			Pushed:		p.Pushed,
+			Paused:		p.Paused,
 		},
 		src:		p.src,
 		dest:		p.dest,
@@ -279,7 +279,7 @@ func (p *Pledge_bwow) Clone( name string ) ( *Pledge_bwow ) {
 	ep := *p.epoint		// make copy
 	newp.epoint = &ep
 
-	newp.window = p.window.clone()
+	newp.Window = p.Window.clone()
 	return newp
 }
 
@@ -310,7 +310,7 @@ func (p *Pledge_bwow) Equals( op *Pledge ) ( state bool ) {
 		if !Strings_equal( p.dest_tpport, obw.dest_tpport ) { return false }
 		if !Strings_equal( p.src_vlan, obw.src_vlan ) { return false }
 
-		if !p.window.overlaps( obw.window ) {
+		if !p.Window.overlaps( obw.Window ) {
 			return false;
 		}
 
@@ -327,9 +327,9 @@ func (p *Pledge_bwow) Equals( op *Pledge ) ( state bool ) {
 func (p *Pledge_bwow) Nuke( ) {
 	p.src = nil
 	p.dest = nil
-	p.id = nil
+	p.Id = nil
 	p.qid = nil
-	p.usrkey = nil
+	p.Usrkey = nil
 }
 
 /*
@@ -353,10 +353,10 @@ func (p *Pledge_bwow) From_json( jstr *string ) ( err error ){
 	p.dest, p.dest_tpport, _  = Split_hpv( jp.Dest )
 
 	p.protocol = jp.Protocol
-	p.window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
-	p.id = jp.Id
+	p.Window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
+	p.Id = jp.Id
 	p.dscp = jp.Dscp
-	p.usrkey = jp.Usrkey
+	p.Usrkey = jp.Usrkey
 	p.qid = jp.Qid
 	p.bandw_out = jp.Bandwout
 
@@ -457,13 +457,13 @@ func (p *Pledge_bwow) String( ) ( s string ) {
 		return ""
 	}
 
-	state, caption, diff := p.window.state_str()
-	commence, expiry := p.window.get_values( )
+	state, caption, diff := p.Window.state_str()
+	commence, expiry := p.Window.get_values( )
 	v1 := p.vlan2string( )
 
 	//NEVER put the usrkey into the string!
 	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%s%s h2=%s:%s id=%s qid=%s st=%d ex=%d bwo=%d push=%v dscp=%d ptype=bw_oneway", state, diff, caption,
-		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.id, *p.qid, commence, expiry, p.bandw_out, p.pushed, p.dscp )
+		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.Id, *p.qid, commence, expiry, p.bandw_out, p.Pushed, p.dscp )
 	return
 }
 
@@ -481,11 +481,11 @@ func (p *Pledge_bwow) To_json( ) ( json string ) {
 		return "{ }"
 	}
 
-	state, _, diff := p.window.state_str()		// get state as a string
+	state, _, diff := p.Window.state_str()		// get state as a string
 	v1 := p.vlan2string( )
 
 	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwout": %d, "src": "%s:%s%s", "dest": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "ptype": %d }`,
-				state, diff,  p.bandw_out, *p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport, *p.id, *p.qid, p.dscp, PT_OWBANDWIDTH )
+				state, diff,  p.bandw_out, *p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport, *p.Id, *p.qid, p.dscp, PT_OWBANDWIDTH )
 
 	return
 }
@@ -509,11 +509,11 @@ func (p *Pledge_bwow) To_chkpt( ) ( chkpt string ) {
 		return
 	}
 
-	commence, expiry := p.window.get_values()
+	commence, expiry := p.Window.get_values()
 	v1 := p.vlan2string( )
 
 	chkpt = fmt.Sprintf( `{ "src": "%s:%s%s", "dest": "%s:%s", "commence": %d, "expiry": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "ptype": %d }`,
-			*p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport,  commence, expiry, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, PT_OWBANDWIDTH )
+			*p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport,  commence, expiry, p.bandw_out, *p.Id, *p.qid, *p.Usrkey, p.dscp, PT_OWBANDWIDTH )
 
 	return
 }
@@ -537,5 +537,5 @@ func (p *Pledge_bwow) Commenced_recently( window int64 ) ( bool ) {
 		return false
 	}
 
-	return p.window.commenced_recently( window )
+	return p.Window.commenced_recently( window )
 }

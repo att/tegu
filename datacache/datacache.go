@@ -49,6 +49,7 @@ import (
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/token"
+	"github.com/att/gopkgs/transform"
 
 	//"github.com/att/tegu/gizmos"
 
@@ -130,6 +131,9 @@ func Mk_dcache( cfg_data map[string]map[string]*string, master_sheep *bleater.Bl
 	Takes a map and generates a string that is properly quoted for a cassandra map table entry.
 	This function does _NOT_ add the leading trailing braces as the caller may need to build several
 	strings for one submission.  
+
+	These don't seem to be needed as the go implementation accepts a map directly and does this
+	conversion.
 */
 func smap2string( m map[string]string ) (string) {
 	s := ""
@@ -243,7 +247,7 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE ulcaps ( project text PRIMARY KEY, pctg int)` ) ).Exec()
 	if err != nil {
 		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
-			dc.sheep.Baa( 1, "table create failed: %s", err )
+			dc.sheep.Baa( 1, "ulcaps table create failed: %s", err )
 			return err
 		}
 	} 
@@ -252,11 +256,40 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE endpts ( epid text PRIMARY KEY, epdata map<text,text> )` ) ).Exec()
 	if err != nil {
 		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
-			dc.sheep.Baa( 1, "table create failed: %s", err )
+			dc.sheep.Baa( 1, "endpts table create failed: %s", err )
 			return err
 		}
 	} 
 	dc.sheep.Baa( 1, "endpts table exists" )
+
+		//chkpt = fmt.Sprintf( `{ 
+
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwres ( resid text PRIMARY KEY, project text, resdata map<text,text> )` ) ).Exec()
+	if err != nil {
+		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
+			dc.sheep.Baa( 1, "bwres table create failed: %s", err )
+			return err
+		}
+	} 
+	dc.sheep.Baa( 1, "bwres table exists" )
+
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwowres ( resid text PRIMARY KEY, project text, resdata map<text,text> )` ) ).Exec()
+	if err != nil {
+		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
+			dc.sheep.Baa( 1, "bwowres table create failed: %s", err )
+			return err
+		}
+	} 
+	dc.sheep.Baa( 1, "bwowres table exists" )
+
+	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE mirres ( resid text PRIMARY KEY, project text, resdata map<text,text> )` ) ).Exec()
+	if err != nil {
+		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
+			dc.sheep.Baa( 1, "mirres table create failed: %s", err )
+			return err
+		}
+	} 
+	dc.sheep.Baa( 1, "mirres table exists" )
 
 	// TODO: add the rest of tegu tables
 	return nil
@@ -434,7 +467,7 @@ func ( dc *Dcache ) Set_ulcap( project string, val int ) ( err error ) {
 	return  nil
 }
 
-// -------------------------------------------------------------------------------------------------------------------------
+// ------ endpoint ---------------------------------------------------------------------------------------------------------
 
 /*
 	Saves the endpoint information into the datacache.
@@ -535,4 +568,61 @@ func ( dc *Dcache ) Get_endpt( epid string ) ( epm map[string]string, err error 
 
 		
 	return epdata, nil
+}
+
+// ------ bandwidth  ---------------------------------------------------------------------------------------------------------
+
+
+/*
+	Generic bandwidth save should work for all.
+*/
+func ( dc *Dcache ) set_reservation( resid string, project string, res interface{}, table string ) ( err error ) {
+	if dc == nil {
+		return fmt.Errorf( "no struct passed to set_bwres" )
+	}
+
+	if resid ==""  {
+		return fmt.Errorf( "invalid reservation id" )
+	}
+
+	if !dc.connected {
+		if  ok, err := dc.connect(); ! ok {
+			return err
+		}
+	}
+
+	if res != nil {
+		dc.sheep.Baa( 2, "saving bandwidth reservation in datacache: %s", resid )
+		resm := transform.Struct_to_map( res, "dcache" )							// transform the exported datacache fields from struct into a map
+dc.sheep.Baa( 1, " map has %d elements", len( resm ) )
+for k, v := range resm {
+	dc.sheep.Baa( 1, "res: %s = %s", k, v )	
+}
+    	err = dc.sess.Query( fmt.Sprintf( "INSERT INTO %s (resid, project, resdata) VALUES (?, ?, ?)", table ), resid, project, resm ).Exec()
+    	if err != nil {
+			dc.sheep.Baa( 1, "unable to set bandwidth reservation: key=%s proj=%s err=%s", resid, project, err )
+			return err
+    	} else {
+			dc.sheep.Baa( 1, "reservation successfully added to datacache: resid=%s proj=%s", resid, project )
+		}
+	} else {
+    	err = dc.sess.Query( fmt.Sprintf( "`DELETE FROM %s WHERE resid = ?`", table), resid ).Exec()
+		if err != nil {
+			dc.sheep.Baa( 1, "unable to delete bandwidth reservation: key=%s err=%s", resid, err )
+			return err
+		} else {
+			dc.sheep.Baa( 1, "bandwidth reservation deleted from datacache: %s", resid )
+		}
+	}
+
+	return nil
+}
+
+/*
+	Saves a reservation into the datacache.
+	If res is nil, then the reservation is deleted. The entry is keyed on reservation id and the project
+	id to make by project listing easier.
+*/
+func ( dc *Dcache ) Set_bwres( resid string, project string, res interface{} ) ( err error ) {
+	return dc.set_reservation( resid, project, res, "bwres" )
 }

@@ -1267,7 +1267,7 @@ func load_endpts( umap map[string]*gizmos.Endpt ) ( m map[string]*gizmos.Endpt, 
 			net_sheep.Baa( 1, "no endpoints listed in datacache" );
 		}
 
-		return nil, err
+		return umap, err
 	}
 
 	if umap == nil {						// no map, create one, otherwise just add to it
@@ -1281,7 +1281,7 @@ func load_endpts( umap map[string]*gizmos.Endpt ) ( m map[string]*gizmos.Endpt, 
 		epm, err := dc.Get_endpt( epl[i] )
 		if err == nil {
 			endpts[epl[i]] = gizmos.Endpt_from_map( epm )
-	net_sheep.Baa( 1, ">>>> adding endpoint from dc: %s",  endpts[epl[i]] )
+			net_sheep.Baa( 2, "adding endpoint from dc: %s",  endpts[epl[i]] )
 		} else {
 			net_sheep.Baa( 1, "unable to fetch endpoint from datacahce: %s: %s", epl[i], err )
 		}

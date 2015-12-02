@@ -30,7 +30,10 @@
 	Date:		20 May 2015
 	Author:		E. Scott Daniels
 
-	Mods:		28 Jul 2015 : Added upper bounds check for expiry time.
+	Mods:		28 Jul 2015 : Added upper bounds check for Expiry time.
+				01 Dec 2015 : Added datacache tags and made fields externally 
+					visible so that the datacache package can convert the struct
+					to a map.
 */
 
 package gizmos
@@ -42,60 +45,60 @@ import (
 )
 
 type pledge_window struct {
-	commence	int64
-	expiry		int64
+	Commence	int64	`dcache:"_"`
+	Expiry		int64	`dcache:"_"`
 }
 
 /*
-	Make a new pledge_window. If the commence time is earlier than now, it is adjusted
-	to be now.  If the expry time is before the adjusted commence time, then a nil
+	Make a new pledge_window. If the Commence time is earlier than now, it is adjusted
+	to be now.  If the expry time is before the adjusted Commence time, then a nil
 	pointer and error are returned.
 */
-func mk_pledge_window( commence int64, expiry int64 ) ( pw *pledge_window, err error ) {
+func mk_pledge_window( Commence int64, Expiry int64 ) ( pw *pledge_window, err error ) {
 	now := time.Now().Unix()
 	err = nil
 	pw = nil
 
-	if commence < now {
-		commence = now
+	if Commence < now {
+		Commence = now
 	}
 
-	if expiry < commence {
-		err = fmt.Errorf( "bad expiry submitted, already expired: now=%d expiry=%d", now, expiry );
+	if Expiry < Commence {
+		err = fmt.Errorf( "bad Expiry submitted, already expired: now=%d Expiry=%d", now, Expiry );
 		obj_sheep.Baa( 2, "pledge: %s", err )
 		return
 	}
 
-	if ! Valid_obtime( expiry ) {			// if expiry is less than max obligation time
-		err = fmt.Errorf( "bad expiry submitted, too far in the future: expiry=%d", expiry );
+	if ! Valid_obtime( Expiry ) {			// if Expiry is less than max obligation time
+		err = fmt.Errorf( "bad Expiry submitted, too far in the future: Expiry=%d", Expiry );
 		obj_sheep.Baa( 2, "pledge: %s", err )
 		return
 	}
 
 	pw = &pledge_window {
-		commence: commence,
-		expiry: expiry,
+		Commence: Commence,
+		Expiry: Expiry,
 	}
 
 	return
 }
 
 /*
-	Adjust window. Returns a valid commence time (if earlier than now) or 0 if the
+	Adjust window. Returns a valid Commence time (if earlier than now) or 0 if the
 	time window is not valid.
-func adjust_window( commence int64, conclude int64 ) ( adj_start int64, err error ) {
+func adjust_window( Commence int64, conclude int64 ) ( adj_start int64, err error ) {
 
 	now := time.Now().Unix()
 	err = nil
 
-	if commence < now {				// ajust forward to better play with windows on the paths
+	if Commence < now {				// ajust forward to better play with windows on the paths
 		adj_start = now
 	} else {
-		adj_start = commence
+		adj_start = Commence
 	}
 
 	if conclude <= adj_start {						// bug #156 fix
-		err = fmt.Errorf( "bad expiry submitted, already expired: now=%d expiry=%d", now, conclude );
+		err = fmt.Errorf( "bad Expiry submitted, already expired: now=%d Expiry=%d", now, conclude );
 		obj_sheep.Baa( 2, "pledge: %s", err )
 		return
 	}
@@ -110,8 +113,8 @@ func (p *pledge_window) clone( ) ( npw *pledge_window ) {
 	}
 
 	npw = &pledge_window {
-		expiry: p.expiry,
-		commence: p.commence,
+		Expiry: p.Expiry,
+		Commence: p.Commence,
 	}
 
 	return
@@ -131,17 +134,17 @@ func (p *pledge_window) state_str( ) ( state string, caption string, diff int64 
 
 	now := time.Now().Unix()
 
-	if now >= p.expiry {
+	if now >= p.Expiry {
 		state = "EXPIRED"
 		caption = "ago"
 	} else {
-		if now < p.commence {
+		if now < p.Commence {
 			state = "PENDING"
-			diff = p.commence - now
+			diff = p.Commence - now
 			caption = "from now"
 		} else {
 			state = "ACTIVE"
-			diff = p.expiry -  now
+			diff = p.Expiry -  now
 			caption = "remaining"
 		}
 	}
@@ -150,57 +153,57 @@ func (p *pledge_window) state_str( ) ( state string, caption string, diff int64 
 }
 
 /*
-	Extend the expiry time by n seconds. N may be negative and will not set the
-	expiry time earlier than now.
+	Extend the Expiry time by n seconds. N may be negative and will not set the
+	Expiry time earlier than now.
 */
 func (p *pledge_window) extend_by( n int64 ) {
 	if p == nil {
 		return
 	}
 
-	p.expiry += n;
+	p.Expiry += n;
 
 	if n < 0 {
 		now := time.Now().Unix()
-		if p.expiry < now {
-			p.expiry = now
+		if p.Expiry < now {
+			p.Expiry = now
 		}
 	}
 }
 
 /*
-	Set the expiry time to the timestamp passed in.
-	It is valid to set the expiry time to a time before the current time.
+	Set the Expiry time to the timestamp passed in.
+	It is valid to set the Expiry time to a time before the current time.
 */
 func (p *pledge_window) set_expiry_to( new_time int64 ) {
-	p.expiry = new_time;
+	p.Expiry = new_time;
 }
 
 /*
 	Returns true if the pledge has expired (the current time is greather than
-	the expiry time in the pledge).
+	the Expiry time in the pledge).
 */
 func (p *pledge_window) is_expired( ) ( bool ) {
 	if p == nil {
 		return true
 	}
 
-	return time.Now().Unix( ) >= p.expiry
+	return time.Now().Unix( ) >= p.Expiry
 }
 
 /*
-	Returns true if the pledge has not become active (the commence time is >= the current time).
+	Returns true if the pledge has not become active (the Commence time is >= the current time).
 */
 func (p *pledge_window) is_pending( ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return time.Now().Unix( ) < p.commence
+	return time.Now().Unix( ) < p.Commence
 }
 
 /*
-	Returns true if the pledge is currently active (the commence time is <= than the current time
-	and the expiry time is > the current time.
+	Returns true if the pledge is currently active (the Commence time is <= than the current time
+	and the Expiry time is > the current time.
 */
 func (p *pledge_window) is_active( ) ( bool ) {
 	if p == nil {
@@ -208,7 +211,7 @@ func (p *pledge_window) is_active( ) ( bool ) {
 	}
 
 	now := time.Now().Unix()
-	return p.commence < now  && p.expiry > now
+	return p.Commence < now  && p.Expiry > now
 }
 
 /*
@@ -220,15 +223,15 @@ func (p *pledge_window) is_active_soon( window int64 ) ( bool ) {
 	}
 
 	now := time.Now().Unix()
-	return (p.commence >= now) && p.commence <= (now + window)
+	return (p.Commence >= now) && p.Commence <= (now + window)
 }
 
-func (p *pledge_window) get_values( ) ( commence int64, expiry int64 ) {
+func (p *pledge_window) get_values( ) ( Commence int64, Expiry int64 ) {
 	if p == nil {
 		return 0, 0
 	}
 
-	return p.commence, p.expiry
+	return p.Commence, p.Expiry
 }
 
 /*
@@ -241,7 +244,7 @@ func (p *pledge_window) concluded_recently( window int64 ) ( bool ) {
 	}
 
 	now := time.Now().Unix()
-	return (p.expiry < now)  && (p.expiry >= now - window)
+	return (p.Expiry < now)  && (p.Expiry >= now - window)
 }
 
 /*
@@ -255,7 +258,7 @@ func (p *pledge_window) commenced_recently( window int64 ) ( bool ) {
 	}
 
 	now := time.Now().Unix()
-	return (p.commence >= (now - window)) && (p.commence <= now ) && (p.expiry > now)
+	return (p.Commence >= (now - window)) && (p.Commence <= now ) && (p.Expiry > now)
 }
 
 /*
@@ -269,12 +272,12 @@ func (p *pledge_window) is_extinct( window int64 ) ( bool ) {
 	}
 
 	now := time.Now().Unix()
-	return p.expiry <= now - window
+	return p.Expiry <= now - window
 }
 
 /*
 	Test this window (p) against a second window (p2) to see if they overlap.
-	Windows where commence is equal to expiry, or expiry is equal to commence
+	Windows where Commence is equal to Expiry, or Expiry is equal to Commence
 	(6, and 8 below) are not considered overlapping.
 
              pc|---------------------------------|pe
@@ -295,15 +298,15 @@ fmt.Fprintf( os.Stderr, ">>>> one/both are nil %v | %v\n", p, p2 )
 		return false
 	}
 
-	if p2.commence >= p.commence  &&  p2.commence < p.expiry {	//(2,3)
+	if p2.Commence >= p.Commence  &&  p2.Commence < p.Expiry {	//(2,3)
 		return true;
 	}
 
-	if p2.expiry > p.commence  &&  p2.expiry <= p.expiry {		//(1,2)
+	if p2.Expiry > p.Commence  &&  p2.Expiry <= p.Expiry {		//(1,2)
 		return true;
 	}
 
-	if p2.commence <= p.commence  &&  p2.expiry >= p.expiry {	//(4,5)
+	if p2.Commence <= p.Commence  &&  p2.Expiry >= p.Expiry {	//(4,5)
 		return true;
 	}
 
