@@ -46,6 +46,7 @@ type Pledge_base struct {
 	Pushed		bool			`dcache:"_"`		// set when pledge has been pushed into openflow or openvswitch
 	Paused		bool			`dcache:"_"`		// set if reservation has been paused
 	Usrkey		*string			`dcache:"_"`		// a 'cookie' supplied by the user to prevent any other user from modifying
+	stashed		bool								// true if successfully stashed
 }
 
 /*
@@ -227,4 +228,18 @@ func (p *Pledge_base) Reset_pushed( ) {
 	if p != nil {
 		p.Pushed = false
 	}
+}
+
+/*
+	Sets the stashed flag to true.
+*/
+func ( p *Pledge_base ) Set_stashed(  val bool ) {
+	p.stashed = val
+}
+
+/*
+	Returns the stashed setting.
+*/
+func ( p *Pledge_base ) Is_stashed( ) ( bool ) {
+	return p.stashed
 }

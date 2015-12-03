@@ -278,3 +278,11 @@ func ( dc *Dcache ) Get_mirres( inc_exp bool ) ( rlist []string, err error ) {
 func ( dc *Dcache ) Get_one_mirres( resid string, target interface{} ) ( err error ) {
 	return dc.get_one_map( "mirres", "resid", resid, "resdata", target )
 }
+
+/*
+	Build a list of mirror reservation IDs.
+*/
+func ( dc *Dcache ) Get_mirres_list( inc_exp bool ) ( rlist []string, err error ) {
+	return dc.get_res_list( "mirres", inc_exp, false )
+}
+

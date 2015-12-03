@@ -613,12 +613,12 @@ func mirror_post( in *http.Request, out http.ResponseWriter, projid string, data
 				} else {
 					req = ipc.Mk_chmsg( )
 					ip := gizmos.Pledge( res )							// must pass an interface pointer to resmgr
-					req.Send_req( rmgr_ch, my_ch, REQ_ADD, &ip, nil )	// network OK'd it, so add it to the inventory
+					req.Send_req( rmgr_ch, my_ch, REQ_ADD, &ip, nil )	// add to inventory and stash in datacache
 					req = <- my_ch										// wait for completion
 
 					if req.State == nil {
-						ckptreq := ipc.Mk_chmsg( )
-						ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+						//ckptreq := ipc.Mk_chmsg( )
+						//ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 					} else {
 						err = fmt.Errorf( "%s", req.State )
 					}
@@ -686,13 +686,15 @@ func mirror_delete( in *http.Request, out http.ResponseWriter, projid string ) (
 	my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
 	defer close( my_ch )								// close it on return
 	namepluscookie := []*string { &name, &cookie }
-	req.Send_req( rmgr_ch, my_ch, REQ_DEL, namepluscookie, nil )	// remove the reservation
+	req.Send_req( rmgr_ch, my_ch, REQ_DEL, namepluscookie, nil )	// remove the reservation; purge from datacache
 	req = <- my_ch										// wait for completion
 
+	/*
 	if req.State == nil {
 		ckptreq := ipc.Mk_chmsg( )
 		ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 	}
+	*/
 
 	code = http.StatusNoContent
 	msg = ""

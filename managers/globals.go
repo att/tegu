@@ -163,6 +163,7 @@ const (
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
 	REQ_CLEANUP					// periodic cleanup 
+	REQ_SANITY					// any needed sanity checks
 
 	//--- deprecated - http uses osif for direct query REQ_GETGW					// give a project ID and get it's gateway
 )

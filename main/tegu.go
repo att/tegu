@@ -138,6 +138,7 @@
 				08 Oct 2015 : Correct bug causing all reservations to be pushed when reservation change state happens.
 				09 Oct 2015 : Use 'admin' project for default phys host list.
 				16 Nov 2015 : Add restart message to logfile.
+				20 Nov 2015 : Added datacache.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -175,7 +176,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.0.0/1b115"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v4.0.1/1c035"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -251,10 +252,10 @@ func main() {
 	req := ipc.Mk_chmsg( )
 
 	/*
-		Block until the network is initialised. We need to do this so that when the checkpoint file is read reservations
-		can be added without missing network pieces.  Even if there is no checkpoint file, or it's empty, blocking
+		Block until the network is initialised. We need to do this so that when reservations are pulled from the 
+		datacache they can be added without missing network pieces.  Even when there are no reservations, blocking
 		prevents reservation rejections because the network graph isn't in working order.  With the implmentation of 
-		endpoint uuid the only thing that we wait on now is an initial endpoint list from openstack.  There isn't 
+		endpoint uuids, the only thing that we wait on now is an initial endpoint list from openstack.  There isn't 
 		a requirement to get information from each physcial host.
 	*/
 	for {																	// hard block to wait on network readyness
@@ -270,19 +271,16 @@ func main() {
 		time.Sleep( 5 * time.Second )
 	}
 
-	if *chkpt_file != "" {
-		sheep.Baa( 1, "network initialised, sending chkpt load request" )
-		req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, chkpt_file, nil )
-		req = <- my_chan												// block until the file is loaded
+	sheep.Baa( 1, "network initialised, sending inventory load request" )
+	req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, "", nil )
+	req = <- my_chan												// block until the file is loaded
 
-		if req.State != nil {
-			sheep.Baa( 0, "ERR: unable to load checkpoint file: %s: %s\n", *chkpt_file, req.State )
-			os.Exit( 1 )
-		}
-	} else {
-		sheep.Baa( 1, "network initialised, opening up system for all requests" )
+	if req.State != nil {
+		sheep.Baa( 0, "ERR: unable to load checkpoint file: %s: %s\n", *chkpt_file, req.State )
+		os.Exit( 1 )
 	}
 
+	sheep.Baa( 1, "network initialised, reservations loaded from cache, opening up system for all requests" )
 	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know
 	managers.Set_accept_state( true )								// http doesn't have a control loop like others, so needs this
 
