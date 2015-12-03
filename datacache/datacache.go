@@ -401,7 +401,7 @@ func ( dc *Dcache ) get_one_map( table string, keyname string, keyvalue string, 
 		err = fmt.Errorf( msg )
 		return  err
     } else {
-		dc.sheep.Baa( 1, "found field %s for %s=%s in %s: %s ", dataname, keyname, keyvalue, table, err )
+		dc.sheep.Baa( 1, "found field %s for %s=%s in %s", dataname, keyname, keyvalue, table )
 	}
 
 	

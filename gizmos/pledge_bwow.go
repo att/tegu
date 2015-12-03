@@ -35,6 +35,7 @@
 	Mods:		18 Jun 2015 : Added set_qid() function.
 				29 Jun 2015 : Corrected bug in Equals().
 				16 Aug 2015 : Move common code into Pledge_base
+				03 Dec 2015 : Added datacache support (sadly means exporting most fields)
 */
 
 package gizmos
@@ -47,19 +48,19 @@ import (
 )
 
 type Pledge_bwow struct {
-				Pledge_base	// common fields
-	src			*string		// hosts; gate applied for traffic from source to dest
-	dest		*string		// could be an external IP  (e.g. !/IP-address
-	protocol	*string		// tcp/udp:port
-	src_tpport	*string		// transport port number or 0 if not defined
-	dest_tpport	*string		// thee match h1/h2 respectively
-	src_vlan	*string		// vlan id to match with src match criteria
-	bandw_out	int64		// bandwidth to reserve outbound from src
-	dscp		int			// dscp value that should be propagated
-	qid			*string		// name that we'll assign to the queue which allows us to look up the pledge's queues
-	phost		*string		// the physical host
-	match_v6	bool		// true if we should force flow-mods to match on IPv6
-	epoint		*Gate		// endpoint where the gate is applied
+				Pledge_base					// common fields (datacache marked as needed)
+	Src			*string		`dcache:"_"`	// hosts; gate applied for traffic from source to dest
+	Dest		*string		`dcache:"_"`	// could be an external IP  (e.g. !/IP-address)
+	Protocol	*string		`dcache:"_"`	// tcp/udp:port
+	Src_tpport	*string		`dcache:"_"`	// transport port number or 0 if not defined
+	Dest_tpport	*string		`dcache:"_"`	// thee match h1/h2 respectively
+	Src_vlan	*string		`dcache:"_"`	// vlan id to match with src match criteria
+	Bandw_out	int64		`dcache:"_"`	// bandwidth to reserve outbound from src
+	Dscp		int			`dcache:"_"`	// dscp value that should be propagated
+	Qid			*string		`dcache:"_"`	// name that we'll assign to the queue which allows us to look up the pledge's queues
+	Phost		*string		`dcache:"_"`	// the physical host
+	Match_v6	bool		`dcache:"_"`	// true if we should force flow-mods to match on IPv6
+	epoint		*Gate						// endpoint where the gate is applied
 }
 
 /*
@@ -93,8 +94,8 @@ type Json_pledge_bwow struct {
 func ( p *Pledge_bwow ) vlan2string( ) ( v string ) {
 	if p != nil {
 	v = ""
-		if p.src_vlan != nil && clike.Atoi( *p.src_vlan ) > 0 {
-			v = "{" + *p.src_vlan + "}"
+		if p.Src_vlan != nil && clike.Atoi( *p.Src_vlan ) > 0 {
+			v = "{" + *p.Src_vlan + "}"
 		}
 	}
 
@@ -133,15 +134,15 @@ func Mk_bwow_pledge(	src *string, dest *string, p1 *string, p2 *string, commence
 			Id: id,
 			Window: window,
 		},
-		src: src,
-		dest: dest,
-		src_tpport: p1,
-		dest_tpport: p2,
-		bandw_out:	bandw_out,
-		qid: &empty_str,
-		dscp: dscp,
-		protocol:	&empty_str,
-		match_v6: false,
+		Src: src,
+		Dest: dest,
+		Src_tpport: p1,
+		Dest_tpport: p2,
+		Bandw_out:	bandw_out,
+		Qid: &empty_str,
+		Dscp: dscp,
+		Protocol:	&empty_str,
+		Match_v6: false,
 	}
 
 	if *usrkey != "" {
@@ -157,7 +158,7 @@ func Mk_bwow_pledge(	src *string, dest *string, p1 *string, p2 *string, commence
 	Return whether the match on IPv6 flag is true
 */
 func (p *Pledge_bwow) Get_matchv6() ( bool ) {
-	return p.match_v6
+	return p.Match_v6
 }
 
 /*
@@ -168,7 +169,7 @@ func (p *Pledge_bwow) Get_qid( ) ( *string ) {
 		return nil
 	}
 
-	return p.qid
+	return p.Qid
 }
 
 /*
@@ -179,7 +180,7 @@ func (p *Pledge_bwow) Get_bandwidth( ) ( int64 ) {
 		return 0
 	}
 
-	return p.bandw_out
+	return p.Bandw_out
 }
 
 /*
@@ -190,7 +191,7 @@ func (p *Pledge_bwow) Get_hosts( ) ( *string, *string ) {
 		return &empty_str, &empty_str
 	}
 
-	return p.src, p.dest
+	return p.Src, p.Dest
 }
 
 /*
@@ -208,7 +209,7 @@ func (p *Pledge_bwow) Get_values( ) ( src *string, dest *string, p1 *string, p2 
 	}
 
 	c, e = p.Window.get_values()
-	return p.src, p.dest, p.src_tpport, p.dest_tpport, c, e
+	return p.Src, p.Dest, p.Src_tpport, p.Dest_tpport, c, e
 }
 
 /*
@@ -220,7 +221,7 @@ func (p *Pledge_bwow) Get_dscp( ) ( int ) {
 		return 0
 	}
 
-	return p.dscp
+	return p.Dscp
 }
 
 /*
@@ -231,7 +232,7 @@ func (p *Pledge_bwow) Set_vlan( v1 *string ) {
 		return
 	}
 
-	p.src_vlan = v1
+	p.Src_vlan = v1
 }
 
 /*
@@ -242,7 +243,7 @@ func (p *Pledge_bwow) Set_qid( id *string ) {
 		return
 	}
 
-	p.qid = id
+	p.Qid = id
 }
 
 /*
@@ -253,7 +254,7 @@ func (p *Pledge_bwow) Get_vlan( ) ( v1 *string ) {
 		return
 	}
 
-	return p.src_vlan
+	return p.Src_vlan
 }
 
 /*
@@ -267,13 +268,13 @@ func (p *Pledge_bwow) Clone( name string ) ( *Pledge_bwow ) {
 			Pushed:		p.Pushed,
 			Paused:		p.Paused,
 		},
-		src:		p.src,
-		dest:		p.dest,
-		src_tpport: 	p.src_tpport,
-		dest_tpport: 	p.dest_tpport,
-		bandw_out:	p.bandw_out,
-		dscp:		p.dscp,
-		qid:		p.qid,
+		Src:		p.Src,
+		Dest:		p.Dest,
+		Src_tpport: 	p.Src_tpport,
+		Dest_tpport: 	p.Dest_tpport,
+		Bandw_out:	p.Bandw_out,
+		Dscp:		p.Dscp,
+		Qid:		p.Qid,
 	}
 
 	ep := *p.epoint		// make copy
@@ -301,14 +302,14 @@ func (p *Pledge_bwow) Equals( op *Pledge ) ( state bool ) {
 
 	obw, ok := (*op).( *Pledge_bwow )			// convert from generic type to specific
 	if ok {
-		if ! Strings_equal( p.protocol, obw.protocol ) { return false } // simple tests that don't swap if hosts are reversed
+		if ! Strings_equal( p.Protocol, obw.Protocol ) { return false } // simple tests that don't swap if hosts are reversed
 
-		if !Strings_equal( p.src, obw.src ) { return false }
-		if !Strings_equal( p.dest, obw.dest ) { return false }
+		if !Strings_equal( p.Src, obw.Src ) { return false }
+		if !Strings_equal( p.Dest, obw.Dest ) { return false }
 
-		if !Strings_equal( p.src_tpport, obw.src_tpport ) { return false }		// hosts can match if ports are different
-		if !Strings_equal( p.dest_tpport, obw.dest_tpport ) { return false }
-		if !Strings_equal( p.src_vlan, obw.src_vlan ) { return false }
+		if !Strings_equal( p.Src_tpport, obw.Src_tpport ) { return false }		// hosts can match if ports are different
+		if !Strings_equal( p.Dest_tpport, obw.Dest_tpport ) { return false }
+		if !Strings_equal( p.Src_vlan, obw.Src_vlan ) { return false }
 
 		if !p.Window.overlaps( obw.Window ) {
 			return false;
@@ -325,10 +326,10 @@ func (p *Pledge_bwow) Equals( op *Pledge ) ( state bool ) {
 	Destruction
 */
 func (p *Pledge_bwow) Nuke( ) {
-	p.src = nil
-	p.dest = nil
+	p.Src = nil
+	p.Dest = nil
 	p.Id = nil
-	p.qid = nil
+	p.Qid = nil
 	p.Usrkey = nil
 }
 
@@ -349,20 +350,20 @@ func (p *Pledge_bwow) From_json( jstr *string ) ( err error ){
 		return
 	}
 
-	p.src, p.src_tpport, p.src_vlan  = Split_hpv( jp.Src )		// suss apart host and port
-	p.dest, p.dest_tpport, _  = Split_hpv( jp.Dest )
+	p.Src, p.Src_tpport, p.Src_vlan  = Split_hpv( jp.Src )		// suss apart host and port
+	p.Dest, p.Dest_tpport, _  = Split_hpv( jp.Dest )
 
-	p.protocol = jp.Protocol
+	p.Protocol = jp.Protocol
 	p.Window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
 	p.Id = jp.Id
-	p.dscp = jp.Dscp
+	p.Dscp = jp.Dscp
 	p.Usrkey = jp.Usrkey
-	p.qid = jp.Qid
-	p.bandw_out = jp.Bandwout
+	p.Qid = jp.Qid
+	p.Bandw_out = jp.Bandwout
 
-	p.protocol = jp.Protocol
-	if p.protocol == nil {					// we don't tolerate nil ptrs
-		p.protocol = &empty_str
+	p.Protocol = jp.Protocol
+	if p.Protocol == nil {					// we don't tolerate nil ptrs
+		p.Protocol = &empty_str
 	}
 
 	return
@@ -378,7 +379,7 @@ func (p *Pledge_bwow) Add_proto( proto *string ) {
 		return
 	}
 
-	p.protocol = proto
+	p.Protocol = proto
 }
 
 /*
@@ -389,7 +390,7 @@ func (p *Pledge_bwow) Get_proto( ) ( *string ) {
 		return nil
 	}
 
-	return p.protocol
+	return p.Protocol
 }
 
 func (p *Pledge_bwow ) Set_phost( phost *string ) {
@@ -397,7 +398,7 @@ func (p *Pledge_bwow ) Set_phost( phost *string ) {
 		return
 	}
 
-	p.phost = phost
+	p.Phost = phost
 
 }
 
@@ -427,7 +428,7 @@ func (p *Pledge_bwow) Get_gate( ) ( *Gate ) {
 	Set match v6 flag based on user input.
 */
 func (p *Pledge_bwow) Set_matchv6( state bool ) {
-	p.match_v6 = state
+	p.Match_v6 = state
 }
 
 /*
@@ -435,7 +436,7 @@ func (p *Pledge_bwow) Set_matchv6( state bool ) {
 	this pledge.
 */
 func (p *Pledge_bwow) Has_host( hname *string ) ( bool ) {
-	return *p.src == *hname || *p.dest == *hname
+	return *p.Src == *hname || *p.Dest == *hname
 }
 
 
@@ -463,7 +464,7 @@ func (p *Pledge_bwow) String( ) ( s string ) {
 
 	//NEVER put the usrkey into the string!
 	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%s%s h2=%s:%s id=%s qid=%s st=%d ex=%d bwo=%d push=%v dscp=%d ptype=bw_oneway", state, diff, caption,
-		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.Id, *p.qid, commence, expiry, p.bandw_out, p.Pushed, p.dscp )
+		*p.Src, *p.Dest_tpport, v1, *p.Dest, *p.Dest_tpport,  *p.Id, *p.Qid, commence, expiry, p.Bandw_out, p.Pushed, p.Dscp )
 	return
 }
 
@@ -485,7 +486,7 @@ func (p *Pledge_bwow) To_json( ) ( json string ) {
 	v1 := p.vlan2string( )
 
 	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwout": %d, "src": "%s:%s%s", "dest": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "ptype": %d }`,
-				state, diff,  p.bandw_out, *p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport, *p.Id, *p.qid, p.dscp, PT_OWBANDWIDTH )
+				state, diff,  p.Bandw_out, *p.Src, *p.Src_tpport, v1, *p.Dest, *p.Dest_tpport, *p.Id, *p.Qid, p.Dscp, PT_OWBANDWIDTH )
 
 	return
 }
@@ -513,7 +514,7 @@ func (p *Pledge_bwow) To_chkpt( ) ( chkpt string ) {
 	v1 := p.vlan2string( )
 
 	chkpt = fmt.Sprintf( `{ "src": "%s:%s%s", "dest": "%s:%s", "commence": %d, "expiry": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "ptype": %d }`,
-			*p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport,  commence, expiry, p.bandw_out, *p.Id, *p.qid, *p.Usrkey, p.dscp, PT_OWBANDWIDTH )
+			*p.Src, *p.Src_tpport, v1, *p.Dest, *p.Dest_tpport,  commence, expiry, p.Bandw_out, *p.Id, *p.Qid, *p.Usrkey, p.Dscp, PT_OWBANDWIDTH )
 
 	return
 }

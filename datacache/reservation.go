@@ -42,13 +42,62 @@ import (
 )
 
 
+// --------------- private -------------------------------------------------------------------------------
+/*
+	Returns a list of reservation IDs that are currently in the datacache.
+	This is an internal workhorse as the only difference is the table name.
+	Inc_exp will cause expired reservations to be included in the list when
+	set to true. If exp_only is true, then the list includes only the expired
+	reservations.
+*/
+func ( dc *Dcache ) get_res_list( table string, inc_exp bool, exp_only bool ) ( rlist []string, err error ) {
+	var (
+		resid	string
+		expiry	int64
+	)
+
+	if dc == nil {
+		return nil, fmt.Errorf( "no struct passed to get_res_list" )
+	}
+
+	if !dc.connected {
+		if  ok, err := dc.connect(); ! ok {
+			return nil, err
+		}
+	}
+
+	ecount := 0
+	now := time.Now().Unix()
+	size := 1024
+	rlist = make( []string, 0, size )			// initial cap set at size, it will grow if needed
+    iter := dc.sess.Query( fmt.Sprintf( `select  resid,expiry  from %s`, table ) ).Consistency(gocql.One).Iter()
+    for iter.Scan( &resid, &expiry ) {
+		if (expiry > now) {
+			if ! exp_only {
+				rlist = append( rlist, resid )			// this will grow if we reach capacity so we must reassign
+			} else {
+				ecount++
+			}
+		} else {
+			if exp_only || inc_exp {
+				rlist = append( rlist, resid )			// this will grow if we reach capacity so we must reassign
+			} else {
+				ecount++
+			}
+		}
+    }
+
+	dc.sheep.Baa( 1, "%d reservations listed from %s; %d excluded ", len( rlist ), table, ecount )
+	return rlist[0:len( rlist )], nil
+}
+
 
 /*
 	Generic reservation save should work for all.
 */
 func ( dc *Dcache ) set_reservation( resid string, expiry int64, project string, res interface{}, table string ) ( err error ) {
 	if dc == nil {
-		return fmt.Errorf( "no struct passed to set_bwres" )
+		return fmt.Errorf( "no struct passed to set_reservation" )
 	}
 
 	if resid ==""  {
@@ -72,7 +121,7 @@ func ( dc *Dcache ) set_reservation( resid string, expiry int64, project string,
 			dc.sheep.Baa( 1, "reservation successfully added to datacache: resid=%s proj=%s", resid, project )
 		}
 	} else {
-    	err = dc.sess.Query( fmt.Sprintf( "`DELETE FROM %s WHERE resid = ?`", table), resid ).Exec()
+    	err = dc.sess.Query( fmt.Sprintf( `DELETE FROM %s WHERE resid = ?`, table), resid ).Exec()
 		if err != nil {
 			dc.sheep.Baa( 1, "unable to delete bandwidth reservation: key=%s err=%s", resid, err )
 			return err
@@ -85,13 +134,38 @@ func ( dc *Dcache ) set_reservation( resid string, expiry int64, project string,
 }
 
 /*
-	Saves a reservation into the datacache.
+	Delete all reservations which have expired.
+	Stops short if there is an error, so it might not delete all.
+*/
+func ( dc *Dcache ) del_exres( table string ) ( err error ) {
+	ecount := 0
+	list, err := dc.get_res_list( table, true, true )
+	
+	for i := range list {
+		err = dc.set_reservation( list[i], 0, "", nil, table )
+		if err != nil {
+			dc.sheep.Baa( 1, "unable to delete a reservation: %s: %s", list[i], err )
+			return err
+		}
+
+		ecount++
+	}
+
+	dc.sheep.Baa( 1, "deleted %d expired reservations", ecount )
+	return err
+}
+
+// ------------- specific reservation type functions ----------------------------------------------------------------
+
+/*
+	Saves a bandwidth reservation into the datacache.
 	If res is nil, then the reservation is deleted. The entry is keyed on reservation id and the project
 	id to make by project listing easier.
 */
 func ( dc *Dcache ) Set_bwres( resid string, expiry int64, project string, res interface{} ) ( err error ) {
 	return dc.set_reservation( resid, expiry, project, res, "bwres" )
 }
+
 /*
 	Delete the reservation from the datacache
 */
@@ -100,56 +174,18 @@ func ( dc *Dcache ) Del_bwres( resid string ) ( err error ) {
 }
 
 /*
-	Delete all reservations which have expired.
+	Delete all bandwidth reservations which have expired.
+	Stops short if there is an error, so it might not delete all.
 */
 func ( dc *Dcache ) Delex_bwres( ) ( err error ) {
-	return nil
-}
-
-/*
-	Returns a list of reservation IDs that are currently in the datacache.
-	This is an internal workhorse as the only difference is the table name.
-	Inc_exp will cause expired reservations to be included in the list when
-	set to true.
-*/
-func ( dc *Dcache ) get_res_list( table string, inc_exp bool ) ( rlist []string, err error ) {
-	var (
-		resid	string
-		expiry	int64
-	)
-
-	if dc == nil {
-		return nil, fmt.Errorf( "no struct passed to get_res_list" )
-	}
-
-	if !dc.connected {
-		if  ok, err := dc.connect(); ! ok {
-			return nil, err
-		}
-	}
-
-	ecount := 0
-	now := time.Now().Unix()
-	size := 1024
-	rlist = make( []string, 0, size )			// initial cap set at size, it will grow if needed
-    iter := dc.sess.Query( fmt.Sprintf( `select  resid,expiry  from %s`, table ) ).Consistency(gocql.One).Iter()
-    for iter.Scan( &resid, &expiry ) {
-		if inc_exp || expiry > now {
-			rlist = append( rlist, resid )			// this will grow if we reach capacity so we must reassign
-		} else {
-			ecount++
-		}
-    }
-
-	dc.sheep.Baa( 1, "%d reservations exist in the datacache (%s) %d expired not listed", len( rlist ), table, ecount )
-	return rlist[0:len( rlist )], nil
+	return dc.del_exres( "bwres" )
 }
 
 /*
 	Specific bwres list function.
 */
 func ( dc *Dcache ) Get_bwres_list( inc_exp bool ) ( rlist []string, err error ) {
-	return dc.get_res_list( "bwres", inc_exp )
+	return dc.get_res_list( "bwres", inc_exp, false )
 }
 
 /*
@@ -158,4 +194,87 @@ func ( dc *Dcache ) Get_bwres_list( inc_exp bool ) ( rlist []string, err error )
 */
 func ( dc *Dcache ) Get_one_bwres( resid string, target interface{} ) ( err error ) {
 	return dc.get_one_map( "bwres", "resid", resid, "resdata", target )
+}
+
+
+// ---------------- bwow --------------------------
+
+/*
+	Saves a bwow reservation into the datacache.
+	If res is nil, then the reservation is deleted. The entry is keyed on reservation id and the project
+	id to make by project listing easier.
+*/
+func ( dc *Dcache ) Set_bwowres( resid string, expiry int64, project string, res interface{} ) ( err error ) {
+	return dc.set_reservation( resid, expiry, project, res, "bwowres" )
+}
+
+/*
+	Delete the reservation from the datacache
+*/
+func ( dc *Dcache ) Del_bwowres( resid string ) ( err error ) {
+	return dc.set_reservation( resid, 1, "", nil, "bwowres" )
+}
+
+/*
+	Delete all bwow reservations which have expired.
+	Stops short if there is an error, so it might not delete all.
+*/
+func ( dc *Dcache ) Delex_bwowres( ) ( err error ) {
+	return dc.del_exres( "bwowres" )
+}
+
+/*
+	Build a list of bwow reservation IDs
+*/
+func ( dc *Dcache ) Get_bwowres_list( inc_exp bool ) ( rlist []string, err error ) {
+	return dc.get_res_list( "bwowres", inc_exp, false )
+}
+
+/*
+	Given a bwow reservation id, look it up and return the structure with information from 
+	the data cache filled in.  Returns error if not found etc.
+*/
+func ( dc *Dcache ) Get_one_bwowres( resid string, target interface{} ) ( err error ) {
+	return dc.get_one_map( "bwowres", "resid", resid, "resdata", target )
+}
+
+// ---------------- mirror --------------------------
+
+/*
+	Saves a mirror reservation into the datacache.
+	If res is nil, then the reservation is deleted. The entry is keyed on reservation id and the project
+	id to make by project listing easier.
+*/
+func ( dc *Dcache ) Set_mirres( resid string, expiry int64, project string, res interface{} ) ( err error ) {
+	return dc.set_reservation( resid, expiry, project, res, "mirres" )
+}
+
+/*
+	Delete the reservation from the datacache
+*/
+func ( dc *Dcache ) Del_mirres( resid string ) ( err error ) {
+	return dc.set_reservation( resid, 1, "", nil, "mirres" )
+}
+
+/*
+	Delete all mirror reservations which have expired.
+	Stops short if there is an error, so it might not delete all.
+*/
+func ( dc *Dcache ) Delex_mirres( ) ( err error ) {
+	return dc.del_exres( "mirres" )
+}
+
+/*
+	Build a list of mirror reservation IDs
+*/
+func ( dc *Dcache ) Get_mirres( inc_exp bool ) ( rlist []string, err error ) {
+	return dc.get_res_list( "mirres", inc_exp, false )
+}
+
+/*
+	Given a mirror reservation id, look it up and return the structure with information from 
+	the data cache filled in.  Returns error if not found etc.
+*/
+func ( dc *Dcache ) Get_one_mirres( resid string, target interface{} ) ( err error ) {
+	return dc.get_one_map( "mirres", "resid", resid, "resdata", target )
 }

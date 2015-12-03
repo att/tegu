@@ -162,6 +162,7 @@ const (
 	REQ_DUPCHECK				// check for duplicate (resmgr)
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
+	REQ_CLEANUP					// periodic cleanup 
 
 	//--- deprecated - http uses osif for direct query REQ_GETGW					// give a project ID and get it's gateway
 )
