@@ -32,6 +32,7 @@
 				01 Jun 2015 - Added equal() support
 				16 Aug 2015 - Move common code into Pledge_base
 				16 Nov 2015 - Add tenant_id, stdout, stderr to Pledge_mirror
+				24 Nov 2015 - Add options
 				03 Dec 2015 - Added datacache support.
 */
 
@@ -63,6 +64,7 @@ type Pledge_mirror struct {
 	//mbidx		int			`dcache:"_"`	// insertion point into mblist
 	Match_v6	bool		`dcache:"_"`	// true if we should force flow-mods to match on IPv6
 	Tenant_id	*string
+	Options		*string		`dcache:"_"`
 
 	stdout		[]string	// stdout/err from last remote command -- not saved in checkpoints!
 	stderr		[]string
@@ -91,6 +93,7 @@ type Json_pledge struct {
 	//Mbox_list	[]*Mbox
 	Match_v6	bool
 	Tenant_id	*string
+	Options		*string
 }
 
 // ---- private -------------------------------------------------------------------
@@ -100,7 +103,7 @@ type Json_pledge struct {
 /*
  *	Makes a mirroring pledge.
  */
-func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string, vlan *string, tenant *string ) ( p Pledge, err error ) {
+func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expiry int64, id *string, usrkey *string, phost *string, vlan *string, tenant *string, opts *string ) ( p Pledge, err error ) {
 	err = nil
 
 	window, err := mk_pledge_window( commence, expiry )		// will adjust commence forward to now if needed, returns nil if expiry has past
@@ -125,6 +128,7 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 		Host2:		out_port,		// mirror output port
 		Qid:		phost,			// physical host (overloaded field)
 		Tenant_id:	tenant,
+		Options:	opts,
 		stdout:		make([]string, 0),
 		stderr:		make([]string, 0),
 	}
@@ -153,6 +157,7 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 		Host2:		p.Host2,
 		Qid:		p.Qid,
 		Tenant_id:	p.Tenant_id,
+		Options:	p.options,
 		stdout:		make([]string, 0),
 		stderr:		make([]string, 0),
 	}
@@ -197,6 +202,7 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 	p.Usrkey = jp.Usrkey
 	p.Qid = jp.Qid
 	p.Tenant_id = jp.Tenant_id
+	p.Options = jp.Options
 	//p.bandw_out = jp.Bandwout
 	//p.bandw_in = jp.Bandwin
 
@@ -264,6 +270,10 @@ func (p *Pledge_mirror) Get_Output() ( []string, []string ) {
 	return p.stdout, p.stderr
 }
 
+func (p *Pledge_mirror) Get_Options() ( *string ) {
+	return p.options
+}
+
 // --------- humanisation or export functions --------------------------------------------------------
 
 /*
@@ -295,8 +305,8 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 
 	state, _, diff := p.Window.state_str( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "ptype": %d }`,
-		state, diff, *p.Host1, *p.Host2, *p.Id, *p.Tenant_id, PT_MIRRORING )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
+		state, diff, *p.Host1, *p.Host2, *p.Id, *p.Tenant_id, *p.Options, PT_MIRRORING )
 
 	return
 }
@@ -323,8 +333,8 @@ func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 	c, e := p.Window.get_values( )
 
 	chkpt = fmt.Sprintf(
-		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id", %q, "ptype": %d }`,
-		*p.Host1, *p.Host2, c, e, *p.Id, *p.Qid, *p.Usrkey, *p.Tenant_id, PT_MIRRORING )
+		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
+		*p.Host1, *p.Host2, c, e, *p.Id, *p.Qid, *p.Usrkey, *p.Tenant_id, *p.Options, PT_MIRRORING )
 
 	return
 }

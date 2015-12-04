@@ -25,6 +25,7 @@
 .\"     Mods:		04 Jul 2015 - Created
 .\"					16 Aug 2015 - Finished descriptions.
 .\"					01 Sep 2015 - Add section about state mismatch.
+.\"					24 Nov 2015 - Add options to add-mirror
 .\"
 .TH TEGU 8 "Tegu Manual"
 .CM 4
@@ -198,9 +199,11 @@ The body of the post should look like:
 	"vlan": "vlan",                      // optional
 	"cookie": "value",                   // optional
 	"name": "mirrorname",                // optional
+	"options": "optionlist",             // optional
 }
 .ft P
 .fi
+See tegu_req(1) for the meanings of the fields.
 .IP
 Because multiple mirrors may be created as a result of one call,
 we return a JSON array of results, one for each mirror:

@@ -27,6 +27,7 @@
 .\"					01 Sep 2015 - Filled in unfinished section.
 .\"					18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
 .\"					22 Sep 2015 - Updates based on code changes.
+.\"					24 Nov 2015 - Add options to add-mirror
 .\"
 .TH TEGU_REQ 1 "Tegu Manual"
 .CM 4
@@ -84,6 +85,9 @@ Only useful if -T is not used.
 .B \-k key=value
 Causes extra arguments, in the form of key=value, to be passed to Tegu for certain requests.
 The commands where this is used are: listres, listhosts, graph, reserve, steer.
+.TP 8
+.B \-o options
+Supplies extra options for a command.  Currently, this is only used by the \fBadd-mirror\fP command (see below).
 .TP 8
 .B \-R name
 Supplies the region name overriding the OS_REGION from the environment.
@@ -329,7 +333,6 @@ token/tenant/host - for "host" (with 1 port only) on "tenant".
 .IP
 token//vm_uuid - for the host with UUID "vm_uuid"
 Tegu will attempt to determine which physical machine the bridge is on and set up the mirror appropriately.
-
 .IP
 .B output
 Specifies where the mirror should be directed to.
@@ -352,7 +355,7 @@ This allows GRE endpoints to be pre-specified.
 Is an optional string that is used to provide a minimum of security for the mirror.
 If provided, it is required when deleting (del-mirror) or viewing (show-mirror) the mirror.
 The cookie may not contain any spaces, and does not need to be unique across mirror requests.
-If a cookie is not desired when specifying the \fIvlan\fP option (see below), hen the empty
+If a cookie is not desired when specifying the \fIvlan\fP option (see below), then the empty
 string should be provided for the cookie.
 .IP
 .B vlan
@@ -361,6 +364,11 @@ be added to the create mirror request passed to openvswitch.
 This specifies that only packets for the listed VLAN(s) should be mirrored.
 If provided, it must consist of a comma separated list of VLAN ids from 0 to 4095.
 If the string is provided and is syntactically incorrect, the mirror request is rejected.
+.IP
+Tegu will normally use the built-in mirroring capability of OVS to provide the mirrors.
+However, if the \fB-oflowmod\fP option is provided to tegu_req, then OVS flowmods will be used
+to mirror traffic to the appropriate port (note: this option will only work if the output port
+is a GRE port).
 
 .TP 8
 .B del-mirror name [cookie]
