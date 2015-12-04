@@ -472,7 +472,7 @@ func ( inv *Inventory ) stash_res( gres *gizmos.Pledge ) {
 	}
 
 	if err != nil {
-		rm_sheep.Baa( 1, "WRN: unable to cache reservation: %s", (*gres).Get_id() )
+		rm_sheep.Baa( 1, "WRN: unable to cache reservation: %s", *((*gres).Get_id()) )
 		inv.unstashed = true
 		(*gres).Set_stashed( false )			// ensure mark is off
 	} else {
