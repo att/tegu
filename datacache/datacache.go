@@ -212,7 +212,7 @@ func imap2string( imap map[string]interface{} ) ( string ) {
 	Ensure that the tcn (tegu cache name) exists inside of cassandra.
 */
 func ( dc *Dcache ) set_keyspace( ) ( err error ) {
-	if dc == nil || dc.sess == nil {
+	if dc == nil {
 		return fmt.Errorf( "no data cache struct or no session." )
 	}
 
@@ -301,14 +301,14 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 	state = false 
 	err = nil
 
+	if dc.db_hosts == "none" {
+		return false, fmt.Errorf( "datacach is explicitly turned off in the config file! (%s)", dc.db_hosts )
+	}
+
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	if dc.connected {						// someone beet us to the punch
 		return true, nil
-	}
-
-	if dc.db_hosts == "none" {
-		return false, fmt.Errorf( "CAUTION: datacach is explicitly turned off in the config file!" )
 	}
 
 	dc.sheep.Baa( 1, "connecting to: %s", dc.db_hosts )
@@ -371,7 +371,7 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 	Return true if anything but 'none' was listed for the db hosts.
 */
 func ( dc *Dcache ) Enabled() ( bool ) {
-	if dc == nil || dc.sess == nil {
+	if dc == nil {
 		return false
 	}
 
@@ -395,7 +395,7 @@ func ( dc *Dcache ) get_one_map( table string, keyname string, keyvalue string, 
 		rdata map[string]string				// stuff that comes back from the datacache is a map
 	)
 
-	if dc == nil || dc.sess == nil {
+	if dc == nil {
 		return fmt.Errorf( "no struct passed to get_one_res" )
 	}
 

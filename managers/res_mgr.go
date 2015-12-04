@@ -118,7 +118,7 @@ import (
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
-	"github.com/att/gopkgs/chkpt"
+	//"github.com/att/gopkgs/chkpt"
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/tegu/datacache"
 	"github.com/att/tegu/gizmos"
@@ -134,7 +134,7 @@ import (
 type Inventory struct {
 	cache		map[string]*gizmos.Pledge		// cache of pledges
 	ulcap_cache	map[string]int					// cache of user limit values (max value)
-	chkpt		*chkpt.Chkpt
+	//chkpt		*chkpt.Chkpt
 	unstashed	bool							// set to true if we fail to stash something
 }
 
@@ -472,7 +472,7 @@ func ( inv *Inventory ) stash_res( gres *gizmos.Pledge ) {
 	}
 
 	if err != nil {
-		rm_sheep.Baa( 1, "WRN: unable to cache reservation: %s", *((*gres).Get_id()) )
+		rm_sheep.Baa( 1, "WRN: unable to cache reservation: %s: %s", *((*gres).Get_id()), err )
 		inv.unstashed = true
 		(*gres).Set_stashed( false )			// ensure mark is off
 	} else {
@@ -519,7 +519,7 @@ func (inv *Inventory) load( ) ( err error ) {
 				if req.Response_data != nil {
 					path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 					p.Set_path_list( path_list )
-					rm_sheep.Baa( 2, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(p.Get_id()), *h1, *h2, len( path_list ) )
+					rm_sheep.Baa( 2, "path allocated for cached reservation: %s %s %s; path length= %d", *(p.Get_id()), *h1, *h2, len( path_list ) )
 					err = inv.Add_res( p, false )									// add to inventory, but don't stash as it just came from there :)
 					nres++
 				} else {
@@ -924,10 +924,7 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 	var (
 		inv	*Inventory
 		msg	*ipc.Chmsg
-		ckptd	string
 		last_qcheck	int64 = 0			// time that the last queue check was made to set window
-		//last_chkpt	int64 = 0			// time that the last checkpoint was written
-		//retry_chkpt bool = false		// checkpoint needs to be retried because of a timing issue
 		queue_gen_type = REQ_GEN_EPQMAP
 		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
 		all_sys_up	bool = false;		// set when we receive the all_up message; some functions must wait for this
@@ -964,12 +961,6 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 	}
 
 	if cfg_data["resmgr"] != nil {
-		cdp := cfg_data["resmgr"]["chkpt_dir"]
-		if cdp == nil {
-			ckptd = "/var/lib/tegu/resmgr"							// default directory and prefix
-		} else {
-			ckptd = *cdp + "/resmgr"							// add prefix to directory in config
-		}
 
 		p = cfg_data["resmgr"]["verbose"]
 		if p != nil {
@@ -1012,7 +1003,6 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 	res_refresh = time.Now().Unix() + int64( rr_rate )				// set first refresh in an hour (ignored if hto_limit not set)
 	inv = Mk_inventory( )
-	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )						// make a checkpoint object (deprecated)
 	inv.build_ulcaps()												// fetch ulcaps from the datacache and pass to network manager
 
 	last_qcheck = time.Now().Unix()

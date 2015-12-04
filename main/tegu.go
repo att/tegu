@@ -145,7 +145,7 @@
 				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
 				3.1		- QoS-Lite with steering and mirroring added
 				3.2		- QoS-Lite with steering and WACC support added
-				4.0		- QoS-Lite (bandwidth/mirroring) with endpoint changes
+				4.0		- QoS-Lite (bandwidth/mirroring) with endpoint and datacache changes
 				4.1		- QoS-Lite with scalable steering
 				4.2		- QoS-Lite with wide area support
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
@@ -176,14 +176,13 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.0.1/1c035"
+		version		string = "v4.0.1/1c045"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
 		needs_help 	*bool
 		fl_host		*string
-		//super_cookie *string
-		chkpt_file	*string
+		//chkpt_file	*string
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager
@@ -200,7 +199,7 @@ func main() {
 
 	needs_help = flag.Bool( "?", false, "show usage" )
 
-	chkpt_file = flag.String( "c", "", "check-point-file" )
+	//chkpt_file = flag.String( "c", "", "check-point-file" )
 	cfg_file = flag.String( "C", "", "configuration-file" )
 	api_port = flag.String( "p", "29444", "api_port" )
 	topo_file := flag.String( "t", "", "topo_file" )
@@ -218,13 +217,6 @@ func main() {
 	}
 	sheep.Baa( 1, "tegu %s started", version )
 	sheep.Baa( 1, "http api is listening on: %s", *api_port )
-
-	/*
-	if *super_cookie == "" {							// must have something and if not supplied this is probably not guessable without the code
-		x := "20030217"
-		super_cookie = &x
-	}
-	*/
 
 	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
 	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
@@ -273,14 +265,14 @@ func main() {
 
 	sheep.Baa( 1, "network initialised, sending inventory load request" )
 	req.Send_req( rmgr_ch, my_chan, managers.REQ_LOAD, "", nil )
-	req = <- my_chan												// block until the file is loaded
+	req = <- my_chan												// block until we load from the datacache
 
 	if req.State != nil {
-		sheep.Baa( 0, "ERR: unable to load checkpoint file: %s: %s\n", *chkpt_file, req.State )
-		os.Exit( 1 )
+		sheep.Baa( 0, "WRN: datacache info was NOT loaded: %s	[TGUEPT000]\n", req.State )
+		//os.Exit( 1 )
+	} else {
+		sheep.Baa( 1, "network initialised, reservations loaded from cache, opening up system for all requests" )
 	}
-
-	sheep.Baa( 1, "network initialised, reservations loaded from cache, opening up system for all requests" )
 	req.Send_req( rmgr_ch, nil, managers.REQ_ALLUP, nil, nil )		// send all clear to the managers that need to know
 	managers.Set_accept_state( true )								// http doesn't have a control loop like others, so needs this
 
