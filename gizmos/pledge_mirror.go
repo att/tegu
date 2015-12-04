@@ -157,7 +157,7 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 		Host2:		p.Host2,
 		Qid:		p.Qid,
 		Tenant_id:	p.Tenant_id,
-		Options:	p.options,
+		Options:	p.Options,
 		stdout:		make([]string, 0),
 		stderr:		make([]string, 0),
 	}
@@ -271,7 +271,7 @@ func (p *Pledge_mirror) Get_Output() ( []string, []string ) {
 }
 
 func (p *Pledge_mirror) Get_Options() ( *string ) {
-	return p.options
+	return p.Options
 }
 
 // --------- humanisation or export functions --------------------------------------------------------
