@@ -43,7 +43,7 @@ import (
 	epm is assumed to be a copy of the map which includes port and router info as strings.
 */
 func ( dc *Dcache ) Set_endpt( epid string, epm map[string]string ) ( err error ) {
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return fmt.Errorf( "no struct passed to set_endpt" )
 	}
 
@@ -85,7 +85,7 @@ func ( dc *Dcache ) Get_endpt_list( ) ( eplist []string, err error ) {
 		epid	string
 	)
 
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return nil, fmt.Errorf( "no struct passed to get_endpt_list" )
 	}
 
@@ -114,7 +114,7 @@ func ( dc *Dcache ) Get_endpt( epid string ) ( epm map[string]string, err error 
 		epdata map[string]string
 	)
 
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return nil, fmt.Errorf( "no struct passed to get_endpt" )
 	}
 

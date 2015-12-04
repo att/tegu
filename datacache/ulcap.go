@@ -58,8 +58,8 @@ func ( dc *Dcache ) Get_ulcap( project string ) ( pctg int, err error ) {
 
 	pctg = 0
 
-	if dc == nil {
-		return 0, fmt.Errorf( "nil ptr to struct passed" )
+	if dc == nil || dc.sess == nil {
+		return 0, fmt.Errorf( "nil ptr to struct passed or no session" )
 	}
 
 	if ! dc.connected {
@@ -83,8 +83,8 @@ func ( dc *Dcache ) Get_ulcap( project string ) ( pctg int, err error ) {
 	Returns a map of all user limit capacities keyed by project id.
 */
 func ( dc *Dcache ) Map_ulcaps( ) ( m map[string]int, err error ) {
-	if dc == nil {
-		return nil, fmt.Errorf( "datacache struct was nil" )
+	if dc == nil || dc.sess == nil {
+		return nil, fmt.Errorf( "datacache struct was nil, or no session" )
 	}
 
 	var	(
@@ -109,7 +109,7 @@ func ( dc *Dcache ) Map_ulcaps( ) ( m map[string]int, err error ) {
 */
 func ( dc *Dcache ) Set_ulcap( project string, val int ) ( err error ) {
 
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return fmt.Errorf( "no struct passed to set_ulcap" )
 	}
 

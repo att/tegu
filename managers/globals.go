@@ -373,9 +373,13 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 		go tegu_sheep.Sheep_herder( log_dir, 86400 )				// start the function that will roll the log now and again
 	}
 
-	for ! dc.Is_connected( ) {
-		tegu_sheep.Baa( 1, "blocked: not connected to data cache" )
-		time.Sleep( 10 * time.Second )
+	if ! dc.Enabled() {
+		tegu_sheep.Baa( 0, "CAUTION: datacache has been explicitly disabled in the config file; no data will be cached" )
+	} else {
+		for ! dc.Is_connected( ) {
+			tegu_sheep.Baa( 1, "blocked: not connected to data cache" )
+			time.Sleep( 10 * time.Second )
+		}
 	}
 
 	return

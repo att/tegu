@@ -56,8 +56,6 @@ import (
 	"github.com/att/gopkgs/token"
 	"github.com/att/gopkgs/transform"
 
-	//"github.com/att/tegu/gizmos"
-
 	"github.com/gocql/gocql"			// cassandra db interface (requires go 1.4 or later)
 )
 
@@ -214,15 +212,15 @@ func imap2string( imap map[string]interface{} ) ( string ) {
 	Ensure that the tcn (tegu cache name) exists inside of cassandra.
 */
 func ( dc *Dcache ) set_keyspace( ) ( err error ) {
-	if dc == nil {
-		return fmt.Errorf( "no data cache struct" )
+	if dc == nil || dc.sess == nil {
+		return fmt.Errorf( "no data cache struct or no session." )
 	}
 
 	dc.cluster.Keyspace = "system"								// switch to system land for this call
 	dc.cluster.Timeout = 20 * time.Second
     sess, err := dc.cluster.CreateSession()						// and create a new session
 	if err != nil {
-		dc.sheep.Baa( 1, "CRI: unable to create a session to setup datacache key space: %s", err )
+		dc.sheep.Baa( 1, "CRI: unable to create a session to setup datacache key space: %s	[TGUDCH001]", err )
 		return
 	}
 
@@ -267,8 +265,6 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 	} 
 	dc.sheep.Baa( 1, "endpts table exists" )
 
-		//chkpt = fmt.Sprintf( `{ 
-
 	err  = dc.sess.Query( fmt.Sprintf( `CREATE TABLE bwres ( resid text PRIMARY KEY, expiry int, project text, resdata map<text,text> )` ) ).Exec()
 	if err != nil {
 		if strings.Index( err.Error( ), "Cannot add already existing table" ) != 0 {
@@ -296,7 +292,7 @@ func ( dc *Dcache ) ensure_tables() ( err error ) {
 	} 
 	dc.sheep.Baa( 1, "mirres table exists" )
 
-	// TODO: add the rest of tegu tables
+	// TODO: add the rest of tegu tables (group, more?)
 	return nil
 }
 
@@ -311,21 +307,26 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 		return true, nil
 	}
 
+	if dc.db_hosts == "none" {
+		return false, fmt.Errorf( "CAUTION: datacach is explicitly turned off in the config file!" )
+	}
+
 	dc.sheep.Baa( 1, "connecting to: %s", dc.db_hosts )
 	nhosts, hosts := token.Tokenise_qsep( dc.db_hosts, ", "  ) 				// split on either commas or spaces
 	if nhosts < 1 {
-		dc.sheep.Baa( 0, "CRI: no hosts listed for datacache" )
+		dc.sheep.Baa( 0, "CRI: no hosts listed for datacache	[TGUDCH000]" )
 		return false, fmt.Errorf( "no seed hosts in the list" )
 	}
 
-    dc.cluster = gocql.NewCluster( hosts[0] )			// this is stilly; internally to cluster is a slice, but the function requires individual strings; wtf?
+    dc.cluster = gocql.NewCluster( hosts[0] )			// this is silly: internally hosts is a slice, but the function requires individual strings; wtf?
+														// we will give it one, and then put our slice in later to work round this.
     if dc.cluster == nil {
 		dc.sheep.Baa( 0, "CRI: unable to allocate a datacache cluster configuration" )
 		return false, fmt.Errorf( "cluster allocation failed" )
     }
 
     dc.cluster.Keyspace = dc.tcn							// set our namespace
-    dc.cluster.Hosts = hosts								// work round their var args interface
+    dc.cluster.Hosts = hosts								// work round their var args interface (see silly comment above)
 	switch nhosts {
 		case 1:
     		dc.cluster.Consistency = gocql.One 				// possible values: Any, One, Two, Three, Quorum, All, LocalQuorum EachQuorum LocalOne
@@ -366,6 +367,16 @@ func ( dc *Dcache ) connect( ) (state bool, err error) {
 	return true, nil
 }
 
+/*
+	Return true if anything but 'none' was listed for the db hosts.
+*/
+func ( dc *Dcache ) Enabled() ( bool ) {
+	if dc == nil || dc.sess == nil {
+		return false
+	}
+
+	return !( dc.db_hosts == "none" )
+}
 //------ generic access functions (internal) ---------------------------------------------------------------------------
 
 /*
@@ -384,7 +395,7 @@ func ( dc *Dcache ) get_one_map( table string, keyname string, keyvalue string, 
 		rdata map[string]string				// stuff that comes back from the datacache is a map
 	)
 
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return fmt.Errorf( "no struct passed to get_one_res" )
 	}
 

@@ -56,7 +56,7 @@ func ( dc *Dcache ) get_res_list( table string, inc_exp bool, exp_only bool ) ( 
 		expiry	int64
 	)
 
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return nil, fmt.Errorf( "no struct passed to get_res_list" )
 	}
 
@@ -96,7 +96,7 @@ func ( dc *Dcache ) get_res_list( table string, inc_exp bool, exp_only bool ) ( 
 	Generic reservation save should work for all.
 */
 func ( dc *Dcache ) set_reservation( resid string, expiry int64, project string, res interface{}, table string ) ( err error ) {
-	if dc == nil {
+	if dc == nil || dc.sess == nil {
 		return fmt.Errorf( "no struct passed to set_reservation" )
 	}
 
