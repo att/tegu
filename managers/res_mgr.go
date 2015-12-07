@@ -118,7 +118,6 @@ import (
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
-	//"github.com/att/gopkgs/chkpt"
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/tegu/datacache"
 	"github.com/att/tegu/gizmos"
@@ -339,6 +338,7 @@ func (i *Inventory) pause_off( ) {
 	for _, p := range i.cache {
 		(*p).Resume( true )					// also reset the push flag
 	}
+
 }
 
 /*
