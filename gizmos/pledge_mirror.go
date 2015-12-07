@@ -336,9 +336,19 @@ func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 
 	c, e := p.window.get_values( )
 
+	options := ""
+	if p.options != nil {
+		options = *p.options
+	}
+
+	tenant_id := "unknown"
+	if p.tenant_id != nil {
+		tenant_id = *p.tenant_id
+	} 
+
 	chkpt = fmt.Sprintf(
 		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
-		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, *p.tenant_id, *p.options, PT_MIRRORING )
+		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, tenant_id, options, PT_MIRRORING )
 
 	return
 }
