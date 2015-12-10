@@ -581,6 +581,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 			is_token = false
 		}
 		if xauth != "" {						// data doesn't blelong in the header, but sigh, we'll give it preference if it is
+			is_token = true
 			auth_data = xauth
 		}
 
