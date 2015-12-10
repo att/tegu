@@ -137,6 +137,7 @@
 				08 Oct 2015 : Correct bug causing all reservations to be pushed when reservation change state happens.
 				09 Oct 2015 : Use 'admin' project for default phys host list.
 				16 Nov 2015 : Add restart message to logfile.
+				09 Dec 2015 : Require token on requests to always be token/project.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -171,7 +172,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.5/1c075"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.5/1c105"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

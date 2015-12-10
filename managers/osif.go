@@ -105,6 +105,8 @@
 						try to build a host list from all projects. It does fall back to the old way
 						if using the admin project fails to build a list.
 				16 Nov 2015 - Added REQ_HAS_ANY_ROLE2, updated has_any_role()
+				09 Dec 2015 - Tightened the reqirements on the token verification; now requires a
+						project name/id to be supplied.
 
 	Deprecated messages -- do NOT reuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -303,18 +305,27 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 
 /*
 	Given a token, return true if the token is valid for one of the roles listed in role.
-	Role is a list of space separated role names.  If token is actually token/project, then
-	we will test only with the indicated project. Otherwise we will test the token against
-	every project we know about and return true if any of the roles in the list is defined
-	for the user in any project.  This _is_ needed to authenticate Tegu requests which are not
-	directly project oriented (e.g. set capacities, graph, etc.), so it is legitimate for
-	a token to be submitted without a leading project/ string.
+	Role is a list of space separated role names.  Token is expected to be token/projectr;
+	we will test only with the indicated project. 
+
+	2015.12.09 - We will only accept token/project strings as trying a token against
+	every proejct that Tegu knows about doesn't scale in the openstack world, and openstack
+	doesn't make a 'generic' crack function available.  If a string is passed as token
+	and _NOT_ token/project it will be rejected with an appropriate error.
+
+	WARNING:
+	If the token passed to us to crack is not a valid token the error message that openstack
+	returns might be very misleading, suggesting that Tegu is not authorised to crack the 
+	token:
+		Unauthorized (401): The request you have made requires authentication.
+
+	This is not cool openstack.  The token is invalid, full stop and you should say so.
 */
 func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( userproj string, err error ) {
 	rtoks := strings.Split( *roles, "," )		// simple tokenising of role list
 
 	userproj = ""
-	if strings.Contains( *token, "/" ) {				// assume it's token/project
+	if strings.Contains( *token, "/" ) {				// assume it's token/project (could also be tok/proj/junk)
 		const p int = 1			// order in split tokens (project)
 		const t int = 0			// order in split tokens (actual token)
 
@@ -335,35 +346,12 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 			}
 		}
 
-		osif_sheep.Baa( 2, "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
-		return "", fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
+		osif_sheep.Baa( 2, "has_any_role: token/project %s/%s not valid for roles: %s: %s (caution, 401 error from openstack is misleading if it suggests the request requires auth)", toks[0], toks[1], *roles, err )
+		return "", fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
 	}
 
-	for _, v := range os_refs {
-		pname, _ := v.Get_project( )
-		osif_sheep.Baa( 2, "has_any_role: checking %s", *pname )
+	return "", fmt.Errorf( "has_any_role: rejected: data was NOT of the form token/project" )
 
-		stuff, err := admin.Crack_ptoken( token, pname, false )			// return a stuff struct with details about the token
-
-		if err == nil {
-			err = fmt.Errorf( "role not defined; %s", *roles )			// assume error
-			state := gizmos.Map_has_any( stuff.Roles, rtoks )			// true if any role token matches anything from ostack
-			if state {
-				osif_sheep.Baa( 2, "has_any_role: verified in %s", *pname )
-				osif_sheep.Baa( 2, "has_any_role: user=%s, tenant=%s", stuff.User, stuff.TenantId )
-				return (stuff.User + "," + stuff.TenantId), nil
-			}
-		} else {
-			osif_sheep.Baa( 2, "has_any_role: crack failed for project=%s: %s", *pname, err )
-		}
-	}
-
-	if err == nil {
-		err = fmt.Errorf( "undetermined reason" )
-	}
-
-	osif_sheep.Baa( 1, "unable to verify role: %s: %s", *roles, err )
-	return "", err
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
