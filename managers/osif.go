@@ -107,6 +107,9 @@
 				16 Nov 2015 - Added REQ_HAS_ANY_ROLE2, updated has_any_role()
 				09 Dec 2015 - Tightened the reqirements on the token verification; now requires a
 						project name/id to be supplied.
+				11 Dec 2015 - Physical host list is sussed from openstack using only the admin
+						creds as running the project list, even when admin returns empty, is too
+						timeconsuming.
 
 	Deprecated messages -- do NOT reuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -398,48 +401,18 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 		list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )
 		osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 		if err != nil {
-			osif_sheep.Baa( 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
+			osif_sheep.Baa( 1, "WRN: error accessing host list with creds: %s: %s   [TGUOSI001]", ostk.To_str(), err )
 		} else {
 			if *list != "" {
 				ts += sep + *list
 				sep = " "
-				osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )
+				osif_sheep.Baa( 2, "list of hosts was returned using creds: %s", ostk.To_str() )
 			} else {
-				osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )
+				osif_sheep.Baa( 2, "WRN: list of hosts not returned using creds: %s   [TGUOSI002]", ostk.To_str() )
 			}
 		}
 	} else {
-		osif_sheep.Baa( 1, "chost list no admin project" )
-	}
-
-	if ts == "" {				// didn't fetch using admin
-		osif_sheep.Baa( 1, "single project (admin) fetch failed to produce host list, working throught all" )
-
-		osif_sheep.Baa( 2, "physical host query starts: %d sets of creds", len( os_refs ) )
-		for k, ostk := range os_refs {
-			bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
-
-			osif_sheep.Baa( 3, "physical host query for %s", k )
-			if k != "_ref_" {
-				list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )
-				osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
-				if err != nil {
-					osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
-					//ostk.Expire()					// force re-auth next go round
-				} else {
-					osif_sheep.Baa_some_reset( bs_class )			// reset on good attempt so 1st failure after good is logged
-					if *list != "" {
-						ts += sep + *list
-						sep = " "
-						osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )
-					} else {
-						osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )
-					}
-				}
-			}
-		}
-	} else {
-		osif_sheep.Baa( 2, "host list was generated using only 'admin' project" )
+		osif_sheep.Baa( 1, "cannot get host list, chost list no admin project in credential list" )
 	}
 
 	cmap := token.Tokenise_count( ts, " " )		// break the string, and then dedup the values

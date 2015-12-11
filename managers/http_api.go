@@ -1344,13 +1344,6 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string, xauth 
 	return
 }
 
-func parse_get( out http.ResponseWriter, recs []string, sender string, xauth string ) (state string, msg string) {
-	http_sheep.Baa( 1, "get received and ignored -- GET is not supported" )
-	state = "ERROR"
-	msg = "GET requests are unsupported"
-	return
-}
-
 /*
 	Deal with input from the other side sent to tegu/api. See http_mirror_api.go for
 	the mirror api handler and related functions.
@@ -1376,14 +1369,16 @@ func api_deal_with( out http.ResponseWriter, in *http.Request ) {
 		msg		string
 	)
 
-	data = dig_data( in )
-	if( data == nil ) {						// missing data -- punt early
-		http_sheep.Baa( 1, "http: api_deal_with called without data: %s", in.Method )
-		fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )	// error stuff back to user
-		return
-	} else {
-		_, recs = token.Tokenise_drop( string( data ), ";\n" )		// split based on ; or newline
-		fmt.Fprintf( out, "{ " )									// open the overall object for output
+	if in.Method != "GET" {
+		data = dig_data( in )
+		if( data == nil ) {						// missing data -- punt early
+			http_sheep.Baa( 1, "http: api_deal_with called without data: %s", in.Method )
+			fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )	// error stuff back to user
+			return
+		} else {
+			_, recs = token.Tokenise_drop( string( data ), ";\n" )		// split based on ; or newline
+			fmt.Fprintf( out, "{ " )									// open the overall object for output
+		}
 	}
 
 	auth := ""
@@ -1401,8 +1396,10 @@ func api_deal_with( out http.ResponseWriter, in *http.Request ) {
 		case "DELETE":
 			state, msg = parse_delete( out, recs, in.RemoteAddr, auth )
 
-		case "GET":
-			state, msg = parse_get( out, recs, in.RemoteAddr, auth )
+		case "GET":				// used for file transfer, so we must handle the return here and not let it go out the bottom
+			state, msg = parse_get( out, in.RequestURI, in.RemoteAddr, auth )
+			http_sheep.Baa( 1, "get processing finished: %s, %s", state, msg )
+			return
 
 		default:
 			http_sheep.Baa( 1, "api_deal_with called for unrecognised method: %s", in.Method )
@@ -1522,6 +1519,8 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 
 	http.HandleFunc( "/tegu/api", api_deal_with )					// reserve/delete etc should eventually be removed from this
 	http.HandleFunc( "/tegu/bandwidth", api_deal_with )				// define bandwidth callback TODO: add a callback specifically for bandwidth things
+
+	http.HandleFunc( "/tegu/fetch/", api_deal_with )		
 
 	if enable_mirroring {
 		http.HandleFunc( "/tegu/mirrors/", mirror_handler )
