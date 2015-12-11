@@ -139,6 +139,7 @@
 				09 Oct 2015 : Use 'admin' project for default phys host list.
 				16 Nov 2015 : Add restart message to logfile.
 				20 Nov 2015 : Added datacache.
+				09 Dec 2015 : Require token on requests to always be token/project.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -176,7 +177,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.0.1/1c045"
+		version		string = "v4.0.1/1c115"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

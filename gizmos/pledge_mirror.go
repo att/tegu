@@ -343,7 +343,7 @@ func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 	} 
 
 	chkpt = fmt.Sprintf(
-		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
+		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id": %q, "options": %q, "ptype": %d }`,
 		*p.Host1, *p.Host2, c, e, *p.Id, *p.Qid, *p.Usrkey, tenant_id, options, PT_MIRRORING )
 
 	return
