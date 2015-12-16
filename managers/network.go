@@ -82,6 +82,8 @@
 				18 Jun 2015 - Added oneway rate limiting and delete support.
  				02 Jul 2015 - Extended the physical host refresh rate.
 				03 Sep 2015 - Correct nil pointer core dump cause.
+				16 Dec 2015 - Strip domain name when we create the vm to phost map since openstack sometimes
+					gives us fqdns and sometimes not, but we only ever get hostname from the topo side.
 */
 
 package managers
@@ -175,7 +177,7 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 			vmid := n.ip2vmid[ip]
 			if vmid != nil && mac != nil {						// skip if we don't find a vmid
 				if n.vmid2phost[*vmid] != nil {
-					net_sheep.Baa( 2, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
 					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
 					i++
 				} else {
@@ -272,7 +274,10 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	
 	if vid != nil {
 		net.vmid2ip[*vid] = vip4
-		net.vmid2phost[*vid] = vphost
+		htoks := strings.Split( *vphost, "." )		// strip domain name
+		//net.vmid2phost[*vid] = vphost
+		net_sheep.Baa( 2, "vm2phost saving %s (%s) for %s", htoks[0], *vphost, *vid )
+		net.vmid2phost[*vid] = &htoks[0]
 	}
 
 	if vip4 != nil {
@@ -756,7 +761,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 			}
 
 			n.hosts[hlist[i].Mac[0]] = h			// reference by mac and IP addresses (when there)
-			net_sheep.Baa( 2, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
+			net_sheep.Baa( 3, "build: saving host ip4=(%s)  ip6=(%s) as mac: %s", ip4, ip6, hlist[i].Mac[0] )
 			if ip4 != "" {
 				n.hosts[ip4] = h
 			}

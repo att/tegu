@@ -380,6 +380,12 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 /*
 	Returns a list of openstack compute and network hosts. Hosts where OVS is likely
 	running.
+
+	WARNING: openstack may not send back host names with any consistency: some come
+	with domain names and some without. Probably due to who configured the environment,
+	but annoying, and problematic nonetheless. We will pass things along unchanged, 
+	but it's probalby wise for the user code to strip the domain if they think it
+	best (might not be best for the agent manager).
 */
 func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	var (
