@@ -24,7 +24,8 @@
 #           Support section termination direct to a new switch
 #           Support command shortforms
 #           Support for newlines in lldp table
-
+#           Support for whitespace within a port number, e.g., Et49/ 1
+#              in the interface status table
 
 '''
 toponet -- generate physical network topology from LLDP enabled
@@ -109,11 +110,22 @@ def normalizePortNum(port):
         number. Arista uses single integer portnumbers, while Cisco uses
         the cardnum/ifnum format, e.g., 2/1
     '''
-    portmatch = re.search('(\d+)/(\d+)', port)
+    portmatch = re.search('(\d+)\s*/\s*(\d+)', port)
     if portmatch:
         return portmatch.group(1)+portmatch.group(2)
     else:
         return port
+
+def normalizedPortNumRegex(port):
+    ''' Return a regex that matches variants of portname. E.g., Et49/1
+        may be represented as Et49  /1.
+    '''
+    portmatch = re.search('(\d+)\s*/\s*(\d+)', port)
+    if portmatch:
+        return portmatch.group(1)+'\s*/\s*'+portmatch.group(2)
+    else:
+        return port
+
 
 def normalizeHostname(hostname):
     ''' Normalize hostnames. Currently, tegu requires only hostnames
@@ -234,8 +246,8 @@ class SwitchFileLoader(NetDataSource):
 
     def parseCisco(self, name, switch):
 
-        links = re.findall('\n([^\s]+)\s*Eth(\d+(?:/\d+)?)\s+\d+\s+\S+' + \
-                           '\s+Ethernet(\d+(?:/\d+)?)', switch['lldp'])
+        links = re.findall('\n([^\s]+)\s*Eth(\d+(?:\s*/\d+)?)\s+\d+\s+\S+' + \
+                           '\s+Ethernet(\d+(?:\s*/\d+)?)', switch['lldp'])
         switch_links = switch.setdefault('links', {})
 
         #print(name + " (Cisco)")
@@ -247,8 +259,10 @@ class SwitchFileLoader(NetDataSource):
             #print("\t"+normalizeHostname(linkmatch[0]))
             
             # Read link full duplex and speed
-            speedmatch = re.search("Eth"+linkmatch[1]+"\s+.+connected\s+[^\s]+" +
-                                   "\s+([^\s]+)\s+([^\s]+)\s+", switch["ifaces"])
+            speedmatch = re.search("Eth"+normalizedPortNumRegex(linkmatch[1]) +
+                                   "\s+.+connected\s+[^\s]+" +
+                                   "\s+([^\s]+)\s+([^\s]+)\s+",
+                                   switch["ifaces"])
 
             if speedmatch and (speedmatch.group(2) in self.speedmap.keys()):
                 new_link.bidi = (speedmatch.group(1) == "full")
@@ -269,7 +283,7 @@ class SwitchFileLoader(NetDataSource):
 
     def parseArista(self, name, switch):
 
-        links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+).*Ethernet(\d+(?:/\d+)?)',
+        links = re.findall('Et(\d+(?:\s*/\d+)?)\s+(\S+).*Ethernet(\d+(?:\s*/\d+)?)',
                            switch['lldp'])
         switch_links = switch.setdefault('links', {})
 
@@ -282,8 +296,11 @@ class SwitchFileLoader(NetDataSource):
             #print("\t"+normalizeHostname(linkmatch[1]))
 
             # Read link full duplex and speed
-            speedmatch = re.search("Et"+linkmatch[0]+"\s+.+connected\s+.*" +
-                                  "(half|full)\s+([^\s]+)\s+", switch["ifaces"])
+            #print("Reading interface for: "+name+", port="+linkmatch[0])
+            speedmatch = re.search("Et"+normalizedPortNumRegex(linkmatch[0]) +
+                                   "\s+.+connected\s+.*" +
+                                   "(half|full)\s+([^\s]+)\s+",
+                                   switch["ifaces"])
 
             if speedmatch and (speedmatch.group(2) in self.speedmap.keys()):
                 new_link.bidi = (speedmatch.group(1) == "full")
