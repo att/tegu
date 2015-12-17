@@ -201,7 +201,7 @@ cat <<endKat
      "methods": [ "password" ],
      "password": {
        "user": {
-       		"domain": { "name": "${OS_DOMAIN_NAME:-default}" },
+       		"domain": { "name": "${OS_REGION_NAME:-default}" },
 			"name": "${OS_USERNAME:-missing}", "password": "${OS_PASSWORD:-missing}"
 	   }
      },
@@ -543,7 +543,7 @@ then
 		# NOTE: the conditional statement below  is a temporary hack until AICv2 is installed and the requirement for
 		# the 'tag' to be netqos goes away if it's an old system the ping will fail and we need to replace tegu/api
 		# etc. with netqos in the url.
-		if  ! rjprt  $opts -m POST -t "$proto$host/$default " -D "$token ping" 2>/dev/null |grep -q pong
+		if  ! rjprt  $opts -m POST -t "$proto$host/$default" -D "$token ping" 2>/dev/null |grep -q pong
 		then
 			default=netqos
 			steering=netqos
