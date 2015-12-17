@@ -84,6 +84,7 @@
 				03 Sep 2015 - Correct nil pointer core dump cause.
 				16 Dec 2015 - Strip domain name when we create the vm to phost map since openstack sometimes
 					gives us fqdns and sometimes not, but we only ever get hostname from the topo side.
+				17 Dec 2015 - Correct nil pointer crash trying to fill in the vm map.
 */
 
 package managers
@@ -274,10 +275,14 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	
 	if vid != nil {
 		net.vmid2ip[*vid] = vip4
-		htoks := strings.Split( *vphost, "." )		// strip domain name
-		//net.vmid2phost[*vid] = vphost
-		net_sheep.Baa( 2, "vm2phost saving %s (%s) for %s", htoks[0], *vphost, *vid )
-		net.vmid2phost[*vid] = &htoks[0]
+		if vphost != nil {
+			htoks := strings.Split( *vphost, "." )		// strip domain name
+			//net.vmid2phost[*vid] = vphost
+			net_sheep.Baa( 2, "vm2phost saving %s (%s) for %s", htoks[0], *vphost, *vid )
+			net.vmid2phost[*vid] = &htoks[0]
+		} else {
+			net_sheep.Baa( 2, "vm2phost phys host is nil for %s", *vid )
+		}
 	}
 
 	if vip4 != nil {
