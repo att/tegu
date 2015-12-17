@@ -110,6 +110,8 @@
 				11 Dec 2015 - Physical host list is sussed from openstack using only the admin
 						creds as running the project list, even when admin returns empty, is too
 						timeconsuming.
+				17 Dec 2015 - Shift from requesting all network hosts to requesting only L3 hosts 
+						from openstack.
 
 	Deprecated messages -- do NOT reuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -404,7 +406,7 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 
 	if ostk := os_refs["admin"]; ostk != nil {
 		k := "admin"
-		list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )
+		list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.L3 )
 		osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 		if err != nil {
 			osif_sheep.Baa( 1, "WRN: error accessing host list with creds: %s: %s   [TGUOSI001]", ostk.To_str(), err )
