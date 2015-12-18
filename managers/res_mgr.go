@@ -385,6 +385,11 @@ func purge_expired( ) {
 	if err != nil {
 		rm_sheep.Baa( 1, "unable to delete expired bwow reservations: %s", err )
 	}
+
+	err = dc.Delex_mirres(  )
+	if err != nil {
+		rm_sheep.Baa( 1, "unable to delete expired bwow reservations: %s", err )
+	}
 }
 
 /*
@@ -420,7 +425,7 @@ func purge_res( gres *gizmos.Pledge ) {
 */
 func ( inv *Inventory ) stash_ulcap( project *string, value *string ) {
 	dc := datacache.Mk_dcache( nil, nil )					// link to the datacache
-	rm_sheep.Baa( 1,  "stash ucap: %s %s\n", project, value )
+	rm_sheep.Baa( 1,  "stash ucap: %s %s", project, value )
 	err := dc.Set_ulcap( *project, clike.Atoi( *value ) )
 	if err != nil {
 		inv.unstashed = true
@@ -446,14 +451,14 @@ func ( inv *Inventory ) stash_res( gres *gizmos.Pledge ) {
 				
 			_, expiry := res.Get_window( )
 			resid := res.Get_id()
-			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s\n", *resid )
+			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s", *resid )
 			err = dc.Set_bwres( *resid, expiry, project, res )
 
 		case *gizmos.Pledge_mirror:
 			project := res.Get_Tenant( )
 			_, expiry := res.Get_window( ) 
 			resid := res.Get_id()
-			rm_sheep.Baa( 1,  "stash mirror reseration: %s\n", *resid )
+			rm_sheep.Baa( 1,  "stash mirror reseration: %s", *resid )
 			err = dc.Set_mirres( *resid, expiry, *project, res )
 
 		case *gizmos.Pledge_bwow:
@@ -463,7 +468,7 @@ func ( inv *Inventory ) stash_res( gres *gizmos.Pledge ) {
 				
 			_, expiry := res.Get_window( )
 			resid := res.Get_id()
-			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s\n", *resid )
+			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s", *resid )
 			err = dc.Set_bwowres( *resid, expiry, project, res )
 
 		default:
