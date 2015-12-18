@@ -40,7 +40,9 @@ import (
 
 	"github.com/att/gopkgs/ipc"
 	"github.com/att/gopkgs/ipc/msgrtr"
+
 	"github.com/att/tegu/gizmos"
+	"github.com/att/tegu/datacache"
 )
 
 
@@ -106,6 +108,23 @@ func payload_2smap( e *msgrtr.Event, what string ) ( m map[string]string, missin
 // ------------ network manager event funcions --------------------------------------------------------------------------------
 
 /*
+	Write the endpoint to the datacache, or delete it if the map is nil.
+*/
+func netev_cache_eplist( uuid string, em map[string]string ) {
+	dc := datacache.Mk_dcache( nil, nil )						// link to the datacache
+	if dc == nil {
+		net_sheep.Baa( 1, "ERR: unable to cache endpoint list; no data cache" )
+		return
+	}
+
+	if em != nil {
+		dc.Set_endpt( uuid, em )
+	} else {
+		dc.Set_endpt( uuid, nil )					// delete
+	}
+}
+
+/*
 	Network manager event handler which acts on endpoint messages.
 	Ldi is the listener data interface variable that was given to the message router when the event was
 	registered.
@@ -116,31 +135,45 @@ func netev_endpt( e *msgrtr.Event, ldi interface{} ) {
 	
 	edata := ldi.( *event_handler_data )		// get refrence to our thread data to use
 
-	payload, missing_stuff := payload_2smap( e, "uuid owner mac ip phost action" )
-	if missing_stuff != "" {
-		if e.Ack {
-			e.Reply( "ERROR", fmt.Sprintf( "event json wasn't complete: payload missing things: %s", missing_stuff ), "" )
-		}
-
-		net_sheep.Baa( 1, "event json wasn't complete: payload missing things: %s", missing_stuff )
-		return
-	}
+	payload, missing_stuff := payload_2smap( e, "uuid owner mac ip phost action" )				// we need all this for add, but only uuid for delete
 		
 	switch payload["action"] {
 		case "add", "mod":
+			if missing_stuff != "" {
+				if e.Ack {
+					e.Reply( "ERROR", fmt.Sprintf( "add event json wasn't complete: payload missing things: %s", missing_stuff ), "" )
+				}
+		
+				net_sheep.Baa( 1, "add event json wasn't complete: payload missing things: %s", missing_stuff )
+				return
+			}
+
 			net_sheep.Baa( 2, "event: adding endpoint: uuid=%s owner=%s mac=%s ip=%s phost=%s", payload["uuid"], payload["owner"], payload["mac"], payload["ip"], payload["phost"] )
 			eplist := make( map[string]*gizmos.Endpt, 1 )
 			eplist[payload["uuid"]] = gizmos.Mk_endpt( payload["uuid"], payload["phost"], payload["owner"], payload["ip"], payload["mac"], nil, -128 )
+			em := eplist[payload["uuid"]].Get_meta_copy()								// copy the map, and add non-meta things for adding to cache
+
 			req := ipc.Mk_chmsg( )
-			req.Send_req( edata.req_chan, nil, REQ_NEW_ENDPT, eplist, nil )				// send to ourselves to deal with in the main channel processing
+			req.Send_req( edata.req_chan, nil, REQ_NEW_ENDPT, eplist, nil )				// send to ourselves to deal with in the main channel processing (expect nothing back)
+
+			netev_cache_eplist( payload["uuid"], em )											// send the endpoint(s) off to the datacache for safe keeping
 
 		case "del", "delete":
-			net_sheep.Baa( 1, "event: deleting endpoint: uuid=%s owner=%s mac=%s ip=%s phost=%s", payload["uuid"], payload["owner"], payload["mac"], payload["ip"], payload["phost"] )
+			if payload["uuid"] != "" {
+				net_sheep.Baa( 1, "event: deleting endpoint: uuid=%s", payload["uuid"] )
 
-			eplist := make( map[string]*gizmos.Endpt, 1 )
-			eplist[payload["uuid"]] = gizmos.Mk_endpt( payload["uuid"], "", payload["owner"], payload["ip"], payload["mac"], nil, -2 )			// if phost is nil/"" then it is deleted
-			req := ipc.Mk_chmsg( )
-			req.Send_req( edata.req_chan, nil, REQ_NEW_ENDPT, eplist, nil )				// send to ourselves to deal with in the main channel processing
+				req := ipc.Mk_chmsg( )
+				req.Send_req( edata.req_chan, nil, REQ_DEL_ENDPT, payload["uuid"], nil )	// send it off in a letter to yourself.... 
+	
+				netev_cache_eplist( payload["uuid"], nil )									// delete from cache
+			} else {
+				if e.Ack {
+					e.Reply( "ERROR", fmt.Sprintf( "del event json wasn't complete: payload missing uuid" ), "" )
+				}
+		
+				net_sheep.Baa( 1, "del event json wasn't complete: payload missing uuid" )
+				return
+			}
 
 		default:
 			if e.Ack {

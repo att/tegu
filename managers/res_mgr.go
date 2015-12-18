@@ -102,23 +102,24 @@
 				08 Oct 2015 : Added !pushed check back to active reservation pushes.
 				15 Oct 2015 : Removed table 9x flow-mod generation. Tegu should _not_ add/manipulate flow-mods directly
 						as that is the agent's responsibility.
+				02 Dec 2015 : Added datacaching support.
 */
 
 package managers
 
 import (
-	"bufio"
+	//"bufio"
 	"bytes"
 	"fmt"
-	"io"
+	//"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
-	"github.com/att/gopkgs/chkpt"
 	"github.com/att/gopkgs/ipc"
+	"github.com/att/tegu/datacache"
 	"github.com/att/tegu/gizmos"
 )
 
@@ -132,7 +133,8 @@ import (
 type Inventory struct {
 	cache		map[string]*gizmos.Pledge		// cache of pledges
 	ulcap_cache	map[string]int					// cache of user limit values (max value)
-	chkpt		*chkpt.Chkpt
+	//chkpt		*chkpt.Chkpt
+	unstashed	bool							// set to true if we fail to stash something
 }
 
 // --- Private --------------------------------------------------------------------------
@@ -336,6 +338,7 @@ func (i *Inventory) pause_off( ) {
 	for _, p := range i.cache {
 		(*p).Resume( true )					// also reset the push flag
 	}
+
 }
 
 /*
@@ -348,172 +351,244 @@ func (i *Inventory) reset_push() {
 	}
 }
 
+// ---------------------- checkpoint/datacache support --------------------------------------------------------------
+
 /*
-	Run the set of reservations in the cache and write any that are not expired out to the checkpoint file.
-	For expired reservations, we'll delete them if they test positive for extinction (dead for more than 120
-	seconds).
-
-	Because of timestamp limitations on the file system, it is possible for the start process to select the
-	wrong checkpoint file if more than one checkpoint files were created within a second of each other. To
-	prevent problems this function will only write a checkpoint if the last one was written more than two
-	seconds ago (to avoid clock issues and the nano timer). If it hasn't been longe enough, this function
-	returns true (retry) and the calling function should call again (probably after a tickler pop) to
-	issue a checkpoint.  There is no need to "queue" anything because if several checkpoint requests are
-	made in the same second, then all of them will be captured the next time a write is allowed and the
-	inventory is parsed.  If the checkpoint can be written, then false is returned.  In either case,
-	the time that the last checkpoint file was written is also returned.
+	If the unstash flag is set, then attempt to restash any pledges that had failures before.
 */
-func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
-
-	now := time.Now().Unix()
-	if now - last < 2 {
-		rm_sheep.Baa( 2, "retry checkpoint signaled" )
-		return true, last			// can only dump 1/min; show queued to force main loop to recall
+func ( inv *Inventory ) restash( ) {
+	if inv == nil || !inv.unstashed {
+		return
 	}
 
-	err := i.chkpt.Create( )
-	if err != nil {
-		rm_sheep.Baa( 0, "CRI: resmgr: unable to create checkpoint file: %s  [TGURMG003]", err )
-		return false, last
+	inv.unstashed = false							// if any attempt fails, it will reset this and we'll be called sometime later
+	for _, p := range inv.cache {
+		if ! (*p).Is_stashed( ) {
+			inv.stash_res( p )						// attempt to stash it
+		}		
 	}
-
-	for nm, v := range i.ulcap_cache {							// write out user link capacity limits that have been set
-		fmt.Fprintf( i.chkpt, "ucap: %s %d\n", nm, v ) 			// we'll check the overall error state on close
-	}
-
-	for key, p := range i.cache {
-		s := (*p).To_chkpt()
-		if s != "expired" {
-			fmt.Fprintf( i.chkpt, "%s\n", s ) 					// we'll check the overall error state on close
-		} else {
-			if (*p).Is_extinct( 120 ) && (*p).Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
-				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
-				delete( i.cache, key )
-			}
-		}
-	}
-
-	ckpt_name, err := i.chkpt.Close( )
-	if err != nil {
-		rm_sheep.Baa( 0, "CRI: resmgr: checkpoint write failed: %s: %s  [TGURMG004]", ckpt_name, err )
-	} else {
-		rm_sheep.Baa( 1, "resmgr: checkpoint successful: %s", ckpt_name )
-	}
-
-	return false, time.Now().Unix()				// not queued, and send back the new chkpt time
 }
 
 /*
-	Opens the filename passed in and reads the reservation data from it. The assumption is
-	that records in the file were saved via the write_chkpt() function and are JSON pledges
-	or other serializable objects.  We will drop any pledges that expired while 'sitting'
-	in the file.
+	Delete reservations with expired timestamps in the datacache.  They are set to expire far enough in the 
+	future that we would have cleaned up any related reservation stuff here (mirrors which need expicit deletes etc).
 */
-func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
+func purge_expired( ) {
+	dc := datacache.Mk_dcache( nil, nil )					// link to the datacache
+
+	err := dc.Delex_bwres(  )
+	if err != nil {
+		rm_sheep.Baa( 1, "unable to delete expired bandwidth reservations: %s", err )
+	}
+
+	err = dc.Delex_bwowres(  )
+	if err != nil {
+		rm_sheep.Baa( 1, "unable to delete expired bwow reservations: %s", err )
+	}
+
+	err = dc.Delex_mirres(  )
+	if err != nil {
+		rm_sheep.Baa( 1, "unable to delete expired bwow reservations: %s", err )
+	}
+}
+
+/*
+	Delete the resrevation (pledge) from the datacache.
+*/
+func purge_res( gres *gizmos.Pledge ) {
+
+	dc := datacache.Mk_dcache( nil, nil )				// link to the datacache
+
+	switch res := (*gres).( type ) {					// datacache maintains reervations in different tables thus has different calls
+		case *gizmos.Pledge_bw:
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "purge bandwidth reseration from datacache: %s", *resid )
+			dc.Del_bwres( *resid )
+
+		case *gizmos.Pledge_mirror:
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "purge mirror reseration from datacache: %s", *resid )
+			dc.Del_mirres( *resid )
+
+		case *gizmos.Pledge_bwow:
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "purge bwow reseration from datacache: %s", *resid )
+			dc.Del_bwowres( *resid )
+
+		default:
+			rm_sheep.Baa( 1, "internal mishap: pledge NOT purged -- unrecognised pledge type! %v", res )
+	}
+}
+
+/*
+	Take a user limit capacity setting and add it to the datacache.
+*/
+func ( inv *Inventory ) stash_ulcap( project *string, value *string ) {
+	dc := datacache.Mk_dcache( nil, nil )					// link to the datacache
+	rm_sheep.Baa( 1,  "stash ucap: %s %s", project, value )
+	err := dc.Set_ulcap( *project, clike.Atoi( *value ) )
+	if err != nil {
+		inv.unstashed = true
+		rm_sheep.Baa( 1, "WRN: unable to stash user cap limit in datacache: %s %s", project, value )
+	}
+}
+
+/*
+	Push the reservation off into the datacache.
+	For bandwidth reservations, the project associated with the reservation is the project associated with host1.
+*/
+func ( inv *Inventory ) stash_res( gres *gizmos.Pledge ) {
+	var err error
+
+	dc := datacache.Mk_dcache( nil, nil )				// link to the datacache
+
+	switch res := (*gres).( type ) {					// datacache maintains reervations in different tables thus has different calls
+
+		case *gizmos.Pledge_bw:
+			ep, _ := res.Get_hosts()							// get the endpoint names;  should be proj/ep/vmname:port
+			tokens := strings.Split( *ep, "/" )
+			project := tokens[0]
+				
+			_, expiry := res.Get_window( )
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s", *resid )
+			err = dc.Set_bwres( *resid, expiry, project, res )
+
+		case *gizmos.Pledge_mirror:
+			project := res.Get_Tenant( )
+			_, expiry := res.Get_window( ) 
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "stash mirror reseration: %s", *resid )
+			err = dc.Set_mirres( *resid, expiry, *project, res )
+
+		case *gizmos.Pledge_bwow:
+			ep, _ := res.Get_hosts()							// get the endpoint names;  should be proj/ep/vmname:port
+			tokens := strings.Split( *ep, "/" )
+			project := tokens[0]
+				
+			_, expiry := res.Get_window( )
+			resid := res.Get_id()
+			rm_sheep.Baa( 1,  "stash bandwidth reseration: %s", *resid )
+			err = dc.Set_bwowres( *resid, expiry, project, res )
+
+		default:
+			rm_sheep.Baa( 1, "internal mishap: pledge NOT stashed -- unrecognised pledge type! %v", res )
+			return
+	}
+
+	if err != nil {
+		rm_sheep.Baa( 1, "WRN: unable to cache reservation: %s: %s", *((*gres).Get_id()), err )
+		inv.unstashed = true
+		(*gres).Set_stashed( false )			// ensure mark is off
+	} else {
+		(*gres).Set_stashed( true )				// mark stashed so we can skip 'error recovery' later	
+	}
+}
+
+/*
+	Loads the inventory from the datacache. Error is returned if we cannot get a list for any of the 
+	tables from the datacache -- probably indicates a connection error. We do not return an error
+	if we cannot recreate a reservation, though that is logged.  Likely the physical network changed
+	while we were away and the reservation cannot be supported.
+*/
+func (inv *Inventory) load( ) ( err error ) {
 	var (
-		rec		string
-		nrecs	int = 0
-		p		*gizmos.Pledge
 		my_ch	chan	*ipc.Chmsg
 		req		*ipc.Chmsg
 	)
 
+	rm_sheep.Baa( 2, "loading reservations from datacache" )
+	nres := 0
 	err = nil
 	my_ch = make( chan *ipc.Chmsg )
-	defer close( my_ch )									// close it on return
 
-	f, err := os.Open( *fname )
+	dc := datacache.Mk_dcache( nil, nil )					// link to the datacache
+
+	rlist, err := dc.Get_bwres_list( true ) 				// get list of bandwidth reesrvations
 	if err != nil {
-		return
-	}
-	defer f.Close( )
+		rm_sheep.Baa( 1, "unable to load bandwidth reservations from datacache: %s", err )
+		return err
+	} else {
+		for i := range( rlist ) {
+			p := new( gizmos.Pledge_bw )							// empty pledge to fill
+			err = dc.Get_one_bwres( rlist[i], p )
+			if err != nil {
+				rm_sheep.Baa( 1, "unable to load single bandwidth reservations from datacache: %s: %s",  rlist[i], err )
+			} else {
 
-	br := bufio.NewReader( f )
-	for ; err == nil ; {
-		rec, err = br.ReadString( '\n' )
-		if err == nil  {
-			nrecs++
+				h1, h2 := p.Get_hosts( )							// get the host names, fetch ostack data and update graph
+				req = ipc.Mk_chmsg( )
+				req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, p, nil )
+				req = <- my_ch										// should be OK, but the underlying network could have changed
 
-			switch rec[0:5] {
-				case "ucap:":
-					toks := strings.Split( rec, " " )
-					if len( toks ) == 3 {
-						i.add_ulcap( &toks[1], &toks[2] )
-					}
-
-				default:
-					p, err = gizmos.Json2pledge( &rec )			// convert any type of json pledge to Pledge
-
-					if err == nil {
-						if  (*p).Is_expired() {
-							rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", (*p).String() )
-						} else {
-							switch sp := (*p).(type) {									// work on specific pledge type, but pass the Pledge interface to add()
-								case *gizmos.Pledge_mirror:
-									err = i.Add_res( p )								// assume we can just add it back in as is
-
-								case *gizmos.Pledge_steer:
-									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
-
-								case *gizmos.Pledge_bwow:
-									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
-									push_block := h2 == nil
-									update_graph( h1, push_block, push_block )			// dig h1 info; push to netmgr if h2 isn't known and block on response
-									if h2 != nil {
-										update_graph( h2, true, true )					// dig h2 data and push to netmgr blocking for a netmgr response
-									}
-
-									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
-									req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, sp, nil )
-									req = <- my_ch										// should be OK, but the underlying network could have changed
-
-									if req.Response_data != nil {
-										gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
-										sp.Set_gate( gate )
-										rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
-										err = i.Add_res( p )
-									} else {
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
-									}
-
-								case *gizmos.Pledge_bw:
-									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
-									update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
-									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
-
-									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-									req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
-									req = <- my_ch										// should be OK, but the underlying network could have changed
-
-									if req.Response_data != nil {
-										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-										sp.Set_path_list( path_list )
-										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
-										err = i.Add_res( p )
-									} else {
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
-									}
-
-								default:
-									rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )
-
-							}						// end switch on specific pledge type
-						}
-					} else {
-						rm_sheep.Baa( 0, "CRI: %s", err )
-						return			// quickk escape
-					}
-			}				// outer switch
+				if req.Response_data != nil {
+					path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
+					p.Set_path_list( path_list )
+					rm_sheep.Baa( 2, "path allocated for cached reservation: %s %s %s; path length= %d", *(p.Get_id()), *h1, *h2, len( path_list ) )
+					err = inv.Add_res( p, false )									// add to inventory, but don't stash as it just came from there :)
+					nres++
+				} else {
+					// QUESTION -- should we remove the reservation from the datacache at this point?
+					rm_sheep.Baa( 0, "ERR: inventory laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
+				}
+			}
 		}
 	}
 
-	if err == io.EOF {
-		err = nil
+	rlist, err = dc.Get_bwowres_list( true )							// get list of oneway reservations
+	if err != nil {
+		rm_sheep.Baa( 1, "unable to load bwow reservations from datacache: %s", err )
+		return err
+	} else {
+		for i := range( rlist ) {
+			p := new( gizmos.Pledge_bwow )							// new struct to populate with next reservation
+			err = dc.Get_one_bwowres( rlist[i], p )					// pull it and stuff it into struct
+			if err != nil {
+				rm_sheep.Baa( 1, "unable to load single bwow reservation: %s: %s", rlist[i], err )
+			} else {
+				req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
+				req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, p, nil )
+				req = <- my_ch										// should be OK, but the underlying network could have changed
+
+				if req.Response_data != nil {
+					gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
+					p.Set_gate( gate )
+					rm_sheep.Baa( 2, "gate allocated for oneway reservation: %s %s", *(p.Get_id()), gate )
+					err = inv.Add_res( p, true )
+				} else {
+					rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
+				}
+			}
+		}
 	}
 
-	rm_sheep.Baa( 1, "read %d records from checkpoint file: %s", nrecs, *fname )
-	return
+	rlist, err = dc.Get_mirres_list( true )							// get list of mirror reservations
+	if err != nil {
+		rm_sheep.Baa( 1, "unable to load mirror reservations from datacache: %s", err )
+		return err
+	} else {
+		for i := range( rlist ) {
+			p := new( gizmos.Pledge_mirror )						// new struct to populate with next reservation
+			err = dc.Get_one_mirres( rlist[i], p )					// pull it and stuff it into struct
+			if err != nil {
+				rm_sheep.Baa( 1, "unable to load mirror reservation: %s: %s", rlist[i], err )
+			} else {
+				err = inv.Add_res( p, true )							// these just need to be added; no net verification
+				if err != nil {
+					rm_sheep.Baa( 1, "unable to add a mirror reservation to the inventory: %s", rlist[i] )
+				} else {
+					rm_sheep.Baa( 1, "mirror reservation added to the inventory: %s", rlist[i] )
+					nres++
+				}
+			}
+		}
+	}
+
+	rm_sheep.Baa( 1, "loaded %d reservations from datacache", nres )
+	return nil
 }
+
+// --------------------------------------------------------------------------------------------------
 
 /*
 	Given a host name, return all pledges that involve that host as a list.
@@ -539,8 +614,8 @@ func (inv *Inventory) pledge_list(  vmname *string ) ( []*gizmos.Pledge, error )
 
 /*
 	Set the user link capacity and forward it on to the network manager. We expect this
-	to be a request from the far side (user/admin) or read from the chkpt file so
-	the value is passed as a string (which is also what network wants too.
+	to be a request from the far side (user/admin) or read from the datacahce so
+	the value is passed as a string (which is also what network wants too).
 */
 func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 	val := clike.Atoi( *sval )
@@ -567,6 +642,28 @@ func (inv *Inventory) add_ulcap( name *string, sval *string ) {
 	}
 }
 
+/*
+	Fetch the user cap map from the datacache and pass it to network manager so it can 
+	build fences. 
+*/
+func (inv *Inventory) build_ulcaps( ) {
+
+	dc := datacache.Mk_dcache( nil, nil )
+	ulm, _ := dc.Map_ulcaps() 				// pull all from the datacache
+
+	for k, v := range ulm {
+		rm_sheep.Baa( 2, "sending user cap from datacache: %s %d", k, v )
+		inv.ulcap_cache[k] = v
+
+		pdata := make( []*string, 2 )		// parameters for message to network
+		s := fmt.Sprintf( "%d", v )
+		pdata[0] = &k
+		pdata[1] = &s
+		req := ipc.Mk_chmsg( )
+		req.Send_req( nw_ch, nil, REQ_SETULCAP, pdata, nil ) 				// push into the network environment
+	}
+}
+
 // --- Public ---------------------------------------------------------------------------
 /*
 	constructor
@@ -583,9 +680,10 @@ func Mk_inventory( ) (inv *Inventory) {
 
 /*
 	Stuff the pledge into the cache erroring if the pledge already exists.
-	Expect either a Pledge, or a pointer to a pledge.
+	Expect either a Pledge, or a pointer to a pledge. If stash is false 
+	this will not attempt to set in the datacache.
 */
-func (inv *Inventory) Add_res( pi interface{} ) (err error) {
+func (inv *Inventory) Add_res( pi interface{}, stash bool ) (err error) {
 	var (
 		p *gizmos.Pledge
 	)
@@ -614,6 +712,7 @@ func (inv *Inventory) Add_res( pi interface{} ) (err error) {
 	}
 
 	inv.cache[*id] = p
+	inv.stash_res( p )
 
 	rm_sheep.Baa( 1, "resgmgr: added reservation: %s", (*p).To_chkpt() )
 	return
@@ -719,7 +818,8 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 				req = <- ch											// wait for response from network
 				state = req.State
 				p.Set_expiry( time.Now().Unix() + 15 )				// set the expiry to 15s from now which will force it out
-				(*gp).Reset_pushed()						// force push of flow-mods that reset the expiry
+				(*gp).Reset_pushed()								// force push of flow-mods that reset the expiry
+				purge_res( gp )										// purge from the datacache
 		}
 	} else {
 		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
@@ -829,13 +929,10 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 	var (
 		inv	*Inventory
 		msg	*ipc.Chmsg
-		ckptd	string
 		last_qcheck	int64 = 0			// time that the last queue check was made to set window
-		last_chkpt	int64 = 0			// time that the last checkpoint was written
-		retry_chkpt bool = false		// checkpoint needs to be retried because of a timing issue
 		queue_gen_type = REQ_GEN_EPQMAP
 		alt_table = DEF_ALT_TABLE		// table number where meta marking happens
-		all_sys_up	bool = false;		// set when we receive the all_up message; some functions (chkpt) must wait for this
+		all_sys_up	bool = false;		// set when we receive the all_up message; some functions must wait for this
 		hto_limit 	int = 3600 * 18		// OVS has a size limit to the hard timeout value, this caps it just under the OVS limit
 		res_refresh	int64 = 0			// next time when we must force all reservations to refresh flow-mods (hto_limit nonzero)
 		rr_rate		int = 3600			// refresh rate (1 hour)
@@ -869,12 +966,6 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 	}
 
 	if cfg_data["resmgr"] != nil {
-		cdp := cfg_data["resmgr"]["chkpt_dir"]
-		if cdp == nil {
-			ckptd = "/var/lib/tegu/resmgr"							// default directory and prefix
-		} else {
-			ckptd = *cdp + "/resmgr"							// add prefix to directory in config
-		}
 
 		p = cfg_data["resmgr"]["verbose"]
 		if p != nil {
@@ -907,7 +998,7 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is insanely low (%ds) and was changed to 1800s", rr_rate )
 					rr_rate = 1800
 				} else {
-					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is too low: %ds", rr_rate )
+					rm_sheep.Baa( 0, "NOTICE: reservation refresh rate in config is too low: %ds; consider increasing to 900 or more", rr_rate )
 				}
 			}
 		}
@@ -915,14 +1006,16 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 	rm_sheep.Baa( 1, "ovs table number %d used for metadata marking", alt_table )
 
-	res_refresh = time.Now().Unix() + int64( rr_rate )				// set first refresh in an hour (ignored if hto_limit not set
+	res_refresh = time.Now().Unix() + int64( rr_rate )				// set first refresh in an hour (ignored if hto_limit not set)
 	inv = Mk_inventory( )
-	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )
+	inv.build_ulcaps()												// fetch ulcaps from the datacache and pass to network manager
 
 	last_qcheck = time.Now().Unix()
 	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )			// push reservations to agent just before they go live
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
-	tklr.Add_spot( 5, my_chan, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
+	tklr.Add_spot( 1800, my_chan, REQ_CLEANUP, nil, ipc.FOREVER )	// periodic cleanup of datacache
+
+	purge_expired()													// delete expired reservations
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
@@ -933,27 +1026,24 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 			case REQ_NOOP:			// just ignore
 
 			case REQ_ADD:
-				msg.State = inv.Add_res( msg.Req_data )			// add will determine the pledge type and do the right thing
+				msg.State = inv.Add_res( msg.Req_data, true )			// add will determine the pledge type and do the right thing
 				msg.Response_data = nil
 
 
 			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
 				all_sys_up = true
-				// periodic checkpointing turned off with the introduction of tegu_ha
-				//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
-
+				tklr.Add_spot( 5, my_chan, REQ_SANITY, nil, ipc.FOREVER )		// perform any sanity checks every few seconds
+			
+			/*
+			DEPRECATED
 			case REQ_RTRY_CHKPT:									// called to attempt to send a queued checkpoint request
-				if all_sys_up {
-					if retry_chkpt {
-						rm_sheep.Baa( 3, "invoking checkpoint (retry)" )
-						retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
-					}
-				}
 
 			case REQ_CHKPT:											// external thread has requested checkpoint
+			*/
+
+			case REQ_CLEANUP:
 				if all_sys_up {
-					rm_sheep.Baa( 3, "invoking checkpoint" )
-					retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
+					purge_expired()									// delete expired reservations
 				}
 
 			case REQ_DEL:											// user initiated delete -- requires cookie
@@ -980,11 +1070,10 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 			case REQ_LIST:											// list reservations	(for a client)
 				msg.Response_data, msg.State = inv.res2json( )
 
-			case REQ_LOAD:								// load from a checkpoint file
-				data := msg.Req_data.( *string )		// assume pointers to name and cookie
-				msg.State = inv.load_chkpt( data )
+			case REQ_LOAD:								// load inventory from datacache
+				msg.State = inv.load( )
 				msg.Response_data = nil
-				rm_sheep.Baa( 1, "checkpoint file loaded" )
+				rm_sheep.Baa( 2, "inventory loaded from datacache" )
 
 			case REQ_PAUSE:
 				msg.State = nil							// right now this cannot fail in ways we know about
@@ -998,6 +1087,11 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 				msg.Response_data = ""
 				res_refresh = 0;						// must force a push of everything on next push tickle
 				inv.pause_off()
+
+			case REQ_SANITY:							// anything needed to keep us sane
+				if all_sys_up {
+					inv.restash()						// if a reservation didn't get to the datacache, try to shove it in again
+				}
 
 			case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
 				now := time.Now().Unix()
@@ -1026,8 +1120,9 @@ func Res_manager( my_chan chan *ipc.Chmsg ) {
 
 			case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
 				data := msg.Req_data.( []*string )
-				inv.add_ulcap( data[0], data[1] )
-				retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
+				inv.add_ulcap( data[0], data[1] )		// add and send to network manager
+				inv.stash_ulcap( data[0], data[1] )			// stuff it into the datacache
+
 
 			// CAUTION: the requests below come back as asynch responses rather than as initial message
 			case REQ_IE_RESERVE:						// an IE reservation failed

@@ -59,9 +59,8 @@ type host_pair struct {
 	Search the list of endpoints looking for a router on the network given
 */
 func (n *Network) find_router( netid *string ) ( epuuid *string ) {
-	net_sheep.Baa( 1, ">>>> searching for router on network: %s", *netid )
+	net_sheep.Baa( 2, "searching for router on network: %s", *netid )
 	for u, ep := range n.endpts {
-		//net_sheep.Baa( 1, ">>>> questioning endpoint %s", ep )
 		if ep.Is_router() && *(ep.Get_netid()) == *netid {
 			return &u
 		}
@@ -112,12 +111,12 @@ func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list
 			pair_list[0].h1 = epuuid1
 			pair_list[0].h2 = epuuid2
 			pair_list[0].usr = ep1.Get_project()
-			net_sheep.Baa( 2, ">>>>> both eps are in same proejct, returning pair list: %d", len(pair_list) )
+			net_sheep.Baa( 2, "both eps are in same proejct, returning pair list: %d", len(pair_list) )
 			return
 		}
 	}
 
-	net_sheep.Baa( 2, ">>>>> endpoints are in different proejcts: %s %s", *epuuid1, *epuuid2  )
+	net_sheep.Baa( 2, "endpoints are in different proejcts: %s %s", *epuuid1, *epuuid2  )
 	pair_list = make( []host_pair, nalloc )
 
 	plidx := 0
@@ -147,7 +146,7 @@ func (n *Network) find_endpoints( epuuid1 *string, epuuid2 *string ) ( pair_list
 		pair_list[plidx].exip = addr_from_pea( epuuid1 )	// get the ip address from the string, or the endpoint
 	}
 
-	net_sheep.Baa( 1, ">>>> endpoints found: %d", nalloc )
+	net_sheep.Baa( 2, "endpoints found: %d", nalloc )
 	return
 }
 
@@ -185,7 +184,6 @@ func (n *Network) find_shortest_path( ssw *gizmos.Switch, h1 *gizmos.Endpt, h2 *
 	ssw.Cost = 0																		// seed the cost in the source switch
 	tsw, cap_trip := ssw.Path_to( h2nm, commence, conclude, inc_cap, usr, usr_max )		// discover the shortest path to terminating switch that has enough bandwidth
 	if tsw != nil {												// must walk from the term switch backwards collecting the links to set the path
-net_sheep.Baa( 2, ">>>>> tsw = %s", *tsw.Get_id() )
 		path = gizmos.Mk_path( h1, h2 )
 		path.Set_reverse( true )								// indicate that the path is saved in reverse order
 		path.Set_bandwidth( inc_cap )
@@ -219,9 +217,7 @@ net_sheep.Baa( 2, ">>>>> tsw = %s", *tsw.Get_id() )
 		path.Flip_leafpoints()		// path expects them to be in h1,h2 order; we added them backwards so must flip
 	}
 
-if path != nil {
-net_sheep.Baa( 2, ">>> returning path: %s", path )
-}
+	net_sheep.Baa( 3, "returning path: %s", path )
 	return
 }
 
@@ -384,13 +380,13 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 		return
 	}
 --- */
-	net_sheep.Baa( 1,  ">>>find-path: both hosts found in network: %s  %s", *h1nm, *h2nm )
+	net_sheep.Baa( 2,  "find-path: both hosts found in network: %s  %s", *h1nm, *h2nm )
 
 	path_list = make( []*gizmos.Path, len( n.links ) )		// we cannot have more in our path than the number of links (needs to be changed as this isn't good in the long run)
 	pcount = 0
 
 	ssw, p1 := h1.Get_switch_port()						// get the source switch and the port the VM is attached to
-	net_sheep.Baa( 1,  ">>>find-path: source switch: %s", *ssw.Get_id() )
+	net_sheep.Baa( 2,  "find-path: source switch: %s", *ssw.Get_id() )
 	// REVAMP -- in the world of floodlight a host might appear attached to multiple switches. we had to find all paths
 	//deprecated -- for {													// we'll break after we've looked at all of the connection points for h1
 		if plidx >= len( path_list ) {
@@ -411,9 +407,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 		fence := n.get_fence( usr )
 		if ssw.Has_host( h1nm )  &&  ssw.Has_host( h2nm ) {			// if both hosts are on the same switch, there's no path if they both have the same port (both external to our view)
-net_sheep.Baa( 1, ">>>> both endpoints on same switch" )
-			//p1 := h1.Get_port( ssw )
-			//p2 := h2.Get_port( ssw )
+			net_sheep.Baa( 2, "both endpoints on same switch" )
 
 			_, p2 := h2.Get_switch_port( )							// need the port for the second endpoint so we can test to see if they dup or are on same switch
 			if p1 < 0 || p1 != p2 {									// when ports differ we'll create/find the vlink between them	(in Tegu-lite port == -128 is legit and will dup)
@@ -494,7 +488,7 @@ net_sheep.Baa( 1, ">>>> both endpoints on same switch" )
 	//}
 
 	//cap_trip = lcap_trip
-	net_sheep.Baa( 2, ">>>>>> returning: %d things in path list", plidx )
+	net_sheep.Baa( 2, "returning: %d things in path list", plidx )
 	return	plidx, path_list[0:plidx], lcap_trip		// slice it down to just what we actually used
 }
 
@@ -554,7 +548,7 @@ func (n *Network) build_paths( h1nm *string, h2nm *string, commence int64, concl
 		net_sheep.Baa( 3, "path building: process pair list %d", i )
 		//num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].fip, ext_flag, find_all )	
 		num, ipaths[i], cap_trip = n.find_paths( pair_list[i].h1, pair_list[i].h2, pair_list[i].usr, commence, conclude, inc_cap, pair_list[i].exip, ext_flag, find_all )	
-net_sheep.Baa( 1, ">>>>> ipath count is %d/%d", num, len( ipaths ) )
+		net_sheep.Baa( 2, "ipath count is %d/%d", num, len( ipaths ) )
 		if num > 0 {
 			total_paths += num
 			ok_count++
@@ -563,8 +557,6 @@ net_sheep.Baa( 1, ">>>>> ipath count is %d/%d", num, len( ipaths ) )
 			for j := range ipaths[i] {
 				if ipaths[i][j] != nil {
 					ipaths[i][j].Set_usr( pair_list[i].usr )			// associate this user with the path; needed in order to delete user based utilisation
-				} else {
-			net_sheep.Baa( 1, ">>>>> j is nil: %d", j )
 				}
 			}
 		} else {
@@ -607,6 +599,6 @@ net_sheep.Baa( 1, ">>>>> ipath count is %d/%d", num, len( ipaths ) )
 		}
 	}
 
-net_sheep.Baa( 1, ">>> build_paths return at end: pcount=%d", pcount )
+	net_sheep.Baa( 2, "build_paths: pcount=%d", pcount )
 	return
 }
