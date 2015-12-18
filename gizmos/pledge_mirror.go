@@ -63,7 +63,7 @@ type Pledge_mirror struct {
 	//mbox_list	[]*Mbox						// list of middleboxes if the pledge is a steering pledge
 	//mbidx		int			`dcache:"_"`	// insertion point into mblist
 	Match_v6	bool		`dcache:"_"`	// true if we should force flow-mods to match on IPv6
-	Tenant_id	*string		`dcwche:"_"`	// project id
+	Tenant_id	*string		`dcache:"_"`	// project id
 	Options		*string		`dcache:"_"`
 
 	stdout		[]string	// stdout/err from last remote command -- not saved in checkpoints!
@@ -305,7 +305,7 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 
 	state, _, diff := p.Window.state_str( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id": %q, "options": %q, "ptype": %d }`,
 		state, diff, *p.Host1, *p.Host2, *p.Id, *p.Tenant_id, *p.Options, PT_MIRRORING )
 
 	return
