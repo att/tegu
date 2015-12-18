@@ -74,6 +74,7 @@
 #				28 Oct 2015 - X-Auth-Tegu token now has /project appended in order to make
 #					verification quicker.
 #				24 Nov 2015 - Add options to add-mirror
+#				16 Dec 2015 - Correct OS_REGION env reference to be correct (OS_REGION_NAME)
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -94,8 +95,8 @@ function usage {
 	  -K Use keystone command line interface, rather than direct API, to generate a token
 	     (ignored unless -T is used)
 	  -o pass options to a subcommand
-	  -R name  Allows a region name to be supplied to override the OS_REGION environment variable.
-	     If OS_REGION is not defined, and this option is not given, then the first region in the
+	  -R name  Allows a region name to be supplied to override the OS_REGION_NAME environment variable.
+	     If OS_REGION_NAME is not defined, and this option is not given, then the first region in the
 	     list returned by Openstack will be used (specify the region if you must be sure!).
 	  -r allows a 'root' name to be supplied for the json output when humanised
 	  -S name  Overrides the QL_SERVICE name defined in the environment and uses name as
@@ -323,7 +324,7 @@ cat <<endKat
      "methods": [ "password" ],
      "password": {
        "user": {
-       		"domain": { "name": "${OS_DOMAIN_NAME:-default}" },
+       		"domain": { "name": "${OS_REGION_NAME:-default}" },
 			"name": "${OS_USERNAME:-missing}", "password": "${OS_PASSWORD:-missing}"
 	   }
      },
@@ -601,7 +602,7 @@ use_keystone=0
 url_type="publicURL"
 skip_catalogue=0			# -c causes this to set and we don't look in keystone catalogue for our url/port
 vlevel=0
-region=${OS_REGION:=any}	# if not supplied, default to first region (any)
+region=${OS_REGION_NAME:=any}	# if not supplied, default to first region (any)
 
 bandwidth="tegu/bandwidth"		# http api collections
 steering="tegu/api"				# eventually this should become steering
@@ -667,7 +668,7 @@ then
 		# NOTE: the conditional statement below  is a temporary hack until AICv2 is installed and the requirement for
 		# the 'tag' to be netqos goes away if it's an old system the ping will fail and we need to replace tegu/api
 		# etc. with netqos in the url.
-		if  ! rjprt  $opts -m POST -t "$proto$host/$default " -D "$token ping" 2>/dev/null |grep -q pong
+		if  ! rjprt  $opts -m POST -t "$proto$host/$default" -D "$token ping" 2>/dev/null |grep -q pong
 		then
 			default=netqos
 			steering=netqos

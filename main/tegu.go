@@ -140,6 +140,8 @@
 				16 Nov 2015 : Add restart message to logfile.
 				20 Nov 2015 : Added datacache.
 				09 Dec 2015 : Require token on requests to always be token/project.
+				16 Dec 2015 : Strips domain from phys host names for path finding
+				17 Dec 2015 : Lists only L3 nodes for network hosts.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu

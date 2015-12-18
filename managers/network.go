@@ -83,6 +83,9 @@
  				02 Jul 2015 - Extended the physical host refresh rate.
 				03 Sep 2015 - Correct nil pointer core dump cause.
 				06 Oct 2015 - Revammp to use endpoints (uuid based) rather than hosts (IP addresses).
+				16 Dec 2015 - Strip domain name when we create the vm to phost map since openstack sometimes
+					gives us fqdns and sometimes not, but we only ever get hostname from the topo side.
+				17 Dec 2015 - Correct nil pointer crash trying to fill in the vm map.
 */
 
 package managers
@@ -265,7 +268,63 @@ func (n *Network) Set_relaxed( state bool ) {
 }
 
 /*
-	REVAMP: this should be replaced with an update endpoint or insert endpoint function
+	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
+*/
+func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
+
+	i := 0
+	if n != nil && n.ip2mac != nil {								// first time round we might not have any data
+		gw_count := 0	
+		if n.gwmap != nil {	
+			gw_count = len( n.gwmap )
+		}
+		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
+
+		for ip, mac := range n.ip2mac {							// add in regular VMs
+			vmid := n.ip2vmid[ip]
+			if vmid != nil && mac != nil {						// skip if we don't find a vmid
+				if n.vmid2phost[*vmid] != nil {
+					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
+					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
+					i++
+				} else {
+					net_sheep.Baa( 1, "did NOT add host: mac=%s ip=%s phost=NIL", *mac, ip )
+				}
+			} else {
+			}
+		}
+
+		if n.gwmap != nil {										// add in the gateways which are not reported by openstack
+			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
+				for mac, ip := range n.gwmap {
+					if n.mac2phost[mac] == nil {
+						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find gw mac in mac2phost list: mac=%s  ip=%s  [TGUNET000]", mac, *ip )
+					} else {
+						if ip != nil {
+							net_sheep.Baa( 3, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
+							hlist[i] = gizmos.FL_mk_host( *ip, "", mac, *(n.mac2phost[mac]), -128 ) 		// use phys host collected from OVS as switch
+							i++
+						} else {
+							net_sheep.Baa( 1, "WRN:  build_hlist: ip was nil for mac: %s  [TGUNET001]", mac )
+						}
+					}
+				}
+			} else {
+				net_sheep.Baa( 1, "WRN: no phost2mac map -- agent likely not returned sp2uuid list  [TGUNET002]" )
+			}
+		} else {
+			net_sheep.Baa( 1, "WRN: no gateway map  [TGUNET003]" )
+		}
+
+		hlist = hlist[0:i]
+	} else {
+		hlist = make( []gizmos.FL_host_json,  1 )			// must have empty list to return if net is nil
+	}
+
+	return
+}
+
+/*
 	Using a net_vm struct update the various maps. Allows for lazy discovery of
 	VM information rather than needing to request everything all at the same time.
 */
@@ -326,7 +385,14 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	
 	if vid != nil {
 		net.vmid2ip[*vid] = vip4
-		net.vmid2phost[*vid] = vphost
+		if vphost != nil {
+			htoks := strings.Split( *vphost, "." )		// strip domain name
+			//net.vmid2phost[*vid] = vphost
+			net_sheep.Baa( 2, "vm2phost saving %s (%s) for %s", htoks[0], *vphost, *vid )
+			net.vmid2phost[*vid] = &htoks[0]
+		} else {
+			net_sheep.Baa( 2, "vm2phost phys host is nil for %s", *vid )
+		}
 	}
 
 	if vip4 != nil {
@@ -866,7 +932,6 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 		} else {
 			net_sheep.Baa( 1, "attachment switch for endpoint %s is missing: %s", k, swname )
 		}
-
 	}
 
 	return
