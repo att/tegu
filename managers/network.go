@@ -268,63 +268,6 @@ func (n *Network) Set_relaxed( state bool ) {
 }
 
 /*
-	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
-*/
-func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
-
-	i := 0
-	if n != nil && n.ip2mac != nil {								// first time round we might not have any data
-		gw_count := 0	
-		if n.gwmap != nil {	
-			gw_count = len( n.gwmap )
-		}
-		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
-
-		for ip, mac := range n.ip2mac {							// add in regular VMs
-			vmid := n.ip2vmid[ip]
-			if vmid != nil && mac != nil {						// skip if we don't find a vmid
-				if n.vmid2phost[*vmid] != nil {
-					net_sheep.Baa( 3, "adding host: [%d] mac=%s ip=%s phost=%s", i, *mac, ip, *(n.vmid2phost[*vmid]) )
-					hlist[i] = gizmos.FL_mk_host( ip, "", *mac, *(n.vmid2phost[*vmid]), -128 ) 				// use phys host as switch name and -128 as port
-					i++
-				} else {
-					net_sheep.Baa( 1, "did NOT add host: mac=%s ip=%s phost=NIL", *mac, ip )
-				}
-			} else {
-			}
-		}
-
-		if n.gwmap != nil {										// add in the gateways which are not reported by openstack
-			if n.mac2phost != nil && len( n.mac2phost ) > 0 {
-				for mac, ip := range n.gwmap {
-					if n.mac2phost[mac] == nil {
-						net_sheep.Baa( 1, "WRN:  build_hlist: unable to find gw mac in mac2phost list: mac=%s  ip=%s  [TGUNET000]", mac, *ip )
-					} else {
-						if ip != nil {
-							net_sheep.Baa( 3, "adding gateway: [%d] mac=%s ip=%s phost=%s", i, mac, *ip, *(n.mac2phost[mac]) )
-							hlist[i] = gizmos.FL_mk_host( *ip, "", mac, *(n.mac2phost[mac]), -128 ) 		// use phys host collected from OVS as switch
-							i++
-						} else {
-							net_sheep.Baa( 1, "WRN:  build_hlist: ip was nil for mac: %s  [TGUNET001]", mac )
-						}
-					}
-				}
-			} else {
-				net_sheep.Baa( 1, "WRN: no phost2mac map -- agent likely not returned sp2uuid list  [TGUNET002]" )
-			}
-		} else {
-			net_sheep.Baa( 1, "WRN: no gateway map  [TGUNET003]" )
-		}
-
-		hlist = hlist[0:i]
-	} else {
-		hlist = make( []gizmos.FL_host_json,  1 )			// must have empty list to return if net is nil
-	}
-
-	return
-}
-
-/*
 	Using a net_vm struct update the various maps. Allows for lazy discovery of
 	VM information rather than needing to request everything all at the same time.
 */
@@ -797,13 +740,10 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 		if err != nil || len( links ) <= 0 {
 			net_sheep.Baa_some( "star", 500, 1, "generating a dummy star topology: json file empty, or non-existent: %s", *cfg.topo_file )
 			links = gizmos.Gen_star_topo( *phost_list )		// generate a dummy topo based on the  phys hosts listed in endpoint list
-		} else {
-			net_sheep.Baa( 0, "ERR: unable to read static links from %s: %s  [TGUNET004]", *cfg.topo_file, err )
-			links = nil										// kicks us out later, but must at least create an empty network first
 		}
 	} else {
 		net_sheep.Baa( 0, "no phost_list yet, not parsing topo file" )
-		links = nil
+		links = nil								// kicks us out later, but must at least create empty topo first
 	}
 
 	n = mk_network( old_net == nil )			// new network, need links and mlags only if it's the first network
@@ -825,7 +765,7 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 		n.endpts = make( map[string]*gizmos.Endpt )
 	}
 
-	if links == nil {
+	if links == nil || len( links ) <= 0 {
 		if eps != nil {					// we cannot run the endpoints until we have a valid topo, so cache this list 
 			net_sheep.Baa( 2, "caching endpoint list; no topo yet" )
 			if n.ep_cache == nil {

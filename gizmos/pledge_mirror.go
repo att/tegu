@@ -63,7 +63,7 @@ type Pledge_mirror struct {
 	//mbox_list	[]*Mbox						// list of middleboxes if the pledge is a steering pledge
 	//mbidx		int			`dcache:"_"`	// insertion point into mblist
 	Match_v6	bool		`dcache:"_"`	// true if we should force flow-mods to match on IPv6
-	Tenant_id	*string
+	Tenant_id	*string		`dcwche:"_"`	// project id
 	Options		*string		`dcache:"_"`
 
 	stdout		[]string	// stdout/err from last remote command -- not saved in checkpoints!

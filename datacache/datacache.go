@@ -110,7 +110,7 @@ func Mk_dcache( cfg_data map[string]map[string]*string, master_sheep *bleater.Bl
 	if cfg_data != nil {
 		if cfg_data["datacache"] != nil {								// things we pull from the default section
 			if p := cfg_data["datacache"]["tcn"]; p != nil {
-				dc.tcn = *p
+				dc.tcn = strings.ToLower( *p )							// seems cassandra makes this lowercase, so we need to enforce it
 			}
 			if p := cfg_data["datacache"]["port"]; p != nil {
 				dc.port = *p

@@ -43,10 +43,11 @@ package gizmos
 type Pledge_base struct {
 	Id			*string			`dcache:"_"`		// name that the client can use to manage (modify/delete)
 	Window		*pledge_window	`dcache:"_"`		// the window of time for which the pledge is active
-	Pushed		bool			`dcache:"_"`		// set when pledge has been pushed into openflow or openvswitch
-	Paused		bool			`dcache:"_"`		// set if reservation has been paused
 	Usrkey		*string			`dcache:"_"`		// a 'cookie' supplied by the user to prevent any other user from modifying
-	stashed		bool								// true if successfully stashed
+
+	Pushed		bool			            		// set when pledge has been pushed into openflow or openvswitch
+	Paused		bool			                    // reservation has been paused
+	stashed		bool								// true if successfully stashed in the datacache
 }
 
 /*
