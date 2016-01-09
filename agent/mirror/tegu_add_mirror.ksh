@@ -59,6 +59,8 @@
 #                                Allow mirrors on bridges other than br-int
 #                  16 Nov 2015 - Put mirror name in all error messages
 #                  23 Nov 2015 - Add -oflowmod option processing
+#                  09 Jan 2016 - Handle VLAN=-1 case in -oflowmod option processing.
+#                                Allow df_default=(true|false) and df_inherit=(true|false) in options
 #
 
 function valid_ip4
@@ -314,8 +316,14 @@ gre)
 			MIRRORPORT=$(grep $port < /tmp/tam.$$ | cut -d' ' -f3)
 			MIRRORVLAN=$(grep $port < /tmp/tam.$$ | cut -d' ' -f7)
 			 MIRRORMAC=$(grep $port < /tmp/tam.$$ | cut -d' ' -f5)
-			$echo $sudo $CONST "cookie=0xfaad,priority=100,dl_vlan=$MIRRORVLAN,dl_dst=$MIRRORMAC,action=output:$GREPORT,normal"
-			      $sudo $CONST "cookie=0xfaad,priority=100,dl_vlan=$MIRRORVLAN,dl_dst=$MIRRORMAC,action=output:$GREPORT,normal"
+			if [ "$MIRRORVLAN" -gt 0 -a "$MIRRORVLAN" -lt 4095 ]
+			then
+				RULES="dl_vlan=$MIRRORVLAN,dl_dst=$MIRRORMAC"
+			else
+				RULES="dl_dst=$MIRRORMAC"
+			fi
+			$echo $sudo $CONST "cookie=0xfaad,priority=100,${RULES},action=output:$GREPORT,normal"
+			      $sudo $CONST "cookie=0xfaad,priority=100,${RULES},action=output:$GREPORT,normal"
 			$echo $sudo $CONST "cookie=0xfaad,priority=100,in_port=$MIRRORPORT,action=output:$GREPORT,normal"
 			      $sudo $CONST "cookie=0xfaad,priority=100,in_port=$MIRRORPORT,action=output:$GREPORT,normal"
 		done
@@ -335,6 +343,15 @@ gre)
 			-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
 			-- add bridge $bridgename mirrors @m
 	fi
+	# Add user specified options to the GRE port
+	for opt in 'df_default=true' 'df_default=false' 'df_inherit=true' 'df_inherit=false'
+	do
+		if option_set $opt
+		then
+			$echo $sudo ovs-vsctl set interface $greportname options:$opt
+			$sudo ovs-vsctl set interface $greportname options:$opt
+		fi
+	done
 	;;
 
 vlan)

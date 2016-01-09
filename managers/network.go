@@ -85,6 +85,7 @@
 				16 Dec 2015 - Strip domain name when we create the vm to phost map since openstack sometimes
 					gives us fqdns and sometimes not, but we only ever get hostname from the topo side.
 				17 Dec 2015 - Correct nil pointer crash trying to fill in the vm map.
+				09 Jan 2016 - Fixed some "go vet" problems.
 */
 
 package managers
@@ -99,7 +100,6 @@ import (
 	"github.com/att/gopkgs/ipc"
 	//"github.com/att/tegu"
 	"github.com/att/tegu/gizmos"
-	
 )
 
 // --------------------------------------------------------------------------------------
@@ -109,7 +109,7 @@ import (
 /*
 	Defines everything we need to know about a network.
 */
-type Network struct {				
+type Network struct {
 	switches	map[string]*gizmos.Switch	// symtable of switches
 	hosts		map[string]*gizmos.Host		// references to host by either mac, ipv4 or ipv6 'names'
 	links		map[string]*gizmos.Link		// table of links allows for update without resetting allotments
@@ -168,8 +168,8 @@ func (n *Network) build_hlist( ) ( hlist []gizmos.FL_host_json ) {
 
 	i := 0
 	if n != nil && n.ip2mac != nil {								// first time round we might not have any data
-		gw_count := 0	
-		if n.gwmap != nil {	
+		gw_count := 0
+		if n.gwmap != nil {
 			gw_count = len( n.gwmap )
 		}
 		hlist = make( []gizmos.FL_host_json, len( n.ip2mac ) + gw_count )
@@ -226,7 +226,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
 	if vname == nil || *vname == "" || *vname == "unknown" {								// shouldn't happen, but be safe
 		//return
-	
+
 	}
 
 	if net.vm2ip == nil {							// ensure everything exists
@@ -268,11 +268,11 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	if net.vmip2gw == nil {
 		net.vmip2gw = make( map[string]*string )
 	}
-	
+
 	if vname != nil {
 		net.vm2ip[*vname] = vip4
 	}
-	
+
 	if vid != nil {
 		net.vmid2ip[*vid] = vip4
 		if vphost != nil {
@@ -301,7 +301,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	if vgwmap != nil {							// as it may be just related to the VM and not every gateway
 		for k, v := range vgwmap {
 			net.gwmap[k] = v
-		}	
+		}
 	}
 }
 
@@ -371,7 +371,7 @@ func (n *Network) update_mac2phost( list []string, phost_suffix *string ) {
 func (n *Network) build_ip2vm( ) ( i2v map[string]*string ) {
 
 	i2v = make( map[string]*string )
-	
+
 	for k, v := range n.vm2ip {
 		if len( k ) != 36 || strings.Index( k, "." ) > 0  || i2v[*v] == nil {		// uuids are 36, so if it's not it's in, or if it has a dot as IPv4 addrs do, or if we have nothing yet
 			dup_str := k							// 'dup' the string so we don't reference the string associated with the other map
@@ -442,7 +442,7 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 		i++
 	}
 	net_sheep.Baa( 1, "gen_queue_map: added %d queue tokens to the list (len=%d)", i, len( qmap ) )
-	
+
 	return
 }
 
@@ -465,7 +465,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 
 	if *hname == "" {
 		net_sheep.Baa( 1, "bad name passed to name2ip: empty" )
-		err = fmt.Errorf( "host unknown: empty name passed to network manager", *hname )
+		err = fmt.Errorf( "host unknown: empty name passed to network manager" )
 		return
 	}
 
@@ -531,9 +531,9 @@ func (n *Network) find_link( ssw string, dsw string, capacity int64, link_alarm_
 
 	net_sheep.Baa( 3, "making link: %s", id )
 	if lnk == nil {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag );
 	} else {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag, lnk[0] );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag, lnk[0] );
 	}
 
 	if mlag != nil {
@@ -566,9 +566,9 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 		id string
 	)
 
-	if p2 < 0 {									
+	if p2 < 0 {
 		if p2 == p1 {
-			id = fmt.Sprintf( "%s.%s.$s", sw, m1, m2 ) 			// late binding, we don't know port, so use mac for ID
+			id = fmt.Sprintf( "%s.%s.$s", sw, m1, m2 )			// late binding, we don't know port, so use mac for ID
 		} else {
 			id = fmt.Sprintf( "%s.%d", sw, p1 )					// endpoint -- only a forward link to p1
 		}
@@ -593,7 +593,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 */
 func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 
-	id := fmt.Sprintf( "%s.%s", sw1, sw2 ) 			
+	id := fmt.Sprintf( "%s.%s", sw1, sw2 )
 
 	l = n.vlinks[id]
 	if l == nil {
@@ -614,7 +614,7 @@ func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 	Tegu-lite:  sdnhost might be a file which contains a static graph, in json form,
 	describing the physical network. The string is assumed to be a filename if it
 	does _not_ contain a ':'.
-	
+
 */
 func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string ) (n *Network) {
 	var (
@@ -678,7 +678,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		}
 
 		tokens := strings.SplitN( links[i].Src_switch, "@", 2 )	// if the 'id' is host@interface we need to drop interface so all are added to same switch
-		sswid := tokens[0]								
+		sswid := tokens[0]
 		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 )
 		dswid := tokens[0]
 
@@ -695,7 +695,7 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		}
 
 		// omitting the link (last parm) causes reuse of the link if it existed so that obligations are kept; links _are_ created with the interface name
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )		
+		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )
 		lnk.Set_forward( dsw )
 		lnk.Set_backward( ssw )
 		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
@@ -816,7 +816,7 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 		return
 	}
 
-	if ip, ok = n.vm2ip[*name]; !ok {		// assume that IP was given instead of name (gateway)	
+	if ip, ok = n.vm2ip[*name]; !ok {		// assume that IP was given instead of name (gateway)
 		//err = fmt.Errorf( "cannot translate vm to an IP address: %s", *name )
 		//return
 		ip = name
@@ -850,7 +850,7 @@ func (n *Network) host_info( name *string ) ( ip *string, mac *string, swid *str
 	Generate a json list of hosts which includes ip, name, switch(es) and port(s).
 */
 func (n *Network) host_list( ) ( jstr string ) {
-	var( 	
+	var(
 		sep 	string = ""
 		hname	string = ""
 		seen	map[string]bool
@@ -911,7 +911,7 @@ func (n *Network) host_list( ) ( jstr string ) {
 	Generate a json list of fences
 */
 func (n *Network) fence_list( ) ( jstr string ) {
-	var( 	
+	var(
 		sep 	string = ""
 	)
 
@@ -1017,13 +1017,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		if p := cfg_data["fqmgr"]["phost_suffix"]; p != nil {
 			phost_suffix = p
 			net_sheep.Baa( 1, "will strip suffix from mac2phost map: %s", *phost_suffix )
-		}	
+		}
 	}
 
 														// suss out config settings from our section
 	if cfg_data["network"] != nil {
 		if p := cfg_data["network"]["discount"]; p != nil {
-			d := clike.Atoll( *p ); 			
+			d := clike.Atoll( *p );
 			if d < 0 {
 				discount = 0
 			} else {
@@ -1035,7 +1035,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 			relaxed = *p ==  "true" || *p ==  "True" || *p == "TRUE"
 		}
 		if p := cfg_data["network"]["refresh"]; p != nil {
-			refresh = clike.Atoi( *p ); 			
+			refresh = clike.Atoi( *p );
 		}
 		if p := cfg_data["network"]["link_max_cap"]; p != nil {
 			max_link_cap = clike.Atoi64( *p )
@@ -1051,7 +1051,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 		if p := cfg_data["network"]["find_paths"]; p != nil {
 			switch( *p ) {
-				case "all":	
+				case "all":
 					find_all_paths = true
 					mlag_paths = false
 
@@ -1110,7 +1110,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 						// tickle once, very soon after starting, to get a host list
 	tklr.Add_spot( int64( refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// get a host list from openstack now and again
 	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network
-	
+
 	for {
 		select {					// assume we might have multiple channels in future
 			case req = <- nch:
@@ -1146,7 +1146,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									path_list[pcount] = path_list_out[j]
 									pcount++
 								}
-								for j := 0; j < pcount_in; j++ {	
+								for j := 0; j < pcount_in; j++ {
 									path_list[pcount] = path_list_in[j]
 								}
 
@@ -1187,7 +1187,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								if len( toks ) > 1 {
 									usr = toks[0]										// the 'user' for queue setting
 								}
-	
+
 								ips, err := act_net.name2ip( src )
 								if err == nil {
 									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
@@ -1471,7 +1471,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							if req.State == nil {
 								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
 								if req.Response_data == nil {
-									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", ip )
+									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", *ip )
 								}	
 							}
 						} else {
