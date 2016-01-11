@@ -86,6 +86,7 @@
 					gives us fqdns and sometimes not, but we only ever get hostname from the topo side.
 				17 Dec 2015 - Correct nil pointer crash trying to fill in the vm map.
 				09 Jan 2016 - Fixed some "go vet" problems.
+				10 Jan 2016 - Corrected typo in printf statement.
 */
 
 package managers
@@ -568,7 +569,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 
 	if p2 < 0 {
 		if p2 == p1 {
-			id = fmt.Sprintf( "%s.%s.$s", sw, m1, m2 )			// late binding, we don't know port, so use mac for ID
+			id = fmt.Sprintf( "%s.%s.%s", sw, *m1, *m2 ) 			// late binding, we don't know port, so use mac for ID
 		} else {
 			id = fmt.Sprintf( "%s.%d", sw, p1 )					// endpoint -- only a forward link to p1
 		}
