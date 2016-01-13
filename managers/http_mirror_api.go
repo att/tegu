@@ -43,6 +43,7 @@
 				18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
 				16 Nov 2015 - Add tenant checks, HTTP logging, error reporting
 				24 Nov 2015 - Add options
+				09 Jan 2016 - Add more options
 */
 
 package managers
@@ -137,6 +138,23 @@ func validVlanList(v string) (err error) {
 func validName(v string) (bool) {
 	re := regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 	return re.MatchString(v)
+}
+
+// Check validity of options to "add mirror"
+func validOption(v string) (bool) {
+	switch v {
+	case "flowmod":
+		return true;
+	case "df_default=true":
+		return true;
+	case "df_default=false":
+		return true;
+	case "df_inherit=true":
+		return true;
+	case "df_inherit=false":
+		return true;
+	}
+	return false;
 }
 
 /*
@@ -591,8 +609,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, projid string, data
 	// 6. Validate options, if present
 	if req.Options != "" {
 		for _, opt := range strings.Split( req.Options, "," ) {
-			// Only "flowmod" is currently valid; wish Go had sets!
-			if opt != "flowmod" {
+			if ! validOption(opt) {
 				code = http.StatusBadRequest
 				msg = "Invalid option: "+opt
 				return

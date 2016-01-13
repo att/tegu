@@ -86,6 +86,8 @@
 				16 Dec 2015 - Strip domain name when we create the vm to phost map since openstack sometimes
 					gives us fqdns and sometimes not, but we only ever get hostname from the topo side.
 				17 Dec 2015 - Correct nil pointer crash trying to fill in the vm map.
+				09 Jan 2016 - Fixed some "go vet" problems.
+				10 Jan 2016 - Corrected typo in printf statement.
 */
 
 package managers
@@ -227,7 +229,7 @@ func mk_net_cfg( cfg_data map[string]map[string]*string ) ( nc *net_cfg ) {
 /*
 	Defines everything we need to know about a network.
 */
-type Network struct {				
+type Network struct {
 	switches	map[string]*gizmos.Switch	// symtable of switches
 	links		map[string]*gizmos.Link		// table of links allows for update without resetting allotments
 	vlinks		map[string]*gizmos.Link		// table of virtual links (links between ports on the same switch)
@@ -267,6 +269,7 @@ func (n *Network) Set_relaxed( state bool ) {
 	}
 }
 
+
 /*
 	Using a net_vm struct update the various maps. Allows for lazy discovery of
 	VM information rather than needing to request everything all at the same time.
@@ -279,7 +282,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	vname, vid, vip4, _, vphost, gw, vmac, vfip := vm.Get_values( )
 	if vname == nil || *vname == "" || *vname == "unknown" {								// shouldn't happen, but be safe
 		//return
-	
+
 	}
 
 	if net.vm2ip == nil {							// ensure everything exists
@@ -321,11 +324,11 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	if net.vmip2gw == nil {
 		net.vmip2gw = make( map[string]*string )
 	}
-	
+
 	if vname != nil {
 		net.vm2ip[*vname] = vip4
 	}
-	
+
 	if vid != nil {
 		net.vmid2ip[*vid] = vip4
 		if vphost != nil {
@@ -354,7 +357,7 @@ func (net *Network) insert_vm( vm *Net_vm ) {
 	if vgwmap != nil {							// as it may be just related to the VM and not every gateway
 		for k, v := range vgwmap {
 			net.gwmap[k] = v
-		}	
+		}
 	}
 */
 }
@@ -391,7 +394,6 @@ func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
 
 	return fence
 }
-
 
 /*
 	Accepts a list (string) of queue data information segments (swid/port,res-id,queue,min,max,pri), splits
@@ -448,7 +450,7 @@ func (n *Network) gen_queue_map( ts int64, ep_only bool ) ( qmap []string, err e
 		i++
 	}
 	net_sheep.Baa( 1, "gen_queue_map: added %d queue tokens to the list (len=%d)", i, len( qmap ) )
-	
+
 	return
 }
 
@@ -543,7 +545,7 @@ func (n *Network) name2ip( hname *string ) (ip *string, err error) {
 
 	if *hname == "" {
 		net_sheep.Baa( 1, "bad name passed to name2ip: empty" )
-		err = fmt.Errorf( "host unknown: empty name passed to network manager", *hname )
+		err = fmt.Errorf( "host unknown: empty name passed to network manager" )
 		return
 	}
 
@@ -628,9 +630,9 @@ func (n *Network) find_link( ssw string, dsw string, capacity int64, link_alarm_
 
 	net_sheep.Baa( 3, "making link: %s", id )
 	if lnk == nil {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag );
 	} else {
-		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag, lnk[0] );	
+		l = gizmos.Mk_link( &ssw, &dsw, capacity, link_alarm_thresh, mlag, lnk[0] );
 	}
 
 	if mlag != nil {
@@ -663,9 +665,9 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 		id string
 	)
 
-	if p2 < 0 {									
+	if p2 < 0 {
 		if p2 == p1 {
-			id = fmt.Sprintf( "%s.%s.$s", sw, m1, m2 ) 			// late binding, we don't know port, so use mac for ID
+			id = fmt.Sprintf( "%s.%s.%s", sw, *m1, *m2 ) 			// late binding, we don't know port, so use mac for ID
 		} else {
 			id = fmt.Sprintf( "%s.%d", sw, p1 )					// endpoint -- only a forward link to p1
 		}
@@ -690,7 +692,7 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 */
 func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 
-	id := fmt.Sprintf( "%s.%s", sw1, sw2 ) 			
+	id := fmt.Sprintf( "%s.%s", sw1, sw2 )
 
 	l = n.vlinks[id]
 	if l == nil {
@@ -802,8 +804,8 @@ func build( old_net *Network, eps map[string]*gizmos.Endpt, cfg *net_cfg, phost_
 		}
 
 		tokens := strings.SplitN( links[i].Src_switch, "@", 2 )	// if the 'id' is host@interface we need to drop interface so all are added to same switch
-		sswid := tokens[0]								
-		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 ) 
+		sswid := tokens[0]
+		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 )
 		dswid := tokens[0]
 
 		ssw = n.switches[sswid]
@@ -985,7 +987,7 @@ func req_ep_list( rch chan *ipc.Chmsg, block bool ) ( map[string]*gizmos.Endpt )
 	Generate a json list of hosts which includes ip, name, switch(es) and port(s).
 */
 func (n *Network) host_list( ) ( jstr string ) {
-	var( 	
+	var(
 		sep 	string = ""
 	)
 
@@ -1017,7 +1019,7 @@ func (n *Network) host_list( ) ( jstr string ) {
 	Generate a json list of fences
 */
 func (n *Network) fence_list( ) ( jstr string ) {
-	var( 	
+	var(
 		sep 	string = ""
 	)
 
@@ -1253,7 +1255,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 									path_list[pcount] = path_list_out[j]
 									pcount++
 								}
-								for j := 0; j < pcount_in; j++ {	
+								for j := 0; j < pcount_in; j++ {
 									path_list[pcount] = path_list_in[j]
 								}
 
@@ -1593,7 +1595,7 @@ func Network_mgr( nch chan *ipc.Chmsg, topo_file *string ) {
 							if req.State == nil {
 								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
 								if req.Response_data == nil {
-									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", ip )
+									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", *ip )
 								}	
 							}
 						} else {

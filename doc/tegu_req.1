@@ -28,6 +28,7 @@
 .\"					18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
 .\"					22 Sep 2015 - Updates based on code changes.
 .\"					24 Nov 2015 - Add options to add-mirror
+.\"					09 Jan 2016 - Allow df_default=(true|false) and df_inherit=(true|false) in options
 .\"
 .TH TEGU_REQ 1 "Tegu Manual"
 .CM 4
@@ -52,9 +53,9 @@ For details on the Tegu HTTP API, look at \fItegu(8)\fP.
 .\" ==========
 .TP 8
 .B \-c
-Causes a search of the keystone service catalogue to be skipped. If not supplied, then 
-tegu_req will attempt to find the URL for Tegu by searching for the netqos service 
-name (see -S) in the catalogue.  If the service is not defined, then localhost is 
+Causes a search of the keystone service catalogue to be skipped. If not supplied, then
+tegu_req will attempt to find the URL for Tegu by searching for the netqos service
+name (see -S) in the catalogue.  If the service is not defined, then localhost is
 assumed unless -h is supplied.
 .TP 8
 .B \-d
@@ -87,7 +88,9 @@ Causes extra arguments, in the form of key=value, to be passed to Tegu for certa
 The commands where this is used are: listres, listhosts, graph, reserve, steer.
 .TP 8
 .B \-o options
-Supplies extra options for a command.  Currently, this is only used by the \fBadd-mirror\fP command (see below).
+Supplies extra options for a command.
+Currently, this is only used by the \fBadd-mirror\fP command (see below).
+Options must be supplied in one comma separated string; the \-o option may not be repeated.
 .TP 8
 .B \-R name
 Supplies the region name overriding the OS_REGION from the environment.
@@ -192,12 +195,12 @@ reservation to be deleted if a matching cookie is supplied.
 The cookie may not contain any spaces, and does not need to be unique across reservations.
 .IP
 \fBdscp\fP
-The traffic classification. 
-This is one of three strings, "voice", "control", or "data"; each may be prefixed with 
+The traffic classification.
+This is one of three strings, "voice", "control", or "data"; each may be prefixed with
 "global_."
 The strings map to one of the supported ITONS DSCP values.
-If the global_ prefix is added, the traffic markings (dscp values) are kept as the traffic 
-passes out of the cloud environment. 
+If the global_ prefix is added, the traffic markings (dscp values) are kept as the traffic
+passes out of the cloud environment.
 If omitted, "voice" is assumed.
 
 .TP 8
@@ -369,6 +372,12 @@ Tegu will normally use the built-in mirroring capability of OVS to provide the m
 However, if the \fB-oflowmod\fP option is provided to tegu_req, then OVS flowmods will be used
 to mirror traffic to the appropriate port (note: this option will only work if the output port
 is a GRE port).
+.IP
+The user may specify values for the \fIdf_default\fP and \fIdf_inherit\fP options for the
+created GRE port by passing in the \fB-odf_default=val1,df_inherit=val2\fP option on the
+command line.
+\fIval1\fP and \fIval2\fP must be either \fItrue\fP or \fIfalse\fP.
+The meanings and default values for these options are provided in \fIovs-vswitchd.conf.db(5)\fP.
 
 .TP 8
 .B del-mirror name [cookie]
@@ -477,4 +486,4 @@ This OpenStack environment variables specifies the URL to use when contacting Ke
 If it is not in the environment, it will be prompted for if a token is needed.
 
 .SH SEE ALSO
-rjprt(1), tegu.cfg(5), tegu(8)
+rjprt(1), tegu.cfg(5), ovs-vswitchd.conf.db(5), tegu(8)
