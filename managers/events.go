@@ -29,7 +29,7 @@
 	Date:		11 November 2015
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		13 Jan 2015 - Added pull of action from event_type if not in payload.
 */
 
 package managers
@@ -63,6 +63,11 @@ type event_handler_data struct {
 	The field names in the 'what' list are searched for and a missing list string
 	which contains the fields that weren't there or couldn't be converted is 
 	returned with the map.   An empty ("") missing string indicates no errors.
+
+	If "action" is included in the required list, and is not in the payload, then
+	the last node of the event type is used. E.g. endpt.add would use add as the 
+	action.  Some message systems add an 'end' as the last node, and in this case
+	the n-1 node will be used (e.g. endpt.add.end would generate an  action of add).
 */
 func payload_2smap( e *msgrtr.Event, what string ) ( m map[string]string, missing_stuff string ) {
 
@@ -96,10 +101,19 @@ func payload_2smap( e *msgrtr.Event, what string ) ( m map[string]string, missin
 				m[tokens[i]] = fmt.Sprintf( "%.3f", thing )
 
 			default:
-				net_sheep.Baa( 1, "%s in event payload was buggered or missing", tokens[i] )
-				missing_stuff += " " + tokens[i]
+				if tokens[i] == "action" {
+					etts := strings.Split( e.Event_type, "." )			// split the event type and use last as the action
+					n := len( etts )
+					if n > 1 && etts[n-1] == "end" {
+						m[tokens[i]] = etts[n-2] 
+					} else {
+						m[tokens[i]] = etts[n-1]
+					}
+				} else {
+					net_sheep.Baa( 1, "%s in event payload was buggered or missing", tokens[i] )
+					missing_stuff += " " + tokens[i]
+				}
 		}
-
 	}
 
 	return m, missing_stuff
