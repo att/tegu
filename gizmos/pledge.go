@@ -69,6 +69,8 @@ type Pledge interface {
 	Resume( bool )
 	Set_expiry( expiry int64 )
 	Set_pushed()
+	Is_stashed() ( bool )
+	Set_stashed( bool )
 
 	// The following must be implemented by each separate Pledge type
 	Equals( *Pledge ) ( bool )

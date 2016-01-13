@@ -112,7 +112,7 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 *string, p2 *string, commence
 	
 	p = &Pledge_steer{
 		Pledge_base:Pledge_base{
-			id: id,
+			Id: id,
 		},
 		host1:		ep1,
 		host2:		ep2,
@@ -121,12 +121,12 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 *string, p2 *string, commence
 		protocol:	proto,
 	}
 
-	p.window = window
+	p.Window = window
 
 	if usrkey != nil && *usrkey != "" {
-		p.usrkey = usrkey
+		p.Usrkey = usrkey
 	} else {
-		p.usrkey = &empty_str
+		p.Usrkey = &empty_str
 	}
 
 	return
@@ -139,10 +139,10 @@ func Mk_steer_pledge( ep1 *string, ep2 *string, p1 *string, p2 *string, commence
 func (p *Pledge_steer) Clone( name string ) ( *Pledge_steer ) {
 	newp := &Pledge_steer {
 		Pledge_base:Pledge_base{
-			id:			&name,
-			usrkey:		p.usrkey,
-			pushed:		p.pushed,
-			paused:		p.paused,
+			Id:			&name,
+			Usrkey:		p.Usrkey,
+			Pushed:		p.Pushed,
+			Paused:		p.Paused,
 		},
 		host1:		p.host1,
 		host2:		p.host2,
@@ -150,7 +150,7 @@ func (p *Pledge_steer) Clone( name string ) ( *Pledge_steer ) {
 		tpport2: 	p.tpport2,
 	}
 
-	newp.window = p.window.clone()
+	newp.Window = p.Window.clone()
 	return newp
 }
 
@@ -160,8 +160,8 @@ func (p *Pledge_steer) Clone( name string ) ( *Pledge_steer ) {
 func (p *Pledge_steer) Nuke( ) {
 	p.host1 = nil
 	p.host2 = nil
-	p.id = nil
-	p.usrkey = nil
+	p.Id = nil
+	p.Usrkey = nil
 }
 
 /*
@@ -185,9 +185,9 @@ func (p *Pledge_steer) From_json( jstr *string ) ( err error ){
 	p.host2, p.tpport2 = Split_port( jp.Host2 )
 
 	p.protocol = jp.Protocol
-	p.window, err = mk_pledge_window( jp.Commence, jp.Expiry )
-	p.id = jp.Id
-	p.usrkey = jp.Usrkey
+	p.Window, err = mk_pledge_window( jp.Commence, jp.Expiry )
+	p.Id = jp.Id
+	p.Usrkey = jp.Usrkey
 
 	p.protocol = jp.Protocol
 	if p.protocol == nil {					// we don't tolerate nil ptrs
@@ -291,11 +291,11 @@ func (p *Pledge_steer) To_str( ) ( s string ) {
 
 func (p *Pledge_steer) String( ) ( s string ) {
 
-	state, caption, diff := p.window.state_str()
-	commence, expiry := p.window.get_values()
+	state, caption, diff := p.Window.state_str()
+	commence, expiry := p.Window.get_values()
 
 	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d h2=%s:%d id=%s st=%d ex=%d push=%v ptype=steering", state, diff, caption,
-			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.id, commence, expiry,  p.pushed )
+			*p.host1, p.tpport2, *p.host2, p.tpport2, *p.Id, commence, expiry,  p.Pushed )
 	return
 }
 
@@ -311,14 +311,14 @@ func (p *Pledge_steer) To_json( ) ( json string ) {
 		diff int64 = 0
 	)
 
-	state, _, diff = p.window.state_str()
+	state, _, diff = p.Window.state_str()
 	
 	proto := ""
 	if p.protocol != nil {
 		proto = *p.protocol
 	}
 	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "id": %q, "ptype": %d, "mbox_list": [ `,
-			state, diff, *p.host1, *p.tpport1, *p.host2, *p.tpport2, proto, *p.id, PT_STEERING )
+			state, diff, *p.host1, *p.tpport1, *p.host2, *p.tpport2, proto, *p.Id, PT_STEERING )
 
 	sep := ""
 	for i := 0; i < p.mbidx; i++ {
@@ -344,19 +344,19 @@ func (p *Pledge_steer) To_json( ) ( json string ) {
 */
 func (p *Pledge_steer) To_chkpt( ) ( chkpt string ) {
 
-	if p.window.is_expired() {
+	if p.Window.is_expired() {
 		chkpt = "expired"
 		return
 	}
 	
-	c, e := p.window.get_values()
+	c, e := p.Window.get_values()
 
 	proto := ""
 	if p.protocol != nil {
 		proto = *p.protocol
 	}
 	chkpt = fmt.Sprintf( `{ "host1": "%s:%s", "host2": "%s:%s", "protocol": %q, "commence": %d, "expiry": %d, "id": %q, "usrkey": %q, "ptype": %d, "mbox_list": [ `,
-			*p.host1, *p.tpport1, *p.host2, *p.tpport2, proto, c, e, *p.id,  *p.usrkey, PT_STEERING )
+			*p.host1, *p.tpport1, *p.host2, *p.tpport2, proto, c, e, *p.Id,  *p.Usrkey, PT_STEERING )
 
 	sep := ""
 	for i := 0; i < p.mbidx; i++ {
@@ -417,7 +417,7 @@ func (p *Pledge_steer) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *s
 		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
 	}
 
-	c, e := p.window.get_values()
+	c, e := p.Window.get_values()
 	return p.host1, p.host2, p.tpport1, p.tpport2, c, e, 0, 0
 }
 

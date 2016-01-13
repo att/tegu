@@ -530,8 +530,6 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 		req = <- my_ch										// wait for completion
 
 		if req.State == nil {
-			ckptreq := ipc.Mk_chmsg( )
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 			reason = fmt.Sprintf( "reservation accepted; reservation path has %d entries", len( path_list ) )
 			jreason =  res.To_json()
 		} else {
@@ -586,12 +584,10 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 		gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
 		res.Set_gate( gate )
 
-		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory (and datacache)
 		req = <- my_ch										// wait for completion
 
 		if req.State == nil {
-			ckptreq := ipc.Mk_chmsg( )
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 			reason = fmt.Sprintf( "one way reservation accepted" )
 			jreason =  res.To_json()
 		} else {
@@ -706,10 +702,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 
 				case "chkpt":
 					if validate_auth( &auth_data, is_token, admin_roles ) {
-						req = ipc.Mk_chmsg( )
-						req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
-						state = "OK"
-						reason = "checkpoint was requested"
+						reason = "deprecated; checkpoint no longer valid"
 					}
 
 				case "graph":
@@ -1160,8 +1153,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 					}
 
 					if req.State == nil {
-						ckptreq := ipc.Mk_chmsg( )								// must have new message since we don't wait on a response
-						ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
+						//ckptreq := ipc.Mk_chmsg( )								// must have new message since we don't wait on a response
+						//ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 						state = "OK"
 						reason = fmt.Sprintf( "steering reservation accepted; reservation has %d middleboxes", len( mbnames ) )
 						jreason =  res.To_json()
@@ -1355,8 +1348,6 @@ func delete_reservation( tokens []string ) ( err error ) {
 
 		if req.State == nil {
 			err = nil
-			ckptreq := ipc.Mk_chmsg( )								// request checkpoint but no need to wait on it
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 		} else {
 			err = req.State
 		}

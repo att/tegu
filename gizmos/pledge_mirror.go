@@ -33,6 +33,7 @@
 				16 Aug 2015 - Move common code into Pledge_base
 				16 Nov 2015 - Add tenant_id, stdout, stderr to Pledge_mirror
 				24 Nov 2015 - Add options
+				03 Dec 2015 - Added datacache support.
 */
 
 package gizmos
@@ -45,24 +46,25 @@ import (
 
 // needs rework to rename fields that make sense to mirroring
 type Pledge_mirror struct {
-				Pledge_base	// common fields
-	host1		*string		// list of ports to mirror
-	host2		*string		// destination of mirrors
-	//protocol	*string		//
-	tpport1		*string		//
-	tpport2		*string		// these match h1/h2 respectively
-	//bandw_in	int64		// bandwidth to reserve inbound to host1
-	//bandw_out	int64		// bandwidth to reserve outbound from host1
-	//dscp		int			// dscp value that should be propagated
-	//dscp_koe	bool		// true if the dscp value should be kept when a packet exits the environment
-	qid			*string		// physical host
-	//path_list	[]*Path		// list of paths that represent the bandwith and can be used to send flowmods etc.
+				Pledge_base					// common fields (fields marked with dcache)
 
-	//mbox_list	[]*Mbox		// list of middleboxes if the pledge is a steering pledge
-	//mbidx		int			// insertion point into mblist
-	match_v6	bool		// true if we should force flow-mods to match on IPv6
-	tenant_id	*string
-	options		*string
+	Host1		*string		`dcache:"_"`	// list of ports to mirror
+	Host2		*string		`dcache:"_"`	// destination of mirrors
+	//protocol	*string
+	Tpport1		*string		`dcache:"_"`	//
+	Tpport2		*string		`dcache:"_"`	// these match h1/h2 respectively
+	//bandw_in	int64						// bandwidth to reserve inbound to host1
+	//bandw_out	int64						// bandwidth to reserve outbound from host1
+	//dscp		int							// dscp value that should be propagated
+	//dscp_koe	bool		`dcache:"_"`	// true if the dscp value should be kept when a packet exits the environment
+	Qid			*string		`dcache:"_"`	// physical host
+	//path_list	[]*Path						// list of paths that represent the bandwith and can be used to send flowmods etc.
+
+	//mbox_list	[]*Mbox						// list of middleboxes if the pledge is a steering pledge
+	//mbidx		int			`dcache:"_"`	// insertion point into mblist
+	Match_v6	bool		`dcache:"_"`	// true if we should force flow-mods to match on IPv6
+	Tenant_id	*string		`dcache:"_"`	// project id
+	Options		*string		`dcache:"_"`
 
 	stdout		[]string	// stdout/err from last remote command -- not saved in checkpoints!
 	stderr		[]string
@@ -118,21 +120,21 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 	}
 	pm := &Pledge_mirror {
 		Pledge_base:Pledge_base{
-			id: id,
-			usrkey: usrkey,			// user "cookie"
-			window: window,
+			Id: id,
+			Usrkey: usrkey,			// user "cookie"
+			Window: window,
 		},
-		host1:		&t,				// mirror input ports (space sep)
-		host2:		out_port,		// mirror output port
-		qid:		phost,			// physical host (overloaded field)
-		tenant_id:	tenant,
-		options:	opts,
+		Host1:		&t,				// mirror input ports (space sep)
+		Host2:		out_port,		// mirror output port
+		Qid:		phost,			// physical host (overloaded field)
+		Tenant_id:	tenant,
+		Options:	opts,
 		stdout:		make([]string, 0),
 		stderr:		make([]string, 0),
 	}
 
 	if *usrkey == "" {
-		pm.usrkey = &empty_str
+		pm.Usrkey = &empty_str
 	}
 
 	p = pm
@@ -146,27 +148,21 @@ func Mk_mirror_pledge( in_ports []string, out_port *string, commence int64, expi
 func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 	newp := &Pledge_mirror {
 		Pledge_base:Pledge_base{
-			id:			p.id,
-			usrkey:		p.usrkey,			// user "cookie"
-			pushed:		p.pushed,
-			paused:		p.paused,
+			Id:			p.Id,
+			Usrkey:		p.Usrkey,			// user "cookie"
+			Pushed:		p.Pushed,
+			Paused:		p.Paused,
 		},
-		host1:		p.host1,
-		host2:		p.host2,
-		//tpport1: 	p.tpport1,
-		//tpport2: 	p.tpport2,
-		//bandw_in:	p.bandw_in,
-		//bandw_out:	p.bandw_out,
-		//dscp:		p.dscp,
-		qid:		p.qid,
-		//path_list:	p.path_list,
-		tenant_id:	p.tenant_id,
-		options:	p.options,
+		Host1:		p.Host1,
+		Host2:		p.Host2,
+		Qid:		p.Qid,
+		Tenant_id:	p.Tenant_id,
+		Options:	p.Options,
 		stdout:		make([]string, 0),
 		stderr:		make([]string, 0),
 	}
 
-	newp.window = p.window.clone()
+	newp.Window = p.Window.clone()
 	return newp
 }
 
@@ -174,11 +170,11 @@ func (p *Pledge_mirror) Clone( name string ) ( Pledge ) {
 	Destruction
 */
 func (p *Pledge_mirror) Nuke( ) {
-	p.host1 = nil
-	p.host2 = nil
-	p.id = nil
-	p.qid = nil
-	p.usrkey = nil
+	p.Host1 = nil
+	p.Host2 = nil
+	p.Id = nil
+	p.Qid = nil
+	p.Usrkey = nil
 }
 
 /*
@@ -196,17 +192,17 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 		return
 	}
 
-	p.host1, p.tpport1 = Split_port( jp.Host1 )		// suss apart host and port
-	p.host2, p.tpport2 = Split_port( jp.Host2 )
+	p.Host1, p.Tpport1 = Split_port( jp.Host1 )		// suss apart host and port
+	p.Host2, p.Tpport2 = Split_port( jp.Host2 )
 
-	p.window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
+	p.Window, _ = mk_pledge_window( jp.Commence, jp.Expiry )
 	//p.protocol = jp.Protocol
-	p.id = jp.Id
+	p.Id = jp.Id
 	//p.dscp_koe = jp.Dscp_koe
-	p.usrkey = jp.Usrkey
-	p.qid = jp.Qid
-	p.tenant_id = jp.Tenant_id
-	p.options = jp.Options
+	p.Usrkey = jp.Usrkey
+	p.Qid = jp.Qid
+	p.Tenant_id = jp.Tenant_id
+	p.Options = jp.Options
 	//p.bandw_out = jp.Bandwout
 	//p.bandw_in = jp.Bandwin
 
@@ -216,7 +212,7 @@ func (p *Pledge_mirror) From_json( jstr *string ) ( err error ){
 /*
 	Associates a queue ID with the pledge.
 func (p *Pledge_mirror) Set_qid( id *string ) {
-	p.qid = id
+	p.Qid = id
 }
 */
 
@@ -224,7 +220,7 @@ func (p *Pledge_mirror) Set_qid( id *string ) {
 	Set match v6 flag based on user input.
 */
 func (p *Pledge_mirror) Set_matchv6( state bool ) {
-	p.match_v6 = state
+	p.Match_v6 = state
 }
 
 /*
@@ -232,7 +228,7 @@ func (p *Pledge_mirror) Set_matchv6( state bool ) {
 	this pledge.
 */
 func (p *Pledge_mirror) Has_host( hname *string ) ( bool ) {
-	return *p.qid == *hname
+	return *p.Qid == *hname
 }
 
 /*
@@ -262,7 +258,7 @@ func (p *Pledge_mirror) Get_proto( ) ( *string ) {
 */
 
 func (p *Pledge_mirror) Get_Tenant() *string {
-	return p.tenant_id
+	return p.Tenant_id
 }
 
 func (p *Pledge_mirror) Set_Output( stdout []string, stderr []string ) {
@@ -275,7 +271,7 @@ func (p *Pledge_mirror) Get_Output() ( []string, []string ) {
 }
 
 func (p *Pledge_mirror) Get_Options() ( *string ) {
-	return p.options
+	return p.Options
 }
 
 // --------- humanisation or export functions --------------------------------------------------------
@@ -289,12 +285,12 @@ func (p *Pledge_mirror) To_str( ) ( s string ) {
 
 func (p *Pledge_mirror) String( ) ( s string ) {
 
-	state, caption, diff := p.window.state_str( )
-	c, e := p.window.get_values( )
+	state, caption, diff := p.Window.state_str( )
+	c, e := p.Window.get_values( )
 
 	//NEVER put the usrkey into the string!
 	s = fmt.Sprintf( "%s: togo=%ds %s ports=%s output=%s id=%s st=%d ex=%d push=%v ptype=mirroring", state, diff, caption,
-		*p.host1, *p.host2, *p.id, c, e, p.pushed )
+		*p.Host1, *p.Host2, *p.Id, c, e, p.Pushed )
 
 	return
 }
@@ -307,10 +303,10 @@ func (p *Pledge_mirror) String( ) ( s string ) {
 */
 func (p *Pledge_mirror) To_json( ) ( json string ) {
 
-	state, _, diff := p.window.state_str( )
+	state, _, diff := p.Window.state_str( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
-		state, diff, *p.host1, *p.host2, *p.id, *p.tenant_id, *p.options, PT_MIRRORING )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id": %q, "options": %q, "ptype": %d }`,
+		state, diff, *p.Host1, *p.Host2, *p.Id, *p.Tenant_id, *p.Options, PT_MIRRORING )
 
 	return
 }
@@ -329,26 +325,26 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 */
 func (p *Pledge_mirror) To_chkpt( ) ( chkpt string ) {
 
-	if p.window.is_expired( ) {			// will show expired if window is nil, so safe without check
+	if p.Window.is_expired( ) {			// will show expired if window is nil, so safe without check
 		chkpt = "expired"
 		return
 	}
 
-	c, e := p.window.get_values( )
+	c, e := p.Window.get_values( )
 
 	options := ""
-	if p.options != nil {
-		options = *p.options
+	if p.Options != nil {
+		options = *p.Options
 	}
 
 	tenant_id := "unknown"
-	if p.tenant_id != nil {
-		tenant_id = *p.tenant_id
+	if p.Tenant_id != nil {
+		tenant_id = *p.Tenant_id
 	} 
 
 	chkpt = fmt.Sprintf(
 		`{ "host1": "%s", "host2": "%s", "commence": %d, "expiry": %d, "id": %q, "qid": %q, "usrkey": %q, "tenant_id": %q, "options": %q, "ptype": %d }`,
-		*p.host1, *p.host2, c, e, *p.id, *p.qid, *p.usrkey, tenant_id, options, PT_MIRRORING )
+		*p.Host1, *p.Host2, c, e, *p.Id, *p.Qid, *p.Usrkey, tenant_id, options, PT_MIRRORING )
 
 	return
 }
@@ -371,7 +367,7 @@ func (p *Pledge_mirror) Get_ptype( ) ( int ) {
 	Return whether the match on IPv6 flag is true
 */
 func (p *Pledge_mirror) Get_matchv6() ( bool ) {
-	return p.match_v6
+	return p.Match_v6
 }
 
 /*
@@ -382,7 +378,7 @@ func (p *Pledge_mirror) Get_qid( ) ( *string ) {
 		return nil
 	}
 
-	return p.qid
+	return p.Qid
 }
 
 /*
@@ -393,7 +389,7 @@ func (p *Pledge_mirror) Get_hosts( ) ( *string, *string ) {
 		return &empty_str, &empty_str
 	}
 
-	return p.host1, p.host2
+	return p.Host1, p.Host2
 }
 
 /*
@@ -411,8 +407,8 @@ func (p *Pledge_mirror) Get_values( ) ( h1 *string, h2 *string, p1 *string, p2 *
 		return &empty_str, &empty_str, &empty_str, &empty_str, 0, 0, 0, 0
 	}
 
-	c, e := p.window.get_values( )
-	return p.host1, p.host2, p.tpport1, p.tpport2, c, e, 0, 0
+	c, e := p.Window.get_values( )
+	return p.Host1, p.Host2, p.Tpport1, p.Tpport2, c, e, 0, 0
 }
 
 /*
@@ -426,11 +422,11 @@ func (p *Pledge_mirror) Equals( p2 *Pledge ) ( bool ) {
 
 	p2m, ok := (*p2).( *Pledge_mirror )			// convert from generic type to specific
 	if ok {
-		if ! Strings_equal( p.host1, p2m.host1 ) { return false }
-		if ! Strings_equal( p.host2, p2m.host2 ) { return false }
-		if ! Strings_equal( p.qid, p2m.qid ) { return false }
+		if ! Strings_equal( p.Host1, p2m.Host1 ) { return false }
+		if ! Strings_equal( p.Host2, p2m.Host2 ) { return false }
+		if ! Strings_equal( p.Qid, p2m.Qid ) { return false }
 
-		if !p.window.overlaps( p2m.window ) {
+		if !p.Window.overlaps( p2m.Window ) {
 			return false;
 		}
 
