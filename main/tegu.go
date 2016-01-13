@@ -142,13 +142,15 @@
 				09 Dec 2015 : Require token on requests to always be token/project.
 				16 Dec 2015 : Strips domain from phys host names for path finding
 				17 Dec 2015 : Lists only L3 nodes for network hosts.
+				09 Jan 2016 : Bump version (added more options for add-mirror)
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
 				3.0.1	- QoS-Lite version of Tegu with lazy openstack information gathering (17 Nov 2014)
 				3.1		- QoS-Lite with steering and mirroring added
 				3.2		- QoS-Lite with steering and WACC support added
-				4.0		- QoS-Lite (bandwidth/mirroring) with endpoint and datacache changes
+				4.x		- Bandwidth and datacache added
+				4.0		- QoS-Lite bandwidth/mirroring
 				4.1		- QoS-Lite with scalable steering
 				4.2		- QoS-Lite with wide area support
 	Trivia:		http://en.wikipedia.org/wiki/Tupinambis
@@ -179,7 +181,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.0.1/1c115"
+		version		string = "v4.0.1/11136"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
