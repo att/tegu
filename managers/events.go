@@ -22,7 +22,7 @@
 
 	Mnemonic:	events.go
 	Abstract:	Functions related to event handling (message listeners registered with 
-				osif/msgrtr), including various functions that are registered.  Functions 
+				ipc/msgrtr), including various functions that are registered.  Functions 
 				registered by each manager thread should start with a prefix which relates 
 				it to that manager to avoid confusion. 
 
