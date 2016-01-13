@@ -33,16 +33,21 @@
 
 	Date:		16 Aug 2015
 	Author:		E. Scott Daniels / Robert Eby
+
+	Mods:		01 Dec 2015 - Added datacache tags and made fields external so that the 
+					datacache package can cache a pledge block.
 */
 
 package gizmos
 
 type Pledge_base struct {
-	id			*string			// name that the client can use to manage (modify/delete)
-	window		*pledge_window	// the window of time for which the pledge is active
-	pushed		bool			// set when pledge has been pushed into openflow or openvswitch
-	paused		bool			// set if reservation has been paused
-	usrkey		*string			// a 'cookie' supplied by the user to prevent any other user from modifying
+	Id			*string			`dcache:"_"`		// name that the client can use to manage (modify/delete)
+	Window		*pledge_window	`dcache:"_"`		// the window of time for which the pledge is active
+	Usrkey		*string			`dcache:"_"`		// a 'cookie' supplied by the user to prevent any other user from modifying
+
+	Pushed		bool			            		// set when pledge has been pushed into openflow or openvswitch
+	Paused		bool			                    // reservation has been paused
+	stashed		bool								// true if successfully stashed in the datacache
 }
 
 /*
@@ -52,7 +57,7 @@ func (p *Pledge_base) Concluded_recently( window int64 ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.window.concluded_recently( window )
+	return p.Window.concluded_recently( window )
 }
 
 /*
@@ -64,7 +69,7 @@ func (p *Pledge_base) Commenced_recently( window int64 ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.window.commenced_recently( window )
+	return p.Window.commenced_recently( window )
 }
 
 /*
@@ -74,7 +79,7 @@ func (p *Pledge_base) Get_id( ) ( *string ) {
 	if p == nil {
 		return nil
 	}
-	return p.id
+	return p.Id
 }
 
 /*
@@ -84,7 +89,7 @@ func (p *Pledge_base) Get_window( ) ( int64, int64 ) {
 	if p == nil {
 		return 0, 0
 	}
-	return p.window.get_values()
+	return p.Window.get_values()
 }
 
 /*
@@ -95,7 +100,7 @@ func (p *Pledge_base) Is_active( ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.window.is_active()
+	return p.Window.is_active()
 }
 
 /*
@@ -105,7 +110,7 @@ func (p *Pledge_base) Is_active_soon( window int64 ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.window.is_active_soon( window )
+	return p.Window.is_active_soon( window )
 }
 
 /*
@@ -116,7 +121,7 @@ func (p *Pledge_base) Is_expired( ) ( bool ) {
 	if p == nil {
 		return true
 	}
-	return p.window.is_expired()
+	return p.Window.is_expired()
 }
 
 /*
@@ -128,7 +133,7 @@ func (p *Pledge_base) Is_extinct( window int64 ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.window.is_extinct( window )
+	return p.Window.is_extinct( window )
 }
 
 /*
@@ -138,7 +143,7 @@ func (p *Pledge_base) Is_pending( ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.window.is_pending()
+	return p.Window.is_pending()
 }
 
 /*
@@ -148,7 +153,7 @@ func (p *Pledge_base) Is_pushed( ) (bool) {
 	if p == nil {
 		return false
 	}
-	return p.pushed
+	return p.Pushed
 }
 
 /*
@@ -158,7 +163,7 @@ func (p *Pledge_base) Is_paused( ) ( bool ) {
 	if p == nil {
 		return false
 	}
-	return p.paused
+	return p.Paused
 }
 
 /*
@@ -169,7 +174,7 @@ func (p *Pledge_base) Is_valid_cookie( c *string ) ( bool ) {
 	if p == nil || c == nil {
 		return false
 	}
-	return *c == *p.usrkey
+	return *c == *p.Usrkey
 }
 
 // There is NOT a toggle pause on purpose; don't add one :)
@@ -179,9 +184,9 @@ func (p *Pledge_base) Is_valid_cookie( c *string ) ( bool ) {
 */
 func (p *Pledge_base) Pause( reset bool ) {
 	if p != nil {
-		p.paused = true
+		p.Paused = true
 		if reset {
-			p.pushed = false;
+			p.Pushed = false;
 		}
 	}
 }
@@ -191,9 +196,9 @@ func (p *Pledge_base) Pause( reset bool ) {
 */
 func (p *Pledge_base) Resume( reset bool ) {
 	if p != nil {
-		p.paused = false
+		p.Paused = false
 		if reset {
-			p.pushed = false;
+			p.Pushed = false;
 		}
 	}
 }
@@ -203,8 +208,8 @@ func (p *Pledge_base) Resume( reset bool ) {
 */
 func (p *Pledge_base) Set_expiry ( v int64 ) {
 	if p != nil {
-		p.window.set_expiry_to( v )
-		p.pushed = false		// force it to be resent to adjust times
+		p.Window.set_expiry_to( v )
+		p.Pushed = false		// force it to be resent to adjust times
 	}
 }
 
@@ -213,7 +218,7 @@ func (p *Pledge_base) Set_expiry ( v int64 ) {
 */
 func (p *Pledge_base) Set_pushed( ) {
 	if p != nil {
-		p.pushed = true
+		p.Pushed = true
 	}
 }
 
@@ -222,6 +227,20 @@ func (p *Pledge_base) Set_pushed( ) {
 */
 func (p *Pledge_base) Reset_pushed( ) {
 	if p != nil {
-		p.pushed = false
+		p.Pushed = false
 	}
+}
+
+/*
+	Sets the stashed flag to true.
+*/
+func ( p *Pledge_base ) Set_stashed(  val bool ) {
+	p.stashed = val
+}
+
+/*
+	Returns the stashed setting.
+*/
+func ( p *Pledge_base ) Is_stashed( ) ( bool ) {
+	return p.stashed
 }

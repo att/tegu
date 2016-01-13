@@ -70,12 +70,15 @@ package managers
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
 	"github.com/att/gopkgs/config"
 	"github.com/att/gopkgs/http_logger"
 	"github.com/att/gopkgs/ipc"
+
+	"github.com/att/tegu/datacache"
 	"github.com/att/tegu/gizmos"
 )
 
@@ -158,6 +161,7 @@ const (
 	REQ_GET_PHOST_FROM_PORTUUID // used by mirroring to find the phost that goes with a neutron UUID
 	REQ_GET_PROJ_HOSTS			// get a list of all VMs for a project for block insertion into network graph
 	REQ_GET_ENDPTS				// generate a map of endpoints for one or all projects keyed by endpoint uuid
+	REQ_DEL_ENDPT				// add/delete an endpoint
 	REQ_NEW_ENDPT
 	REQ_HAS_ANY_ROLE			// given token and role list return true if token lists any role presented
 	REQ_HAS_ANY_ROLE2			// given token and role list return user,project if token lists any role presented
@@ -165,6 +169,8 @@ const (
 	REQ_DUPCHECK				// check for duplicate (resmgr)
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
+	REQ_CLEANUP					// periodic cleanup 
+	REQ_SANITY					// any needed sanity checks
 
 	//--- deprecated - http uses osif for direct query REQ_GETGW					// give a project ID and get it's gateway
 )
@@ -379,12 +385,23 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 		cfg_data = nil
 	}
 
+	dc := datacache.Mk_dcache( cfg_data, tegu_sheep )				// set up the datacache 
+
 	tegu_sheep.Add_child( gizmos.Get_sheep( ) )						// since we don't directly initialise the gizmo environment we ask for its sheep
 	if *log_dir  != "stderr" {										// if overriden in config
 		lfn := tegu_sheep.Mk_logfile_nm( log_dir, 86400 )
 		tegu_sheep.Baa( 1, "switching to log file: %s", *lfn )
 		tegu_sheep.Append_target( *lfn, false )						// switch bleaters to the log file rather than stderr
 		go tegu_sheep.Sheep_herder( log_dir, 86400 )				// start the function that will roll the log now and again
+	}
+
+	if ! dc.Enabled() {
+		tegu_sheep.Baa( 0, "CAUTION: datacache has been explicitly disabled in the config file; no data will be cached" )
+	} else {
+		for ! dc.Is_connected( ) {
+			tegu_sheep.Baa( 1, "blocked: not connected to data cache" )
+			time.Sleep( 10 * time.Second )
+		}
 	}
 
 	return

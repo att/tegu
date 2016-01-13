@@ -406,8 +406,6 @@ func validate_auth( data *string, is_token bool, valid_roles *string ) ( allowed
 			http_sheep.Baa( 2, "priv_auth set to none, request always allowed" )
 			return true
 
-		//case "local":
-			//fallthrough
 		case "local", "localhost":
 			if ! is_token {
 				http_sheep.Baa( 2, "priv_auth set to localhost, validating local address %s", *data )
@@ -532,8 +530,6 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 		req = <- my_ch										// wait for completion
 
 		if req.State == nil {
-			ckptreq := ipc.Mk_chmsg( )
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 			reason = fmt.Sprintf( "reservation accepted; reservation path has %d entries", len( path_list ) )
 			jreason =  res.To_json()
 		} else {
@@ -588,12 +584,10 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 		gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
 		res.Set_gate( gate )
 
-		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory (and datacache)
 		req = <- my_ch										// wait for completion
 
 		if req.State == nil {
-			ckptreq := ipc.Mk_chmsg( )
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
 			reason = fmt.Sprintf( "one way reservation accepted" )
 			jreason =  res.To_json()
 		} else {
@@ -638,7 +632,7 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 		accept_requests	bool	set to true if we can accept and process requests. if false any
 								request is failed.
 */
-func parse_post( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
+func parse_post( out http.ResponseWriter, recs []string, sender string, xauth string ) (state string, msg string) {
 	var (
 		//res_name	string = "undefined"
 		tokens		[]string
@@ -673,7 +667,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 			continue
 		}
 
-		if len( tokens[0] ) > 5  && tokens[0][0:5] == "auth="	{
+		if len( tokens[0] ) > 5  && tokens[0][0:5] == "auth="	{		// auth must be first key/val pair though this should be changed
 			auth_data = tokens[0][5:]
 			tokens = tokens[1:]				// reslice to skip the jibberish
 			ntokens--
@@ -681,6 +675,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 		} else {
 			auth_data = sender
 			is_token = false
+		}
+		if xauth != "" {						// data doesn't blelong in the header, but sigh, we'll give it preference if it is
+			is_token = true
+			auth_data = xauth
 		}
 
 		req_count++
@@ -704,10 +702,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 
 				case "chkpt":
 					if validate_auth( &auth_data, is_token, admin_roles ) {
-						req = ipc.Mk_chmsg( )
-						req.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
-						state = "OK"
-						reason = "checkpoint was requested"
+						reason = "deprecated; checkpoint no longer valid"
 					}
 
 				case "graph":
@@ -1158,8 +1153,8 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 					}
 
 					if req.State == nil {
-						ckptreq := ipc.Mk_chmsg( )								// must have new message since we don't wait on a response
-						ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
+						//ckptreq := ipc.Mk_chmsg( )								// must have new message since we don't wait on a response
+						//ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 						state = "OK"
 						reason = fmt.Sprintf( "steering reservation accepted; reservation has %d middleboxes", len( mbnames ) )
 						jreason =  res.To_json()
@@ -1310,9 +1305,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string ) (state 
 	return
 }
 
-func parse_put( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
+func parse_put( out http.ResponseWriter, recs []string, sender string, xauth string ) (state string, msg string) {
 
-	state, msg = parse_post( out, recs, sender )
+	state, msg = parse_post( out, recs, sender, xauth )
 	return
 }
 
@@ -1353,8 +1348,6 @@ func delete_reservation( tokens []string ) ( err error ) {
 
 		if req.State == nil {
 			err = nil
-			ckptreq := ipc.Mk_chmsg( )								// request checkpoint but no need to wait on it
-			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )
 		} else {
 			err = req.State
 		}
@@ -1374,7 +1367,7 @@ func delete_reservation( tokens []string ) ( err error ) {
 	impossible from those environments.  So this is just a wrapper that invokes yet another layer
 	to actually process the request. Gotta love REST.
 */
-func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( state string, msg string ) {
+func parse_delete( out http.ResponseWriter, recs []string, sender string, xauth string ) ( state string, msg string ) {
 	var (
 		sep			string = ""							// json output list separator
 		req_count	int = 0								// requests processed this batch
@@ -1443,13 +1436,6 @@ func parse_delete( out http.ResponseWriter, recs []string, sender string ) ( sta
 	return
 }
 
-func parse_get( out http.ResponseWriter, recs []string, sender string ) (state string, msg string) {
-	http_sheep.Baa( 1, "get received and ignored -- GET is not supported" )
-	state = "ERROR"
-	msg = "GET requests are unsupported"
-	return
-}
-
 /*
 	Deal with input from the other side sent to tegu/api. See http_mirror_api.go for
 	the mirror api handler and related functions.
@@ -1475,35 +1461,37 @@ func api_deal_with( out http.ResponseWriter, in *http.Request ) {
 		msg		string
 	)
 
-	data = dig_data( in )
-	if( data == nil ) {						// missing data -- punt early
-		http_sheep.Baa( 1, "http: api_deal_with called without data: %s", in.Method )
-		fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )	// error stuff back to user
-		return
-	} else {
-		_, recs = token.Tokenise_drop( string( data ), ";\n" )		// split based on ; or newline
-		fmt.Fprintf( out, "{ " )									// open the overall object for output
+	if in.Method != "GET" {
+		data = dig_data( in )
+		if( data == nil ) {						// missing data -- punt early
+			http_sheep.Baa( 1, "http: api_deal_with called without data: %s", in.Method )
+			fmt.Fprintf( out, `{ "status": "ERROR", "comment": "missing command" }` )	// error stuff back to user
+			return
+		} else {
+			_, recs = token.Tokenise_drop( string( data ), ";\n" )		// split based on ; or newline
+			fmt.Fprintf( out, "{ " )									// open the overall object for output
+		}
 	}
 
-	/*
 	auth := ""
 	if in.Header != nil && in.Header["X-Auth-Tegu"] != nil {
 		auth = in.Header["X-Auth-Tegu"][0]
 	}
-	*/
 
 	switch in.Method {
 		case "PUT":
-			state, msg = parse_put( out, recs, in.RemoteAddr )
+			state, msg = parse_put( out, recs, in.RemoteAddr, auth )
 
 		case "POST":
-			state, msg = parse_post( out, recs, in.RemoteAddr )
+			state, msg = parse_post( out, recs, in.RemoteAddr, auth )
 
 		case "DELETE":
-			state, msg = parse_delete( out, recs, in.RemoteAddr )
+			state, msg = parse_delete( out, recs, in.RemoteAddr, auth )
 
-		case "GET":
-			state, msg = parse_get( out, recs, in.RemoteAddr )
+		case "GET":				// used for file transfer, so we must handle the return here and not let it go out the bottom
+			state, msg = parse_get( out, in.RequestURI, in.RemoteAddr, auth )
+			http_sheep.Baa( 1, "get processing finished: %s, %s", state, msg )
+			return
 
 		default:
 			http_sheep.Baa( 1, "api_deal_with called for unrecognised method: %s", in.Method )
@@ -1624,6 +1612,8 @@ func Http_api( api_port *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg ) {
 																	//  define callbacks that are driven when various http requests are received
 	http.HandleFunc( "/tegu/api", api_deal_with )					// reserve/delete etc should eventually be removed from this
 	http.HandleFunc( "/tegu/bandwidth", api_deal_with )				// define bandwidth callback TODO: add a callback specifically for bandwidth things
+
+	http.HandleFunc( "/tegu/fetch/", api_deal_with )		
 
 	if enable_mirroring {
 		http.HandleFunc( "/tegu/mirrors/", mirror_handler )

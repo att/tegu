@@ -19,8 +19,10 @@
 
 #
 #       Name:      tegu_del_mirror
-#       Usage:     tegu_del_mirror [-v] <name>
+#       Usage:     tegu_del_mirror [-o<options>] [-v] <name>
 #       Abstract:  This script deletes a mirror, named by <name>, from openvswitch.
+#
+#                  The only currently valid option is -oflowmod, to delete a flowmod based mirror.
 #
 #       Author:    Robert Eby
 #       Date:      04 February 2015
@@ -31,6 +33,7 @@
 #                  15 Sep 2015 - Remove extra copyright
 #                  19 Oct 2015 - Allow delete of mirrors from bridges other than br-int
 #                  15 Nov 2015 - Fixed rather bad bug introduced w/last change
+#                  23 Nov 2015 - Add -oflowmod option processing
 #
 
 function logit
@@ -45,17 +48,39 @@ function findbridge
 		/^port/ && $2 == uuid { print br }'
 }
 
+function option_set
+{
+	echo $options | tr ' ' '\012' | grep $1 > /dev/null
+	return $?
+}
+
+function usage
+{
+	echo "usage: tegu_del_mirror [-o<options>] [-v] name" >&2
+}
+
 PATH=$PATH:/sbin:/usr/bin:/bin 		# must pick up agent augmented path
 echo=:
-if [ "$1" == "-v" ]
-then
-	shift
-	echo=echo
-fi
+options=
+while [[ "$1" == -* ]]
+do
+	if [[ "$1" == "-v" ]]
+	then
+		echo=echo
+		shift
+	elif [[ "$1" == -o* ]]
+	then
+		options=`echo $1 | sed -e 's/^-o//' -e 's/,/ /g'`
+		shift
+	else
+		usage
+		exit 1
+	fi
+done
 
 if [ $# != 1 ]
 then
-	echo "usage: tegu_del_mirror [-v] name" >&2
+	usage
 	exit 1
 fi
 if [ ! -x /usr/bin/ovs-vsctl ]
@@ -69,32 +94,61 @@ sudo=sudo
 
 mirrorname=$1
 
-$echo $sudo ovs-vsctl get mirror "$mirrorname" output_port _uuid
-$sudo ovs-vsctl get mirror "$mirrorname" output_port _uuid > /tmp/m$$ && {
-	# get output_port UUID
-	uuid=`sed -n 1p /tmp/m$$`
-	bridgename=$(findbridge $uuid)
+# Special code to handle flowmod-ed mirror
+if option_set flowmod
+then
+	# Find bridge with the GRE port
+	$echo $sudo ovs-vsctl list port gre-$mirrorname
+	$sudo ovs-vsctl list port gre-$mirrorname | grep _uuid | sed 's/.*://' > /tmp/m$$ && {
+		bridgename=$(findbridge $(cat /tmp/m$$))
 
-	# get name from uuid
-	$echo $sudo ovs-vsctl list port $uuid
-	pname=`$sudo ovs-vsctl list port $uuid | grep name | tr -d '" ' | cut -d: -f2`
-	# if it is a GRE port, with the right name, remove port
-	case "$pname" in
-	gre-$mirrorname)
-		$echo $sudo ovs-vsctl del-port $bridgename $pname
-		$sudo ovs-vsctl del-port $bridgename $pname
-		;;
-	esac
+		# Find $GREPORT
+		GREPORT=$(ovs_sp2uuid -a | grep gre-$mirrorname | cut -d' ' -f3)
 
-	# get mirror UUID
-	uuid=`sed -n 2p /tmp/m$$`
-	$echo $sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
-	$sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
-	rm -f /tmp/m$$
+		# Remove all flows with cookie=0xfaad from bridge that have actions=output:$GREPORT
+		$sudo ovs-ofctl dump-flows $bridgename | grep "cookie=0xfaad.*output:$GREPORT," > /tmp/tdm.$$
+		for flow in $(cut -d' ' -f8 </tmp/tdm.$$ | sed 's/priority=100,//')
+		do
+			$echo $sudo ovs-ofctl del-flows $bridgename $flow
+			$sudo ovs-ofctl del-flows $bridgename $flow
+		done
+		rm -f /tmp/tdm.$$ /tmp/m$$
 
-	echo Mirror $mirrorname removed from bridge $bridgename.
-	exit 0
-}
+		# Remove the GRE port
+		$echo $sudo ovs-vsctl del-port $bridgename gre-$mirrorname
+		$sudo ovs-vsctl del-port $bridgename gre-$mirrorname
+
+		echo Mirror $mirrorname removed from bridge $bridgename.
+		exit 0
+	}
+else
+	$echo $sudo ovs-vsctl get mirror "$mirrorname" output_port _uuid
+	$sudo ovs-vsctl get mirror "$mirrorname" output_port _uuid > /tmp/m$$ && {
+		# get output_port UUID
+		uuid=`sed -n 1p /tmp/m$$`
+		bridgename=$(findbridge $uuid)
+
+		# get name from uuid
+		$echo $sudo ovs-vsctl list port $uuid
+		pname=`$sudo ovs-vsctl list port $uuid | grep name | tr -d '" ' | cut -d: -f2`
+		# if it is a GRE port, with the right name, remove port
+		case "$pname" in
+		gre-$mirrorname)
+			$echo $sudo ovs-vsctl del-port $bridgename $pname
+			$sudo ovs-vsctl del-port $bridgename $pname
+			;;
+		esac
+
+		# get mirror UUID
+		uuid=`sed -n 2p /tmp/m$$`
+		$echo $sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
+		$sudo ovs-vsctl remove bridge $bridgename mirrors $uuid
+		rm -f /tmp/m$$
+
+		echo Mirror $mirrorname removed from bridge $bridgename.
+		exit 0
+	}
+fi
 
 echo "tegu_del_mirror: mirror $mirrorname does not exist." >&2
 rm -f /tmp/m$$
