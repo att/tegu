@@ -42,6 +42,8 @@
 				29 Jun 2015 - Fixed fallout from config section name change.
 				18 Sep 2015 - Allow mirrored ports to be ID-ed by neutron UUID
 				16 Nov 2015 - Add tenant checks, HTTP logging, error reporting
+				24 Nov 2015 - Add options
+				09 Jan 2016 - Add more options
 */
 
 package managers
@@ -136,6 +138,23 @@ func validVlanList(v string) (err error) {
 func validName(v string) (bool) {
 	re := regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 	return re.MatchString(v)
+}
+
+// Check validity of options to "add mirror"
+func validOption(v string) (bool) {
+	switch v {
+	case "flowmod":
+		return true;
+	case "df_default=true":
+		return true;
+	case "df_default=false":
+		return true;
+	case "df_inherit=true":
+		return true;
+	case "df_inherit=false":
+		return true;
+	}
+	return false;
 }
 
 /*
@@ -233,6 +252,10 @@ func convertToJSON(mirror *gizmos.Pledge_mirror, scheme string, host string) (st
 	bs.WriteString(fmt.Sprintf("  \"output\": \"%s\",\n", *outp))
 	if vlan != "" {
 		bs.WriteString(fmt.Sprintf("  \"vlan\": \"%s\",\n", vlan))
+	}
+	options := mirror.Get_Options()
+	if options != nil && *options != "" {
+		bs.WriteString(fmt.Sprintf("  \"options\": \"%s\",\n", *options))
 	}
 
 	stdout, stderr := mirror.Get_Output()
@@ -528,6 +551,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, projid string, data
 		Vlan 		string	 `json:"vlan"`
 		Cookie 		string	 `json:"cookie"`
 		Name 		string	 `json:"name"`
+		Options		string	 `json:"options"`
 	}
 	var req req_type
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -582,7 +606,18 @@ func mirror_post( in *http.Request, out http.ResponseWriter, projid string, data
 	}
 	req.Output = *newport
 
-	// 6. Make one pledge per mirror, send to reservation mgr, build JSON return string
+	// 6. Validate options, if present
+	if req.Options != "" {
+		for _, opt := range strings.Split( req.Options, "," ) {
+			if ! validOption(opt) {
+				code = http.StatusBadRequest
+				msg = "Invalid option: "+opt
+				return
+			}
+		}
+	}
+
+	// 7. Make one pledge per mirror, send to reservation mgr, build JSON return string
 	scheme := "http"
 	if (isSSL) {
 		scheme = "https"
@@ -595,7 +630,7 @@ func mirror_post( in *http.Request, out http.ResponseWriter, projid string, data
 			// Make a pledge
 			phost := key
 			nam   := mirror.name
-			res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &nam, &req.Cookie, &phost, &req.Vlan, &projid )
+			res, err := gizmos.Mk_mirror_pledge( mirror.ports, &req.Output, stime, etime, &nam, &req.Cookie, &phost, &req.Vlan, &projid, &req.Options )
 			if res != nil {
 				req := ipc.Mk_chmsg( )
 				my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests

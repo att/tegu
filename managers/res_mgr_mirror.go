@@ -27,6 +27,7 @@
 	Mods:		23 Feb 2015 - Created.
 				26 May 2015 - Changes to support pledge as an interface.
 				16 Nov 2015 - Add save_mirror_response()
+				24 Nov 2015 - Add options
 */
 
 package managers
@@ -53,7 +54,15 @@ func push_mirror_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chms
 
 	ports, out, _, _, _, _, _, _ := p.Get_values( )
 	ports2 := strings.Replace(*ports, " ", ",", -1)	// ports must be comma separated
+
+	// This is somewhat of a hack, but as long as the code in tegu_agent:do_mirrorwiz doesn't change, it should work
 	id := p.Get_id( )
+	arg := *id
+	opts := p.Get_Options()
+	if opts != nil && *opts != "" {
+		arg = fmt.Sprintf("-o%s %s", *opts, *id)
+	}
+
 	host := p.Get_qid( )
 	rm_sheep.Baa( 1, "Adding mirror %s on host %s", *id, *host )
 	json := `{ "ctype": "action_list", "actions": [ { `
@@ -65,9 +74,9 @@ func push_mirror_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chms
 		n := strings.Index(ports2, ",vlan:")
 		vlan := ports2[n+6:]
 		ports2 = ports2[:n]
-		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q, %q ] `, *id, ports2, *out, vlan)
+		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q, %q ] `, arg, ports2, *out, vlan)
 	} else {
-		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q ] `, *id, ports2, *out)
+		json += fmt.Sprintf(`"qdata": [ "add", %q, %q, %q ] `, arg, ports2, *out)
 	}
 	json += `} ] }`
 	rm_sheep.Baa( 2, " JSON -> %s", json )
@@ -89,12 +98,19 @@ func undo_mirror_reservation( gp *gizmos.Pledge, rname string, ch chan *ipc.Chms
 	}
 
 	id := p.Get_id( )
+	// This is somewhat of a hack, but as long as the code in tegu_agent:do_mirrorwiz doesn't change, it should work
+	arg := *id
+	opts := p.Get_Options()
+	if opts != nil && *opts != "" {
+		arg = fmt.Sprintf("-o%s %s", *opts, *id)
+	}
+
 	host := p.Get_qid( )
 	rm_sheep.Baa( 1, "Deleting mirror %s on host %s", *id, *host )
 	json := `{ "ctype": "action_list", "actions": [ { `
 	json += `"atype": "mirrorwiz", `
 	json += fmt.Sprintf(`"hosts": [ %q ], `,  *host)
-	json += fmt.Sprintf(`"qdata": [ "del", %q ] `, *id)
+	json += fmt.Sprintf(`"qdata": [ "del", %q ] `, arg)
 	json += `} ] }`
 	rm_sheep.Baa( 2, " JSON -> %s", json )
 	msg := ipc.Mk_chmsg( )

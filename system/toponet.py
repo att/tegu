@@ -18,6 +18,15 @@
 # ---------------------------------------------------------------------------
 #
 
+# Changelog
+# 12/16/15: Kaustubh Joshi - more robust parsing
+#           Support # or > as the prompt
+#           Support section termination direct to a new switch
+#           Support command shortforms
+#           Support for newlines in lldp table
+#           Support for whitespace within a port number, e.g., Et49/ 1
+#              in the interface status table
+
 '''
 toponet -- generate physical network topology from LLDP enabled
            Cisco/Arista switches
@@ -101,29 +110,32 @@ def normalizePortNum(port):
         number. Arista uses single integer portnumbers, while Cisco uses
         the cardnum/ifnum format, e.g., 2/1
     '''
-    portmatch = re.search('(\d+)/(\d+)', port)
+    portmatch = re.search('(\d+)\s*/\s*(\d+)', port)
     if portmatch:
         return portmatch.group(1)+portmatch.group(2)
     else:
         return port
+
+def normalizedPortNumRegex(port):
+    ''' Return a regex that matches variants of portname. E.g., Et49/1
+        may be represented as Et49  /1.
+    '''
+    portmatch = re.search('(\d+)\s*/\s*(\d+)', port)
+    if portmatch:
+        return portmatch.group(1)+'\s*/\s*'+portmatch.group(2)
+    else:
+        return port
+
 
 def normalizeHostname(hostname):
     ''' Normalize hostnames. Currently, tegu requires only hostnames
         because that is what Openstack host-list returns. Strip the
         domainname if FQDN is read in.
     '''
-<<<<<<< HEAD
     return hostname.split(".")[0]
 
 def shortName(name):
     return name.split('@')[0].split('.')[0]
-=======
-    return hostname.split(".")[0].strip()
-
-def shortName(name):
-    return name.split('@')[0].split('.')[0].strip()
->>>>>>> master
-
 
 def parseLldpCtl(file, hosts, thisHost=None, ifacelist=set()):
     ''' Parse output from the lldpctl command executed on a single host
@@ -234,23 +246,31 @@ class SwitchFileLoader(NetDataSource):
     def parseCisco(self, name, switch):
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         links = re.findall('\n([^\s]+).*Eth(\d+(?:/\d+)?)\s+\d+\s+\S+' + \
 =======
         links = re.findall('\n([^\s]+)[\s\n]*Eth(\d+(?:/\d+)?)\s+\d+\s+\S+' + \
 >>>>>>> master
                            '\s+Ethernet(\d+(?:/\d+)?)', switch['lldp'])
+=======
+        links = re.findall('\n([^\s]+)\s*Eth(\d+(?:\s*/\d+)?)\s+\d+\s+\S+' + \
+                           '\s+Ethernet(\d+(?:\s*/\d+)?)', switch['lldp'])
+        switch_links = switch.setdefault('links', {})
+>>>>>>> master
 
-        #print(name + "(Cisco)")
-	#print name, "\n"
-	#print switch['lldp'], "\n"
+        #print(name + " (Cisco)")
         for linkmatch in links:
+            #print("\tLink: "+linkmatch[1])
             new_link = Link(src=name, srcPort=normalizePortNum(linkmatch[1]),
                             dst=normalizeHostname(linkmatch[0]),
                             dstPort=normalizePortNum(linkmatch[2]))
             #print("\t"+normalizeHostname(linkmatch[0]))
+            
             # Read link full duplex and speed
-            speedmatch = re.search("Eth"+linkmatch[1]+"\s+.+connected\s+[^\s]+" +
-                                   "\s+([^\s]+)\s+([^\s]+)\s+", switch["ifaces"])
+            speedmatch = re.search("Eth"+normalizedPortNumRegex(linkmatch[1]) +
+                                   "\s+.+connected\s+[^\s]+" +
+                                   "\s+([^\s]+)\s+([^\s]+)\s+",
+                                   switch["ifaces"])
 
             if speedmatch and (speedmatch.group(2) in self.speedmap.keys()):
                 new_link.bidi = (speedmatch.group(1) == "full")
@@ -262,16 +282,16 @@ class SwitchFileLoader(NetDataSource):
                 new_link.capacity = DEF_SWITCHCAPACITY
 
             # Read link mlag
-            mlagmatch = re.search("\n\d+\s+([^(]+)\(.+LACP|NONE.+Eth" + \
+            mlagmatch = re.search("\n\d+\s+([^(]+)\(.+(LACP|NONE).+Eth" + \
                                   linkmatch[1], switch['portchannel'])
             if mlagmatch:
                 new_link.mlag = name + "_" + mlagmatch.group(1)
-            switch_links = switch.setdefault('links', {})
             switch_links[new_link.srcPort] = new_link
 
 
     def parseArista(self, name, switch):
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+).*Ethernet(\d+(?:/\d+)?)',
                            switch['lldp'])
@@ -279,17 +299,26 @@ class SwitchFileLoader(NetDataSource):
         links = re.findall('Et(\d+(?:/\d+)?)\s+([^\s]+)[\s\n]*Ethernet(\d+(?:/\d+)?)',
                            switch['lldp'], flags=re.DOTALL)
 >>>>>>> master
+=======
+        links = re.findall('Et(\d+(?:\s*/\d+)?)\s+(\S+).*Ethernet(\d+(?:\s*/\d+)?)',
+                           switch['lldp'])
+        switch_links = switch.setdefault('links', {})
+>>>>>>> master
 
         #print(name + " (Arista)")
         for linkmatch in links:
+            #print("\tLink: "+linkmatch[1])
             new_link = Link(src=name, srcPort=normalizePortNum(linkmatch[0]),
                             dst=normalizeHostname(linkmatch[1]),
                             dstPort=normalizePortNum(linkmatch[2]))
             #print("\t"+normalizeHostname(linkmatch[1]))
 
             # Read link full duplex and speed
-            speedmatch = re.search("Et"+linkmatch[0]+"\s+.+connected\s+.*" +
-                                  "(half|full)\s+([^\s]+)\s+", switch["ifaces"])
+            #print("Reading interface for: "+name+", port="+linkmatch[0])
+            speedmatch = re.search("Et"+normalizedPortNumRegex(linkmatch[0]) +
+                                   "\s+.+connected\s+.*" +
+                                   "(half|full)\s+([^\s]+)\s+",
+                                   switch["ifaces"])
 
             if speedmatch and (speedmatch.group(2) in self.speedmap.keys()):
                 new_link.bidi = (speedmatch.group(1) == "full")
@@ -306,7 +335,6 @@ class SwitchFileLoader(NetDataSource):
                                   switch['portchannel'])
             if mlagmatch:
                 new_link.mlag = name + "_" + mlagmatch.group(1)
-            switch_links = switch.setdefault('links', {})
             switch_links[new_link.srcPort] = new_link
 
 
@@ -325,15 +353,20 @@ class SwitchFileLoader(NetDataSource):
         return chunk
 
     def loadSection(self, start_tag, key, the_file, line):
-        match = re.search("(^[^#]+)#\s*"+start_tag, line)
+        match = re.search("^\W*([\w\.]+)(#|>)\s*"+start_tag, line)
         if (match):
             src_switch = match.group(1)
+            #print('Parsing ' + src_switch + ':' + start_tag)
             switch = self.switches.setdefault(normalizeHostname(src_switch), {})
-            switch[key] = self.loadChunk(the_file, '^'+src_switch+'#')
+            switch[key] = self.loadChunk(the_file, '^\W*[\w\.]+\s*(#|>)')
             return normalizeHostname(src_switch)
         return None
 
     def load(self):
+        iface_regex = '(sho|show) (int|inter|interface) (stat|status)'
+        portchannel_regex = '(sho|show) (port-ch|port-channel) sum'
+        lldp_regex = '(sho|show) lldp (neigh|neighbor|neighbors)'
+        
         switch_file = open(self.switchFilename)
 
         # Parse the files
@@ -343,15 +376,14 @@ class SwitchFileLoader(NetDataSource):
             if not line:
                 break
 
-            if self.loadSection('show interface status', 'ifaces', switch_file, line):
+            if self.loadSection(iface_regex, 'ifaces', switch_file, line):
                 continue
 
-            if self.loadSection('show port-channel sum', 'portchannel', switch_file, line):
+            if self.loadSection(portchannel_regex, 'portchannel', switch_file, line):
                 continue
 
-            src_switch = self.loadSection('show lldp neigh', 'lldp', switch_file, line)
+            src_switch = self.loadSection(lldp_regex, 'lldp', switch_file, line)
             if src_switch:
-                #print src_switch
                 if re.search('Capability codes:', self.switches[src_switch]['lldp']):
                     self.switches[src_switch]['type'] = 'Cisco'
                 else:
@@ -359,6 +391,7 @@ class SwitchFileLoader(NetDataSource):
 
         # Finished parsing file, now populate links
         for name, switch in self.switches.iteritems():
+            #print("Loading "+name)
             if switch['type'] == 'Cisco':
                 self.parseCisco(name, switch)
             else:
@@ -366,7 +399,6 @@ class SwitchFileLoader(NetDataSource):
 
 
     def hasElement(self, name):
-	#print name, self.switches.keys()
         return (name in self.switches)
 
     def getElementList(self):
@@ -514,15 +546,19 @@ class TopoGen:
                 self.switches.append(elem)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             elem_links = ds.getElementLinks(elem)
 =======
             #print elem;
 	    elem_links = ds.getElementLinks(elem)
 >>>>>>> master
+=======
+            elem_links = ds.getElementLinks(elem)
+>>>>>>> master
             for link in elem_links:
                 if link.dst not in visited:
-		    #print link;
                     self.links.append(link)
+                    # print('Visting '+link.dst)
                     for source in self.netDataSources:
                         if source.hasElement(link.dst):
                             queue.append((link.dst,source))
@@ -595,7 +631,7 @@ def cli_main(argv=None):
     parser.add_argument("--hostcap", dest="hostcap", metavar="bps",
                         help="host link capacity [default: %default]")
     parser.add_argument("-i", "--hostiface", dest="hostifaces", action='append',
-                        help="host interfaces to include (e.g., eth2,eth3)")
+                        help="host interfaces to include (e.g., eth4,eth6)")
 
     # Options for openstack loader
     parser.add_argument("--openstack", dest="ostack", action="store_true")

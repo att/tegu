@@ -19,7 +19,7 @@
 
 #
 #       Name:      tegu_add_mirror
-#       Usage:     tegu_add_mirror [-v] <name> <port1>[,<port2>...] <output> [<vlan>]
+#       Usage:     tegu_add_mirror [-o<options>] [-v] <name> <port1>[,<port2>...] <output> [<vlan>]
 #       Abstract:  This script starts a mirror named <name> on openvswitch.
 #
 #                  The port list for the mirror is named by <port1>, <port2>, etc. which
@@ -43,6 +43,8 @@
 #
 #                  The -v switch causes all openvswitch commands to be echoed.
 #
+#                  The only currently valid option is -oflowmod, to create a flowmod based mirror.
+#
 #                  If succesful, this command prints the mirror name on exit.
 #
 #       Author:    Robert Eby
@@ -56,6 +58,9 @@
 #                  19 Oct 2015 - Add options:in_key to GRE ports to allow multiple GRE ports.
 #                                Allow mirrors on bridges other than br-int
 #                  16 Nov 2015 - Put mirror name in all error messages
+#                  23 Nov 2015 - Add -oflowmod option processing
+#                  09 Jan 2016 - Handle VLAN=-1 case in -oflowmod option processing.
+#                                Allow df_default=(true|false) and df_inherit=(true|false) in options
 #
 
 function valid_ip4
@@ -115,17 +120,39 @@ function findbridge
 		/^port/ && $2 == uuid { print br }'
 }
 
+function option_set
+{
+	echo $options | tr ' ' '\012' | grep $1 > /dev/null
+	return $?
+}
+
+function usage
+{
+	echo "usage: tegu_add_mirror [-o<options>] [-v] name port1[,port2,...] output [vlan]" >&2
+}
+
 # Preliminaries
 PATH=$PATH:/sbin:/usr/bin:/bin		# must pick up agent augmented path
 echo=:
-if [ "$1" == "-v" ]
-then
-	shift
-	echo=echo
-fi
+options=
+while [[ "$1" == -* ]]
+do
+	if [[ "$1" == "-v" ]]
+	then
+		echo=echo
+		shift
+	elif [[ "$1" == -o* ]]
+	then
+		options=`echo $1 | sed -e 's/^-o//' -e 's/,/ /g'`
+		shift
+	else
+		usage
+		exit 1
+	fi
+done
 if [ $# -lt 3 -o $# -gt 4 ]
 then
-	echo "usage: tegu_add_mirror [-v] name port1[,port2,...] output [vlan]" >&2
+	usage
 	exit 1
 fi
 if [ ! -x /usr/bin/ovs-vsctl ]
@@ -270,18 +297,61 @@ gre)
 	greportname=gre-$mirrorname
 	key=$(echo $mirrorname | sed -e 's/mir-//' -e 's/_.$//')
 	key=$((16#$key))
-	$echo $sudo ovs-vsctl \
-		add-port $bridgename $greportname \
-		-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key \
-		-- --id=@p get port $greportname \
-		-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
-		-- add bridge $bridgename mirrors @m
-	$sudo ovs-vsctl \
-		add-port $bridgename $greportname \
-		-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key \
-		-- --id=@p get port $greportname \
-		-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
-		-- add bridge $bridgename mirrors @m
+	if option_set flowmod
+	then
+		# Flow mod based mirror - create a GRE port, then mirror the $realports to it
+		$echo $sudo ovs-vsctl \
+			add-port $bridgename $greportname \
+			-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key
+		$sudo ovs-vsctl \
+			add-port $bridgename $greportname \
+			-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key
+
+		# determine GRE port num, mirrored port num, mirrored MAC and vlan
+		ovs_sp2uuid -a > /tmp/tam.$$
+		CONST="ovs-ofctl -O OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13 add-flow $bridgename"
+		GREPORT=$(grep $greportname < /tmp/tam.$$ | cut -d' ' -f3)
+		for port in $(echo $realports | tr , ' ')
+		do
+			MIRRORPORT=$(grep $port < /tmp/tam.$$ | cut -d' ' -f3)
+			MIRRORVLAN=$(grep $port < /tmp/tam.$$ | cut -d' ' -f7)
+			 MIRRORMAC=$(grep $port < /tmp/tam.$$ | cut -d' ' -f5)
+			if [ "$MIRRORVLAN" -gt 0 -a "$MIRRORVLAN" -lt 4095 ]
+			then
+				RULES="dl_vlan=$MIRRORVLAN,dl_dst=$MIRRORMAC"
+			else
+				RULES="dl_dst=$MIRRORMAC"
+			fi
+			$echo $sudo $CONST "cookie=0xfaad,priority=100,${RULES},action=output:$GREPORT,normal"
+			      $sudo $CONST "cookie=0xfaad,priority=100,${RULES},action=output:$GREPORT,normal"
+			$echo $sudo $CONST "cookie=0xfaad,priority=100,in_port=$MIRRORPORT,action=output:$GREPORT,normal"
+			      $sudo $CONST "cookie=0xfaad,priority=100,in_port=$MIRRORPORT,action=output:$GREPORT,normal"
+		done
+		rm -f /tmp/tam.$$
+	else
+		# Normal OVS mirror
+		$echo $sudo ovs-vsctl \
+			add-port $bridgename $greportname \
+			-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key \
+			-- --id=@p get port $greportname \
+			-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
+			-- add bridge $bridgename mirrors @m
+		$sudo ovs-vsctl \
+			add-port $bridgename $greportname \
+			-- set interface $greportname type=gre options:remote_ip=$remoteip options:in_key=$key \
+			-- --id=@p get port $greportname \
+			-- --id=@m create mirror name=$mirrorname $mirrorargs output-port=@p \
+			-- add bridge $bridgename mirrors @m
+	fi
+	# Add user specified options to the GRE port
+	for opt in 'df_default=true' 'df_default=false' 'df_inherit=true' 'df_inherit=false'
+	do
+		if option_set $opt
+		then
+			$echo $sudo ovs-vsctl set interface $greportname options:$opt
+			$sudo ovs-vsctl set interface $greportname options:$opt
+		fi
+	done
 	;;
 
 vlan)

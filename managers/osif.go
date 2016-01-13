@@ -105,6 +105,13 @@
 						try to build a host list from all projects. It does fall back to the old way
 						if using the admin project fails to build a list.
 				16 Nov 2015 - Added REQ_HAS_ANY_ROLE2, updated has_any_role()
+				09 Dec 2015 - Tightened the reqirements on the token verification; now requires a
+						project name/id to be supplied.
+				11 Dec 2015 - Physical host list is sussed from openstack using only the admin
+						creds as running the project list, even when admin returns empty, is too
+						timeconsuming.
+				17 Dec 2015 - Shift from requesting all network hosts to requesting only L3 hosts 
+						from openstack.
 
 	Deprecated messages -- do NOT reuse the number as it already maps to something in ops doc!
 				osif_sheep.Baa( 0, "WRN: no response channel for host list request  [TGUOSI011] DEPRECATED MESSAGE" )
@@ -303,18 +310,27 @@ func validate_admin_token( admin *ostack.Ostack, token *string, user *string ) (
 
 /*
 	Given a token, return true if the token is valid for one of the roles listed in role.
-	Role is a list of space separated role names.  If token is actually token/project, then
-	we will test only with the indicated project. Otherwise we will test the token against
-	every project we know about and return true if any of the roles in the list is defined
-	for the user in any project.  This _is_ needed to authenticate Tegu requests which are not
-	directly project oriented (e.g. set capacities, graph, etc.), so it is legitimate for
-	a token to be submitted without a leading project/ string.
+	Role is a list of space separated role names.  Token is expected to be token/projectr;
+	we will test only with the indicated project. 
+
+	2015.12.09 - We will only accept token/project strings as trying a token against
+	every proejct that Tegu knows about doesn't scale in the openstack world, and openstack
+	doesn't make a 'generic' crack function available.  If a string is passed as token
+	and _NOT_ token/project it will be rejected with an appropriate error.
+
+	WARNING:
+	If the token passed to us to crack is not a valid token the error message that openstack
+	returns might be very misleading, suggesting that Tegu is not authorised to crack the 
+	token:
+		Unauthorized (401): The request you have made requires authentication.
+
+	This is not cool openstack.  The token is invalid, full stop and you should say so.
 */
 func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, token *string, roles *string ) ( userproj string, err error ) {
 	rtoks := strings.Split( *roles, "," )		// simple tokenising of role list
 
 	userproj = ""
-	if strings.Contains( *token, "/" ) {				// assume it's token/project
+	if strings.Contains( *token, "/" ) {				// assume it's token/project (could also be tok/proj/junk)
 		const p int = 1			// order in split tokens (project)
 		const t int = 0			// order in split tokens (actual token)
 
@@ -335,35 +351,12 @@ func has_any_role( os_refs map[string]*ostack.Ostack, admin *ostack.Ostack, toke
 			}
 		}
 
-		osif_sheep.Baa( 2, "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
-		return "", fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", roles, err )
+		osif_sheep.Baa( 2, "has_any_role: token/project %s/%s not valid for roles: %s: %s (caution, 401 error from openstack is misleading if it suggests the request requires auth)", toks[0], toks[1], *roles, err )
+		return "", fmt.Errorf( "has_any_role: token/project not valid for roles: %s: %s", *roles, err )
 	}
 
-	for _, v := range os_refs {
-		pname, _ := v.Get_project( )
-		osif_sheep.Baa( 2, "has_any_role: checking %s", *pname )
+	return "", fmt.Errorf( "has_any_role: rejected: data was NOT of the form token/project" )
 
-		stuff, err := admin.Crack_ptoken( token, pname, false )			// return a stuff struct with details about the token
-
-		if err == nil {
-			err = fmt.Errorf( "role not defined; %s", *roles )			// assume error
-			state := gizmos.Map_has_any( stuff.Roles, rtoks )			// true if any role token matches anything from ostack
-			if state {
-				osif_sheep.Baa( 2, "has_any_role: verified in %s", *pname )
-				osif_sheep.Baa( 2, "has_any_role: user=%s, tenant=%s", stuff.User, stuff.TenantId )
-				return (stuff.User + "," + stuff.TenantId), nil
-			}
-		} else {
-			osif_sheep.Baa( 2, "has_any_role: crack failed for project=%s: %s", *pname, err )
-		}
-	}
-
-	if err == nil {
-		err = fmt.Errorf( "undetermined reason" )
-	}
-
-	osif_sheep.Baa( 1, "unable to verify role: %s: %s", *roles, err )
-	return "", err
 }
 
 func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  map[string]*string ) {
@@ -389,6 +382,12 @@ func mapvm2ip( admin *ostack.Ostack, os_refs map[string]*ostack.Ostack ) ( m  ma
 /*
 	Returns a list of openstack compute and network hosts. Hosts where OVS is likely
 	running.
+
+	WARNING: openstack may not send back host names with any consistency: some come
+	with domain names and some without. Probably due to who configured the environment,
+	but annoying, and problematic nonetheless. We will pass things along unchanged, 
+	but it's probalby wise for the user code to strip the domain if they think it
+	best (might not be best for the agent manager).
 */
 func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 	var (
@@ -407,51 +406,21 @@ func get_hosts( os_refs map[string]*ostack.Ostack ) ( s *string, err error ) {
 
 	if ostk := os_refs["admin"]; ostk != nil {
 		k := "admin"
-		list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )
+		list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.L3 )
 		osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
 		if err != nil {
-			osif_sheep.Baa( 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
+			osif_sheep.Baa( 1, "WRN: error accessing host list with creds: %s: %s   [TGUOSI001]", ostk.To_str(), err )
 		} else {
 			if *list != "" {
 				ts += sep + *list
 				sep = " "
-				osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )
+				osif_sheep.Baa( 2, "list of hosts was returned using creds: %s", ostk.To_str() )
 			} else {
-				osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )
+				osif_sheep.Baa( 2, "WRN: list of hosts not returned using creds: %s   [TGUOSI002]", ostk.To_str() )
 			}
 		}
 	} else {
-		osif_sheep.Baa( 1, "chost list no admin project" )
-	}
-
-	if ts == "" {				// didn't fetch using admin
-		osif_sheep.Baa( 1, "single project (admin) fetch failed to produce host list, working throught all" )
-
-		osif_sheep.Baa( 2, "physical host query starts: %d sets of creds", len( os_refs ) )
-		for k, ostk := range os_refs {
-			bs_class := fmt.Sprintf( "osif_gh_%s", k )			// baa_some class for this project
-
-			osif_sheep.Baa( 3, "physical host query for %s", k )
-			if k != "_ref_" {
-				list, err = ostk.List_enabled_hosts( ostack.COMPUTE | ostack.NETWORK )
-				osif_sheep.Baa( 2, "physical host query for %s err is nil %v", k, err == nil )
-				if err != nil {
-					osif_sheep.Baa_some( bs_class, 100, 1, "WRN: error accessing host list: for %s: %s   [TGUOSI001]", ostk.To_str(), err )
-					//ostk.Expire()					// force re-auth next go round
-				} else {
-					osif_sheep.Baa_some_reset( bs_class )			// reset on good attempt so 1st failure after good is logged
-					if *list != "" {
-						ts += sep + *list
-						sep = " "
-						osif_sheep.Baa( 2, "list of hosts was returned by %s  ", ostk.To_str() )
-					} else {
-						osif_sheep.Baa( 2, "WRN: list of hosts not returned by %s   [TGUOSI002]", ostk.To_str() )
-					}
-				}
-			}
-		}
-	} else {
-		osif_sheep.Baa( 2, "host list was generated using only 'admin' project" )
+		osif_sheep.Baa( 1, "cannot get host list, chost list no admin project in credential list" )
 	}
 
 	cmap := token.Tokenise_count( ts, " " )		// break the string, and then dedup the values
