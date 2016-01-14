@@ -30,6 +30,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		13 Jan 2015 - Added pull of action from event_type if not in payload.
+					Accepts a list of IP addresses and does the right thing.
 */
 
 package managers
@@ -149,7 +150,7 @@ func netev_endpt( e *msgrtr.Event, ldi interface{} ) {
 	
 	edata := ldi.( *event_handler_data )		// get refrence to our thread data to use
 
-	payload, missing_stuff := payload_2smap( e, "uuid owner mac ip phost action" )				// we need all this for add, but only uuid for delete
+	payload, missing_stuff := payload_2smap( e, "uuid owner mac phost action" )				// we need all this for add, but only uuid for delete
 		
 	switch payload["action"] {
 		case "add", "mod":
@@ -162,15 +163,19 @@ func netev_endpt( e *msgrtr.Event, ldi interface{} ) {
 				return
 			}
 
-			net_sheep.Baa( 2, "event: adding endpoint: uuid=%s owner=%s mac=%s ip=%s phost=%s", payload["uuid"], payload["owner"], payload["mac"], payload["ip"], payload["phost"] )
+			net_sheep.Baa( 2, "event: adding endpoint: uuid=%s owner=%s mac=%s phost=%s ips=%s", payload["uuid"], payload["owner"], payload["mac"], payload["phost"], payload["ips"] )
 			eplist := make( map[string]*gizmos.Endpt, 1 )
-			eplist[payload["uuid"]] = gizmos.Mk_endpt( payload["uuid"], payload["phost"], payload["owner"], payload["ip"], payload["mac"], nil, -128 )
+			ips := make( []string, 0, 1 )
+			if payload["ip"] != "" {
+				ips = strings.Split( payload["ips"], "," )
+			}
+			eplist[payload["uuid"]] = gizmos.Mk_endpt( payload["uuid"], payload["phost"], payload["owner"], ips, payload["mac"], nil, -128 )
 			em := eplist[payload["uuid"]].Get_meta_copy()								// copy the map, and add non-meta things for adding to cache
 
 			req := ipc.Mk_chmsg( )
 			req.Send_req( edata.req_chan, nil, REQ_NEW_ENDPT, eplist, nil )				// send to ourselves to deal with in the main channel processing (expect nothing back)
 
-			netev_cache_eplist( payload["uuid"], em )											// send the endpoint(s) off to the datacache for safe keeping
+			netev_cache_eplist( payload["uuid"], em )									// send the endpoint(s) off to the datacache for safe keeping
 
 		case "del", "delete":
 			if payload["uuid"] != "" {
