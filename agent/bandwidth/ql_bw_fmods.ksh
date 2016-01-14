@@ -65,7 +65,7 @@
 #
 #				Transport protocol (tcp/udp) and ports are pesky things. The reservation may have one
 #				associated with either endpoint.  The invocation of this script uses -p and -P to 
-#				associate a protocol and port port number with the local endpoint (-r) and the local
+#				associate a protocol and port port number with the remote endpoint (-r) and the local
 #				endpoint (-s).  For the local endpoint -P is used and -p is used if there is a proto/port
 #				associated with the remote endpoint.  
 #							
@@ -87,6 +87,7 @@
 #								or all dest on both inbound and outbound fmods rather than src for one and
 #								dest for the other.
 #				13 Nov 2015 - Now susses the bridge based on uuid from ovs rather than assuming br-int.
+#				14 Jan 2016 - Fixed typos in comments/doc.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -251,7 +252,7 @@ fi
 
 if [[ -z $lmac || -z $rmac ]]
 then
-	logit "must have soruce and dest mac addresses in order to generate flow-mods   [FAIL]"
+	logit "must have source and dest mac addresses in order to generate flow-mods   [FAIL]"
 	exit 1
 fi
 
