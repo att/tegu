@@ -97,6 +97,7 @@
 				12 Aug 2015 : Corrected debug message.
 				03 Sep 2015 : Added latency option to verbose.
 				12 Nov 2015 : Pulled in httplogger from steering branch.
+				14 Jan 2016 : Some comment and message text changes.
 */
 
 package managers
@@ -208,7 +209,6 @@ func validate_ep_proj( ep_uuid *string, proj *string ) ( bool ) {
 
 		!///IP:port  for external addresses
 */
-////// func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string, p2 *string, v1 *string, v2 *string, err error ) {
 func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) {
 	
 	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
@@ -230,11 +230,11 @@ func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) 
 	http_sheep.Baa( 1, "validating hosts: (%s) (%s)", h1, h2 )
 
 	req := ipc.Mk_chmsg( )
-	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// request to openstack interface to validate this token/project pair for host
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h1, nil )		// validate this token/project pair for host (req name is misleading)
 	req = <- my_ch													// hard wait for response (response is token stripped (proj/endpt/ip-stuff
 
 	if req.State != nil {
-		err = fmt.Errorf( "h1 validation failed: %s", req.State )
+		err = fmt.Errorf( "token/project validation failed (h1): %s", req.State )
 		return
 	}
 
@@ -256,11 +256,11 @@ func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) 
 	pea1 = mk_pea( tokens[0], tokens[1], *h, *p, *v )			// make internal project/endpoint/address struct to return
 
 	req = ipc.Mk_chmsg( )											// probably don't need a new one, but it should be safe
-	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// request to openstack interface to validate this host
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &h2, nil )		// validate token/project pair (request name is old and misleading)
 	req = <- my_ch													// hard wait for response
 
 	if req.State != nil {
-		err = fmt.Errorf( "h2 validation failed: %s", req.State )
+		err = fmt.Errorf( "token/project validation failed (h2): %s", req.State )
 		return nil, nil, err
 	}
 
@@ -291,7 +291,7 @@ func validate_hosts( h1 string, h2 string ) ( pea1 *Pea, pea2 *Pea, err error ) 
 		return nil, nil, err
 	}
 
-	http_sheep.Baa( 2, "endpoint validate: %s %s	[OK]", h1, h2 )
+	http_sheep.Baa( 2, "successful endpoint validation: %s %s", h1, h2 )
 	return pea1, pea2, nil
 }
 
