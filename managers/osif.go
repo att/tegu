@@ -882,6 +882,7 @@ func Osif_mgr( my_chan chan *ipc.Chmsg ) {
 				}
 
 			case REQ_VALIDATE_HOST:						// validate and translate a [token/]project-name/host  string
+														// this request would be better named validate_tokproj as that is what it does; nothing to do with host any more
 				if msg.Response_ch != nil {
 					if ! have_project(  msg.Req_data.( *string ), pname2id, id2pname ) {				// ensure that we have creds for this project, if not attempt to get
 						os_refs, pname2id, id2pname = update_project( os_admin, os_refs, os_projects, pname2id, id2pname, os_list == "all"  )
