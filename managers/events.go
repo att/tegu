@@ -22,14 +22,15 @@
 
 	Mnemonic:	events.go
 	Abstract:	Functions related to event handling (message listeners registered with 
-				osif/msgrtr), including various functions that are registered.  Functions 
+				ipc/msgrtr), including various functions that are registered.  Functions 
 				registered by each manager thread should start with a prefix which relates 
 				it to that manager to avoid confusion. 
 
 	Date:		11 November 2015
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		13 Jan 2015 - Added pull of action from event_type if not in payload.
+					Accepts a list of IP addresses and does the right thing.
 */
 
 package managers
@@ -63,6 +64,11 @@ type event_handler_data struct {
 	The field names in the 'what' list are searched for and a missing list string
 	which contains the fields that weren't there or couldn't be converted is 
 	returned with the map.   An empty ("") missing string indicates no errors.
+
+	If "action" is included in the required list, and is not in the payload, then
+	the last node of the event type is used. E.g. endpt.add would use add as the 
+	action.  Some message systems add an 'end' as the last node, and in this case
+	the n-1 node will be used (e.g. endpt.add.end would generate an  action of add).
 */
 func payload_2smap( e *msgrtr.Event, what string ) ( m map[string]string, missing_stuff string ) {
 
@@ -96,10 +102,19 @@ func payload_2smap( e *msgrtr.Event, what string ) ( m map[string]string, missin
 				m[tokens[i]] = fmt.Sprintf( "%.3f", thing )
 
 			default:
-				net_sheep.Baa( 1, "%s in event payload was buggered or missing", tokens[i] )
-				missing_stuff += " " + tokens[i]
+				if tokens[i] == "action" {
+					etts := strings.Split( e.Event_type, "." )			// split the event type and use last as the action
+					n := len( etts )
+					if n > 1 && etts[n-1] == "end" {
+						m[tokens[i]] = etts[n-2] 
+					} else {
+						m[tokens[i]] = etts[n-1]
+					}
+				} else {
+					net_sheep.Baa( 1, "%s in event payload was buggered or missing", tokens[i] )
+					missing_stuff += " " + tokens[i]
+				}
 		}
-
 	}
 
 	return m, missing_stuff
@@ -135,7 +150,7 @@ func netev_endpt( e *msgrtr.Event, ldi interface{} ) {
 	
 	edata := ldi.( *event_handler_data )		// get refrence to our thread data to use
 
-	payload, missing_stuff := payload_2smap( e, "uuid owner mac ip phost action" )				// we need all this for add, but only uuid for delete
+	payload, missing_stuff := payload_2smap( e, "uuid owner mac phost action" )				// we need all this for add, but only uuid for delete
 		
 	switch payload["action"] {
 		case "add", "mod":
@@ -148,15 +163,19 @@ func netev_endpt( e *msgrtr.Event, ldi interface{} ) {
 				return
 			}
 
-			net_sheep.Baa( 2, "event: adding endpoint: uuid=%s owner=%s mac=%s ip=%s phost=%s", payload["uuid"], payload["owner"], payload["mac"], payload["ip"], payload["phost"] )
+			net_sheep.Baa( 2, "event: adding endpoint: uuid=%s owner=%s mac=%s phost=%s ips=%s", payload["uuid"], payload["owner"], payload["mac"], payload["phost"], payload["ips"] )
 			eplist := make( map[string]*gizmos.Endpt, 1 )
-			eplist[payload["uuid"]] = gizmos.Mk_endpt( payload["uuid"], payload["phost"], payload["owner"], payload["ip"], payload["mac"], nil, -128 )
+			ips := make( []string, 0, 1 )
+			if payload["ip"] != "" {
+				ips = strings.Split( payload["ips"], "," )
+			}
+			eplist[payload["uuid"]] = gizmos.Mk_endpt( payload["uuid"], payload["phost"], payload["owner"], ips, payload["mac"], nil, -128 )
 			em := eplist[payload["uuid"]].Get_meta_copy()								// copy the map, and add non-meta things for adding to cache
 
 			req := ipc.Mk_chmsg( )
 			req.Send_req( edata.req_chan, nil, REQ_NEW_ENDPT, eplist, nil )				// send to ourselves to deal with in the main channel processing (expect nothing back)
 
-			netev_cache_eplist( payload["uuid"], em )											// send the endpoint(s) off to the datacache for safe keeping
+			netev_cache_eplist( payload["uuid"], em )									// send the endpoint(s) off to the datacache for safe keeping
 
 		case "del", "delete":
 			if payload["uuid"] != "" {
