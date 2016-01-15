@@ -99,7 +99,7 @@
 				12 Aug 2015 : Corrected debug message.
 				03 Sep 2015 : Added latency option to verbose.
 				12 Nov 2015 : Pulled in httplogger from steering branch.
-				14 Jan 2016 : Some comment and message text changes.
+				14 Jan 2016 : Some comment and message text changes. Fixed verbose change for network mgr.
 */
 
 package managers
@@ -1231,7 +1231,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 										http_sheep.Set_level( nv )
 
 									case "net", "network":
-										http_sheep.Set_level( nv )
+										net_sheep.Set_level( nv )
 
 									case "agent":
 										am_sheep.Set_level( nv )
