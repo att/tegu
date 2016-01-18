@@ -34,6 +34,7 @@
 #                  19 Oct 2015 - Allow delete of mirrors from bridges other than br-int
 #                  15 Nov 2015 - Fixed rather bad bug introduced w/last change
 #                  23 Nov 2015 - Add -oflowmod option processing
+#                  18 Jan 2016 - Hardened logic so that we don't inadvertently delete all flows
 #
 
 function logit
@@ -107,10 +108,13 @@ then
 
 		# Remove all flows with cookie=0xfaad from bridge that have actions=output:$GREPORT
 		$sudo ovs-ofctl dump-flows $bridgename | grep "cookie=0xfaad.*output:$GREPORT," > /tmp/tdm.$$
-		for flow in $(cut -d' ' -f8 </tmp/tdm.$$ | sed 's/priority=100,//')
+		for flow in $(sed -e 's/.*priority=100,//' -e 's/ actions=.*//' </tmp/tdm.$$ | tr -d ' ')
 		do
-			$echo $sudo ovs-ofctl del-flows $bridgename $flow
-			$sudo ovs-ofctl del-flows $bridgename $flow
+			if [ -n "$flow" ]
+			then
+				$echo $sudo ovs-ofctl del-flows $bridgename "$flow"
+				$sudo ovs-ofctl del-flows $bridgename "$flow"
+			fi
 		done
 		rm -f /tmp/tdm.$$ /tmp/m$$
 

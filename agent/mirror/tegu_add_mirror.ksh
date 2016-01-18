@@ -61,6 +61,7 @@
 #                  23 Nov 2015 - Add -oflowmod option processing
 #                  09 Jan 2016 - Handle VLAN=-1 case in -oflowmod option processing.
 #                                Allow df_default=(true|false) and df_inherit=(true|false) in options
+#                  18 Jan 2016 - Fix flowmod mirrors so they resubmit (in case vlans need to be rewritten)
 #
 
 function valid_ip4
@@ -322,10 +323,10 @@ gre)
 			else
 				RULES="dl_dst=$MIRRORMAC"
 			fi
-			$echo $sudo $CONST "cookie=0xfaad,priority=100,${RULES},action=output:$GREPORT,normal"
-			      $sudo $CONST "cookie=0xfaad,priority=100,${RULES},action=output:$GREPORT,normal"
-			$echo $sudo $CONST "cookie=0xfaad,priority=100,in_port=$MIRRORPORT,action=output:$GREPORT,normal"
-			      $sudo $CONST "cookie=0xfaad,priority=100,in_port=$MIRRORPORT,action=output:$GREPORT,normal"
+			$echo $sudo $CONST "cookie=0xfaad,priority=100,metadata=0/1,${RULES},action=set_field:0x01->metadata,output:$GREPORT,resubmit(,0)"
+			      $sudo $CONST "cookie=0xfaad,priority=100,metadata=0/1,${RULES},action=set_field:0x01->metadata,output:$GREPORT,resubmit(,0)"
+			$echo $sudo $CONST "cookie=0xfaad,priority=100,metadata=0/1,in_port=$MIRRORPORT,action=set_field:0x01->metadata,output:$GREPORT,resubmit(,0)"
+			      $sudo $CONST "cookie=0xfaad,priority=100,metadata=0/1,in_port=$MIRRORPORT,action=set_field:0x01->metadata,output:$GREPORT,resubmit(,0)"
 		done
 		rm -f /tmp/tam.$$
 	else
