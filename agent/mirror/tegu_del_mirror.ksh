@@ -35,11 +35,12 @@
 #                  15 Nov 2015 - Fixed rather bad bug introduced w/last change
 #                  23 Nov 2015 - Add -oflowmod option processing
 #                  18 Jan 2016 - Hardened logic so that we don't inadvertently delete all flows
+#                  19 Jan 2016 - Log if a null flow is found when deleting flows
 #
 
 function logit
 {
-	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $argv0: $@" >&2
+	echo "$(date '+%s %Y/%m/%d %H:%M:%S') $argv0: $@" >&2
 }
 
 function findbridge
@@ -60,6 +61,7 @@ function usage
 	echo "usage: tegu_del_mirror [-o<options>] [-v] name" >&2
 }
 
+argv0=${0##*/}
 PATH=$PATH:/sbin:/usr/bin:/bin 		# must pick up agent augmented path
 echo=:
 options=
@@ -100,7 +102,9 @@ if option_set flowmod
 then
 	# Find bridge with the GRE port
 	$echo $sudo ovs-vsctl list port gre-$mirrorname
-	$sudo ovs-vsctl list port gre-$mirrorname | grep _uuid | sed 's/.*://' > /tmp/m$$ && {
+	$sudo ovs-vsctl list port gre-$mirrorname > /tmp/x$$ && {
+		grep _uuid < /tmp/x$$ | sed 's/.*://' > /tmp/m$$
+		rm /tmp/x$$
 		bridgename=$(findbridge $(cat /tmp/m$$))
 
 		# Find $GREPORT
@@ -114,6 +118,9 @@ then
 			then
 				$echo $sudo ovs-ofctl del-flows $bridgename "$flow"
 				$sudo ovs-ofctl del-flows $bridgename "$flow"
+			else
+				logit "Empty flow rule discovered"
+				cat /tmp/tdm.$$ >&2
 			fi
 		done
 		rm -f /tmp/tdm.$$ /tmp/m$$
