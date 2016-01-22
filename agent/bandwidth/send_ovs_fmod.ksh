@@ -219,7 +219,8 @@ function get_ovs_data
 {
 	if [[ ! -s $ovs_data ]]
 	then
-		ovs_sp2uuid -a $rhost any >$ovs_data
+		ql_suss_ovsd >$ovs_data
+		#ovs_sp2uuid -a $rhost any >$ovs_data		## deprecated
 	fi
 }
 
@@ -321,13 +322,9 @@ function str2nwproto
 }
 
 
-# accept a port, mac or special id (e.g. :qosirl0) as $1. If $1 is a mac address, then we attempt to find it
-# in ovs_sp2uuid information and echo out the corresponding port. If a special ID is given, then that ID, without
-# the leading : is epected to be listed as a port on a switch.
-#	ovs_sp2uuid output we want has the form:
-#		switch: 000082e23ecd0e4d cd3ee281-ce07-4d0e-9350-f7faa43b6a91 br-int
-#		port: 01f7f621-03ff-43e5-a183-c66151eae9d7 346 tap916a2d34-eb fa:de:ad:54:08:6b 916a2d34-ebdf-402e-bcb3-904b56011773
-#		port: e3909c91-5d1a-4821-a12b-0130a62d456b 19 qosirl0   -1
+# accept a port, mac, or special id (e.g. :qosirl0) as $1. If $1 is a mac address, then we attempt to find it
+# in ql_suss_ovsd information and echo out the corresponding port. If a special ID is given, then that ID, without
+# the leading : is epected to be listed as a port with that name (field 4).
 function late_binding
 {
 	get_ovs_data
@@ -337,11 +334,11 @@ function late_binding
 		typeset port=""
 	
 		awk -v mac=${1/#:/} ' 							# strip lead : from mac if it is :id
-			/^switch:/ { sw = $4; next; }
+			#/^switch:/ { sw = $4; next; }
 			/^port:/ {
-				if( $5 == mac || $4 == mac )			# match mac or port name (ID)
+				if( $1 == mac || $5 == mac || $4 == mac )	# match uuid, mac or port name (ID)
 				 {
-					print sw, $3;
+					print $8, $3;						# $8 is the bridge (switch)
 					exit( 0 )
 				}
 			}
@@ -349,10 +346,35 @@ function late_binding
 
 		echo $port $lbswitch
 	else
-		echo $1
+		echo $1 ""
 	fi
 }
 
+#
+# Given a uuid or mac address, suss out the associated vlan
+function late_binding_vlan
+{
+	get_ovs_data
+
+	typeset vlan=""
+
+	awk -v id=${1/#:/} ' 							# strip lead : from mac if it is :id
+		/^port:/ {
+			if( $2 == id ||  $5 == id  )			# match uuid or mac
+			 {
+				print $7;							#vlan is 7th field
+				exit( 0 )
+			}
+		}
+	'  $ovs_data | read vlan
+
+	if [[ -n $vlan ]] 			# found it, echo it
+	then
+		echo $vlan
+	else
+		echo $1					# probably wasn't an id/mac, send it back as is
+	fi
+}
 
 # -------------------------------------------------------------------------------------------
 
@@ -501,7 +523,7 @@ do
 
 				-t)	match+="tun_id=$2 "; shift;;		# id[/mask]
 				-T) match+="nw_tos=$2 "; shift;;
-				-v)	match+="dl_vlan=${2} "; shift;; 			# tci_vlan[/mask]
+				-v)	match+="dl_vlan=$( late_binding_vlan ${2} ) "; shift;; 			# tci_vlan[/mask] (allow uuid/mac and suss from ovs data)
 
 				*)	echo "unrecognised match option: $1  [FAIL]"
 					exit 1
@@ -549,6 +571,7 @@ do
 				-v)	
 					vid="${2%%/*}"						# strip off if id/priority given
 					vpri="${2##*/}"						# snag the priority if there
+
 					if [[ $vid == *":"* ]]				# a mac address for us to look up in ovs and dig the assigned vlan tag
 					then
 						vid=$( suss_vid $vid )
@@ -634,6 +657,12 @@ fi
 
 case $1 in
 	add)				# $2 is cookie, and we use $3 only if we didn't get a latebinding port
+		if [[ -z ${lbswitch:-$3} ]]
+		then
+			echo "set_ovs_fmod: no bridge on command line, or late binding resulted in nil string.	[FAIL]"
+			exit 1
+		fi
+
 		if [[ ${lbswitch:-$3} == "br-int" ]]		# must ensure that ingress rate limiting is on for br-int fmods
 		then
 			if ! check_irl

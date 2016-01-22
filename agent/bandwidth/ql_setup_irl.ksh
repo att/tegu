@@ -1,4 +1,4 @@
-#!/usr/bin/env bash 
+#!/usr/bin/env ksh 
 # vi: sw=4 ts=4:
 #
 # ---------------------------------------------------------------------------
@@ -33,6 +33,9 @@
 #				17 Nov 2014	- Added timeouts on ssh commands to prevent "stalls" as were observed in pdk1.
 #				04 Dec 2014 - Ensured that all crit/warn messages have a constant target host component.
 #				28 Jan 2015 - Prevent an ssh call if -h indicates local host.
+#				21 Jan 2015 - Set up on bridges other than br-int and to assume that br-rl name is <bridge>-rl
+#						where bridge is the bridge that it is attached to (e.g. br-int-rl)
+#						This script now requires ksh; reset #! (don't know why it was ever set to bash).
 # -----------------------------------------------------------------------------------------------------------------
 
 function logit
@@ -71,16 +74,22 @@ function warn_if_bad
 # create the rate limit bridge
 function mk_bridge
 {
-	$forreal timeout 15 $ssh $sudo /usr/bin/ovs-vsctl add-br br-rl
-	ensure_ok $? "unable to make bridge br-rl"
-	logit "created bridge br-rl"
+	$forreal timeout 15 $ssh $sudo /usr/bin/ovs-vsctl add-br $1-rl
+	ensure_ok $? "unable to make bridge $1-rl"
+	logit "created bridge $1-rl"
 }
 
 # remove the bridge
 function rm_bridge
 {
-	logit "deleting bridge br-rl"
-	$forreal timeout 15 $ssh $sudo /usr/bin/ovs-vsctl del-br br-rl
+	if [[ -z $1 ]]
+	then
+		logit "no bridge passed to rm_bridge  [WARN]"
+		return
+	fi
+
+	logit "deleting bridge $1-rl"
+	$forreal timeout 15 $ssh $sudo /usr/bin/ovs-vsctl del-br $1-rl
 }
 
 # create our veth that will be used for the loop round
@@ -113,27 +122,35 @@ function detach_veth
 	$forreal timeout 15 $ssh $sudo ovs-vsctl del-port $ve1 >/dev/null 2>&1
 }
 
-# attach the veth to br-int and br-rl
+# attach the veth to the bridge and its rate limit (-rl) counterpart.
 function attach_veth
 {
-	logit "cleaning previous attachments: $ve0-$ve1 to br-int and br-rl   [OK]"
+	if [[ -z $1 ]]
+	then
+		logit "no bridge passed to attach_veth  [WARN]"
+		return
+	fi
+
+	logit "cleaning previous attachments: $ve0-$ve1 to $1 and $1-rl   [OK]"
 	# drop the ports if one or the other were already there (ignoring failures)
-	detach_veth
+	detach_veth $1
 
-	$forreal timeout 15 $ssh $sudo ovs-vsctl add-port br-int $ve0 #-- set interface $ve0  ofport=4000
-	ensure_ok $? "unable to attach veth $ve0 to br-int"
+	$forreal timeout 15 $ssh $sudo ovs-vsctl add-port $1 $ve0 			#-- set interface $ve0  ofport=4000
+	ensure_ok $? "unable to attach veth $ve0 to $1"
 
-	$forreal timeout 15 $ssh $sudo ovs-vsctl add-port br-rl  $ve1 #-- set interface $ve1  ofport=4001
-	ensure_ok $? "unable to attach veth $ve1 to br-rl"
+	$forreal timeout 15 $ssh $sudo ovs-vsctl add-port $1-rl  $ve1 		#-- set interface $ve1  ofport=4001
+	ensure_ok $? "unable to attach veth $ve1 to $1-rl"
 
-	logit "attached $ve0-$ve1 to br-int and br-rl   [OK]"
+	logit "attached $ve0-$ve1 to $1 and $1-rl   [OK]"
 }
 
 function usage
 {
-	echo "$argv0 version 1.0/19224" >&2
-	echo "usage: $argv0 [-D] [-h host] [-n] [-p link-prefix]" >&2
+	echo "$argv0 version 2.0/11216" >&2
+	echo "usage: $argv0 [-D] [-h host] [-n] [-p link-prefix] [bridge(s)]" >&2
 	echo "   -D causes all rate limiting bridges, ports and links to be removed"
+	echo "	bridge is the bridge that the rate limit bridge should be attached to"
+	echo "  if not supplied, all bridges listed in the agent config file are setup/deleted."
 }
 
 # -------------------------------------------------------------------------------------------
@@ -141,6 +158,7 @@ if (( $( id -u ) != 0 ))
 then
 	sudo="sudo"
 fi
+config="${TEGU_AGENT_CONFIG:-tegu_agent.cfg}"
 
 tmp=${TMP:-/tmp}
 argv0="${0##*/}"
@@ -157,6 +175,9 @@ traceoff="set +x"
 link_prefix="qosirl"
 force_attach=0
 delete=0
+
+typeset -C bandwidth											# must ensure this is set to handle missing config file
+ql_parse_config -f $config >/tmp/PID$$.cfg && . /tmp/PID$$.cfg		# xlate config file into variables and source them
 
 while [[ $1 == "-"* ]]
 do
@@ -188,77 +209,86 @@ do
 	shift
 done
 
-ve0="${link_prefix}0"				# veth endpoint names
-ve1="${link_prefix}1"
-
-if (( delete ))
+if [[ -n $1 ]]
 then
-	logit "deleting ingress rate limiting configuration (bridge, ports, veth pair)    [OK]"
-	detach_veth						# bring the ports down and remove from the bridges
-	rm_veth							# delete the link
-	rm_bridge						# finally drop the bridge
-
-	exit 0
-fi
-
-if [[ -e /etc/tegu/no_irl ]]
-then
-	logit "abort: /etc/tegu/no_irl file exists which prevents setting up ingress rate limiting bridge and flow-mods	[WARN]"
-	exit 1
-fi
-
-bridge_list=/tmp/PID$$.brdge
-link_list=/tmp/PID$$.link
-
-timeout 15 $ssh $sudo ovs-vsctl -d bare list bridge|grep name >$bridge_list
-ensure_ok $? "unable to get bridge list"
-
-add_fmod=0
-if ! grep -q br-rl $bridge_list
-then
-	mk_bridge
-	force_attach=1
-	add_fmod=1				# no flow-mod if new bridge; cause creation
+	bridge_list="$@"							# assume bridges to operate supplied on the command line
 else
-	timeout 15 $ssh $sudo ovs-ofctl dump-flows br-rl |grep -q cookie=0xdead
-	if (( $? > 0 ))
-	then
-		add_fmod=1			# f-mod gone missing; force creation
-	fi
+	bridge_list="${bandwidth.rate_limit}"		# else operate on all rate limit bridges in the config
 fi
 
-if (( add_fmod ))
-then
-	# bug fix #227 -- only replace the flow mod when bridge is created, or if we cannot find it
-	send_ovs_fmod $rhost_parm $no_exec -t 0 --match --action -b add 0xdead br-rl 		# default f-mod for br-rl that bounces packets out from whence they came
-	ensure_ok $? "unable to set flow-mod on br-rl"
-fi
+for bridge in $bridge_list
+do
+	ve0="${bridge}-${link_prefix}0"		# bloody namespace is flat, add bridge as a prefix
+	ve1="${bridge}-${link_prefix}1"		# veth pair endpint names that go into OVS
 
-timeout 15 $ssh ip link > $link_list
-ensure_ok $? "unable to generate a list of links"
-
-if ! grep -q "$link_prefix" $link_list			# no veth found, make it
-then
-	mk_veth
-	attach_veth
-else
-	c=0
-	if (( ! force_attach ))		# don't need to spend time if force was set
+	if (( delete ))
 	then
-		ovs_sp2uuid $rhost_parm -a >/tmp/PID$$.udata				# fix #241; ensure that veth are attached to bridges
-		ensure_ok $? "unable to get ovs uuid data from $rhost"
-		c=$( grep -c $link_prefix /tmp/PID$$.udata )
+		logit "deleting ingress rate limiting configuration (bridge, ports, veth pair) for $bridge   [OK]"
+		detach_veth	$bridge					# bring the ports down and remove from the bridges
+		rm_veth	$bridge						# delete the link
+		rm_bridge $bridge					# finally drop the bridge
+	else
+
+		if [[ -e /etc/tegu/no_irl ]]
+		then
+			logit "abort: /etc/tegu/no_irl file exists which prevents setting up ingress rate limiting bridge and flow-mods	[WARN]"
+			exit 1
+		fi
+
+		bridge_list=/tmp/PID$$.brdge
+		link_list=/tmp/PID$$.link
+
+		timeout 15 $ssh $sudo ovs-vsctl -d bare list bridge|grep name >$bridge_list
+		ensure_ok $? "unable to get bridge list"
+
+		add_fmod=0
+		if ! grep -q $bridge-rl $bridge_list
+		then
+			logit "making bridge: $bridge-rl	[OK]"
+			mk_bridge $bridge
+			force_attach=1
+			add_fmod=1				# no flow-mod if new bridge; cause creation
+		else
+			timeout 15 $ssh $sudo ovs-ofctl dump-flows $bridge-rl |grep -q cookie=0xdead
+			if (( $? > 0 ))
+			then
+				add_fmod=1			# f-mod gone missing; force creation
+			fi
+		fi
+
+		if (( add_fmod ))
+		then
+			# bug fix #227 -- only replace the flow mod when bridge is created, or if we cannot find it
+			send_ovs_fmod $rhost_parm $no_exec -t 0 --match --action -b add 0xdead $bridge-rl 		# default f-mod for *-rl that bounces packets out from whence they came
+			ensure_ok $? "unable to set flow-mod on $bridge-rl"
+		fi
+
+		timeout 15 $ssh ip link > $link_list
+		ensure_ok $? "unable to generate a list of links"
+
+		if ! grep -q "$link_prefix" $link_list			# no veth found, make it
+		then
+			mk_veth	$bridge
+			attach_veth $bridge
+		else
+			c=0
+			if (( ! force_attach ))		# don't need to spend time if force was set
+			then
+				ovs_sp2uuid $rhost_parm -a >/tmp/PID$$.udata				# fix #241; ensure that veth are attached to bridges
+				ensure_ok $? "unable to get ovs uuid data from $rhost"
+				c=$( grep -c $link_prefix /tmp/PID$$.udata )
+			fi
+			if (( c != 2 ))				# didn't exist, or pair existed, but if we had to create *-rl then we must attach it
+			then
+				attach_veth	$bridge
+			fi
+		fi
+
+
+		$forreal timeout 15 $ssh $sudo ovs-ofctl mod-port $bridge $ve0 noflood		# we should always do this
+		warn_if_bad $? "unable to set no flood on $bridge:$ve0"
 	fi
-	if (( c != 2 ))				# didn't exist, or pair existed, but if we had to create br-rl then we must attach it
-	then
-		attach_veth
-	fi
-fi
-
-
-$forreal timeout 15 $ssh $sudo ovs-ofctl mod-port br-int $ve0 noflood		# we should always do this
-warn_if_bad $? "unable to set no flood on br-int:$ve0"
-
+done
 
 rm -f $tmp/PID$$.*
 exit 0
