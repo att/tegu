@@ -93,6 +93,7 @@
 #				12 Oct 2015 - No longer test for br-rl presensnce since it has (at least temporarily)
 #								been removed as HTB queues were causing damage.
 #				30 Oct 2015 - Ensure that IP type is set when protocol is specified.
+#				21 Jan 2016 - Correct value on arp type.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -359,7 +360,7 @@ ovs_data=/tmp/PID$$.lbdata 	# spot to dump ovs output into
 
 ip6_type="dl_type=0x86dd"
 ip4_type="dl_type=0x0800"
-arp_type="dl_type=0x8000"
+arp_type="dl_type=0x0806"
 
 check_level=0				# -B sets to force a check for backlevel version
 backlevel_ovs=0				# -b sets to indicate backlevel (w/o test)
