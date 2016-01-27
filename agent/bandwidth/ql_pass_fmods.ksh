@@ -95,38 +95,73 @@ function ep2mac
 # based on the address type and left alone if just the port was supplied.
 function split_pap
 {
-	typeset proto=${1%%:*}		# strip off protocol
-	typeset rest=${1#*:}		# address:port or just port
+	typeset proto=""
+	typeset rest=""
+	typeset addr=""
+
+	case $1 in 					# split proto:rest
+		*:\[* | *:*.*)			# proto:ipv6  or proto:ipv4
+			proto=${1%%:*}
+			rest=${1#*:}	
+			;;
+
+		\[*\]:* | *.*:*)		# address:port (no proto)
+			proto=""
+			rest="$1"
+			;;
+
+		*::*)					# proto::port (empty address)
+			proto="${1%%:*}"
+			rest="${1##*:}"
+			;;
+
+		*:*)					# proto:port ('empty' address)
+			proto="${1%:*}"
+			rest="${1#*:}"
+			;;
+
+		*)						# assume lone udp/tcp and no :addr:port or :port
+			proto=$1
+			rest=""
+			;;
+	esac
+
 
 	if [[ -z $rest ]]			# only proto given
 	then
 		echo "$proto none 0"
 	fi
 
-	case $rest in 
-		\[*\]:)					# ipv6 address:port
-			typeset addr="${rest%%]*}"
+	case "$rest" in 
+		\[*\]*)											# ipv6 address:port or just ipv6
+			addr="${rest%%]*}"
 			ip_type="-6"								# must force the type; set directly, DO NOT use set_ip_type
-			echo "$proto ${addr##*\[} ${rest##*]:}"
+			if [[ $rest == *"]:"* ]]
+			then
+				rest="${rest##*]:}"
+				rest="${rest:-0}"						# handle case where : exists, but no port (implied 0)
+				proto=${proto:-tcp}						# if there is a port we must ensure there is a prototype; default if not given
+			else
+				rest="${rest##*]}"
+			fi
+			echo "${proto:-none} "[${addr##*\[}]" ${rest:-0}"
 			;;
 
-		\[*)					# ipv6 address
-			typeset addr="${rest%%]*}"
-			ip_type="-6"
-			echo "$proto ${addr##*\[} 0"
-			;;
-
-		*.*.*.*:)					# ipv4:port
+		*.*.*.*)										# ipv4:port or just ipv4
 			ip_type="-4"
-			echo "$proto ${rest%%:*} ${rest##*:}"
+			addr="${rest%%:*}"
+			if [[ $rest == *:* ]]
+			then
+				rest="${rest##*:}"
+				proto=${proto:-tcp}						# if there is a port we must ensure there is a prototype; default if not given
+			else
+				rest=0
+			fi
+				
+			echo "$proto $addr ${rest:-0}"
 			;;
 
-		*.*.*.*)					# ipv4
-			ip_type="-4"
-			echo "$proto ${rest%%:*} 0"
-			;;
-
-		*)						# just port; default ip type, or what they set on command line
+		*)												# just port; default ip type, or what they set on command line
 			echo "$proto none ${rest//:/}"
 			;;
 	esac
@@ -165,6 +200,7 @@ do
 		-n)		forreal="-n";;
 		-s)		smac="$2"; shift;;						# source (local) mac address (should be endpoint to be safe, but allow mac)
 		-S)		split_pap "$2" | read proto sip port	# expect -S {udp|tcp}:[address:]port
+echo ">>> ($proto) ($sip) ($port)"
 				if [[ $sip == "none" ]]
 				then
 					sip=""
@@ -216,9 +252,14 @@ then
 fi
 fi
 
-if [[ -n $proto ]]
+if [[ $proto == "none" ]]
 then
-	proto="-p $proto:$port"
+	proto=""
+else
+	if [[ -n $proto ]]
+	then
+		proto="-p $proto:$port"
+	fi
 fi
 
 # the flow-mod is simple; match and set marking that causes the p10 flow-mod from matching.
