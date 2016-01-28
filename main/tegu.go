@@ -141,6 +141,7 @@
 				16 Dec 2015 : Strips domain from phys host names for path finding
 				17 Dec 2015 : Lists only L3 nodes for network hosts.
 				09 Jan 2016 : Bump version (added more options for add-mirror)
+				28 Jan 2015 : Added passthru reservation support.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -175,7 +176,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.5/11096"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
+		version		string = "v3.1.5/11286"		// 3.1.x == steering branch version (.2 steering only, .3 steering+mirror+lite)
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

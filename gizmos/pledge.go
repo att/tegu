@@ -120,12 +120,16 @@ func Json2pledge( jstr *string ) ( p *Pledge, err error ) {
 					mp.From_json( jstr )
 					pi = Pledge( mp )			// convert to interface type
 					
-	
 				case PT_STEERING:
 					mp := new( Pledge_steer )
 					mp.From_json( jstr )
 					pi = Pledge( mp )			// convert to interface type
 	
+				case PT_PASSTHRU:
+					pt := new( Pledge_pass )
+					pt.From_json( jstr )
+					pi = Pledge( pt )			// convert to interface type
+
 				default:
 					err = fmt.Errorf( "unknown pledge type in json: %d: %s", *jp.Ptype, *jstr )
 					return

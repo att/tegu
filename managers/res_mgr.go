@@ -99,6 +99,7 @@
 						command to be run and it wasn't.)
 				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
 				08 Oct 2015 : Added !pushed check back to active reservation pushes.
+				27 Jan 2015 : Changes to support passthru reservations.
 */
 
 package managers
@@ -176,7 +177,9 @@ func name2ip( name *string ) ( ip *string ) {
 	msg = <- ch
 	if msg.State == nil {					// success
 		ip = msg.Response_data.(*string)
-	}
+	} else {
+rm_sheep.Baa( 1, ">>>>> name didn't translate to ip: %s", name )
+}
 
 	return
 }
@@ -360,6 +363,9 @@ func (i *Inventory) push_reservations( ch chan *ipc.Chmsg, alt_table int, hto_li
 
 						case *gizmos.Pledge_mirror:
 							push_mirror_reservation( p, rname, ch )
+
+						case *gizmos.Pledge_pass:
+							pass_push_res( p, &rname, ch, hto_limit )
 					}
 
 					pushed_count++
@@ -525,7 +531,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 									req = <- my_ch										// should be OK, but the underlying network could have changed
 
 									if req.Response_data != nil {
-										gate := req.Response_data.( *gizmos.Gate  )			// expect that network sent us a gate
+										gate := req.Response_data.( *gizmos.Gate )		// expect that network sent us a gate
 										sp.Set_gate( gate )
 										rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
 										err = i.Add_res( p )
@@ -550,6 +556,27 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 									} else {
 										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
 									}
+
+								case *gizmos.Pledge_pass:
+									host, _ := sp.Get_hosts()
+									update_graph( host, true, true )
+									req.Send_req( nw_ch, my_ch, REQ_GETPHOST, host, nil )		// need to find the current phost for the vm
+									req = <- my_ch
+
+									if req.Response_data != nil {
+										phost := req.Response_data.( *string  )
+										sp.Set_phost( phost )
+										rm_sheep.Baa( 1, "passthrou phost found  for chkptd reservation: %s %s %s", *(sp.Get_id()), *host, *phost )
+										err = i.Add_res( p )
+									} else {
+										s := fmt.Errorf( "unknown reason" )
+										if req.State != nil {
+											s = req.State
+										}
+										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to find phost for passthru pledge: %s	[TGURMG000]", s )
+										rm_sheep.Baa( 0, "erroring passthru pledge: %s", (*p).To_str() )
+									}
+									
 
 								default:
 									rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )

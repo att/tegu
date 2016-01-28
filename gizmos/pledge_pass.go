@@ -42,9 +42,12 @@ import (
 type Pledge_pass struct {
 				Pledge_base	// common fields
 	host		*string		// VM (endpoint) where the traffic originates from
-	protocol	*string		// tcp/udp:port
+	protocol	*string		// tcp/udp or "" if not defined
 	tpport		*string		// transport port number or 0 if not defined
 	vlan		*string		// vlan id to match with h1 match criteria
+
+							// these aren't checkpointed -- they are discovered at restart if needed
+	phost		*string		// physical host where the VM resides
 }
 
 /*
@@ -150,13 +153,13 @@ func (p *Pledge_pass) Get_hosts( ) ( host *string, dummy *string ) {
 		the commence time,
 		the expiry time
 */
-func (p *Pledge_pass) Get_values( ) ( host *string,  port *string, commence int64, expiry int64 ) {
+func (p *Pledge_pass) Get_values( ) ( host *string,  port *string, commence int64, expiry int64, proto *string ) {
 	if p == nil {
-		return &empty_str, &empty_str, 0, 0
+		return &empty_str, &empty_str, 0, 0, &empty_str
 	}
 
 	c, e := p.window.get_values()
-	return p.host,  p.tpport, c, e
+	return p.host,  p.tpport, c, e, p.protocol
 }
 
 /*
@@ -182,10 +185,14 @@ func (p *Pledge_pass) Get_vlan( ) ( vlanid *string ) {
 }
 
 /*
-	Create a clone of the pledge.  The path is NOT a copy, but just a reference to the list
-	from the original.
+	Create a clone of the pledge. Strings are immutable, so 
+	just copying the pointers is fine.
 */
 func (p *Pledge_pass) Clone( name string ) ( *Pledge_pass ) {
+	if p == nil {
+		return nil 
+	}
+
 	newp := &Pledge_pass {
 		Pledge_base:Pledge_base {
 			id:			&name,
@@ -234,6 +241,19 @@ func (p *Pledge_pass) Equals( op *Pledge ) ( state bool ) {
 	return false
 }
 
+/*
+	Set the protocol string. This string is 'free form' as is needed by the user 
+	though it is likely one of the following forms:
+		proto:port
+		proto::port
+		proto:address:port
+*/
+func (p *Pledge_pass) Set_proto( proto *string ) {
+	if p != nil {
+		p.protocol = proto
+	}
+}
+
 // --------------- interface functions (required) ------------------------------------------------------
 /*
 	Destruction
@@ -251,6 +271,11 @@ func (p *Pledge_pass) Nuke( ) {
 	as would be expected.
 */
 func (p *Pledge_pass) From_json( jstr *string ) ( err error ){
+	if p == nil {
+		err = fmt.Errorf( "no passthrough pledge to convert json into" )
+		return
+	}
+
 	jp := new( Json_pledge_pass )
 	err = json.Unmarshal( []byte( *jstr ), &jp )
 	if err != nil {
@@ -291,14 +316,38 @@ func (p *Pledge_pass) Add_proto( proto *string ) {
 	Return the protocol associated with the pledge.
 */
 func (p *Pledge_pass) Get_proto( ) ( *string ) {
-	return p.protocol
+	if p != nil {
+		return p.protocol
+	}
+
+	return nil
+}
+
+/*
+	Set the physical host.
+*/
+func( p *Pledge_pass) Set_phost( phost *string ) {
+	if p != nil {
+		p.phost = phost;
+	}
+}
+
+func( p *Pledge_pass) Get_phost( ) ( *string ) {
+	if p != nil {
+		return p.phost
+	}
+
+	return nil
 }
 
 // --- functions required by the interface ------------------------------
 /*
 	Set match v6 flag based on user input.
+	Specific use of v4 vs v6 is deprecated.  It will be sussed out by the 
+	agent if the protocol is given. Must keep this for interface compatability.
 */
 func (p *Pledge_pass) Set_matchv6( state bool ) {
+	return
 }
 
 
@@ -307,7 +356,11 @@ func (p *Pledge_pass) Set_matchv6( state bool ) {
 	this pledge.
 */
 func (p *Pledge_pass) Has_host( hname *string ) ( bool ) {
-	return *p.host == *hname
+	if p != nil {
+		return *p.host == *hname
+	}
+
+	return false
 }
 
 
@@ -318,7 +371,7 @@ func (p *Pledge_pass) Has_host( hname *string ) ( bool ) {
 	(Deprecated in favour of Stringer interface)
 */
 func (p *Pledge_pass) To_str( ) ( s string ) {
-	return p.String()
+	return p.String()		// handles nil check so we don't need to
 }
 
 /*
@@ -327,7 +380,7 @@ func (p *Pledge_pass) To_str( ) ( s string ) {
 func (p *Pledge_pass) String( ) ( s string ) {
 
 	if p == nil {
-		return ""
+		return "--nil-pt-pledge--"
 	}
 
 	state, caption, diff := p.window.state_str()

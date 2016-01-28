@@ -74,6 +74,7 @@
 #					verification quicker.
 #				24 Nov 2015 - Add options to add-mirror
 #				16 Dec 2015 - Correct OS_REGION env reference to be correct (OS_REGION_NAME)
+#				27 Jan 2016 - Added support for passthru
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -113,6 +114,7 @@ function usage {
 	commands and parms are one of the following:
 	  $argv0 reserve [bandwidth_in,]bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
 	  $argv0 owreserve bandwidth_out [start-]expiry token/project/host1,token/project/host2 cookie [dscp]
+	  $argv0 passtrhu  [start-]expiry token/project/host cookie
 	  $argv0 cancel reservation-id [cookie]
 	  $argv0 listconns {name[ name]... | <file}
 	  $argv0 add-mirror [start-]end port1[,port2...] output [cookie] [vlan]
@@ -623,6 +625,21 @@ case $1 in
 		esac
 
 		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto$host/$bandwidth"
+		;;
+
+	passthru|passthrough)
+		shift
+		# tegu wants passthru [proto=[{udp|tcp}:]address[:port]] timewindow|+sss token/proj/vm cookie
+		if [[ $# < 3 ]] 
+		then
+			echo "found $# positional parameters on the command line, expected three.i   [FAIL]"
+			echo "missing positional parameters: [<start]-]end|+sss token/project/VM cookie"
+			echo " "
+			usage
+			exit 1
+		fi
+		expiry=$( str2expiry $1 )
+		rjprt  $opts -m POST -D "passthru $kv_pairs $expiry $(expand_epname "$raw_token" "$OS_TENANT_NAME" $2) $3" -t "$proto$host/$bandwidth"
 		;;
 
 	pause)
