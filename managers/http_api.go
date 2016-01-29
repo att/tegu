@@ -97,6 +97,7 @@
 				12 Aug 2015 : Corrected debug message.
 				03 Sep 2015 : Added latency option to verbose.
 				12 Nov 2015 : Pulled in httplogger from steering branch.
+				27 Jan 2016 : Added support for passthrough reservations.
 */
 
 package managers
@@ -138,7 +139,7 @@ func mk_resname( ) ( string ) {
 }
 
 /*
-	Validate the h1 and h2 strings translating the project name to a tenant ID if present.
+	Validate the h1 and optionally h2 strings translating the project name to a tenant ID if present.
 	The translated names are returned if _both_ are valid; error is set otherwise.
 	In addition, if a port number is added to a host name it is stripped and returned.
 
@@ -195,6 +196,33 @@ func validate_hosts( h1 string, h2 string ) ( h1x string, h2x string, p1 *string
 	}
 
 	return
+}
+
+/*	This is almost identical to validate_hosts() for a single host.  It does not support
+	'external' host names. The host name is expected to be project/host[:port][{vlan}].
+	If a project name is given, it is translated to project ID and reflected in the 
+	hostx (extracted) string. If port and vlan are embedded, they are stripped and 
+	returned as separater values.
+*/
+func validate_one_host( hname string ) ( hostx string, port *string, vlan *string, err error ) {
+	var ht *string
+
+	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
+	port = &zero_string
+
+	req := ipc.Mk_chmsg( )
+	req.Send_req( osif_ch, my_ch, REQ_VALIDATE_HOST, &hname, nil )	// request to openstack interface to validate this token/project pair for host
+	req = <- my_ch													// hard wait for response
+
+	if req.State != nil {
+		err = fmt.Errorf( "h1 validation failed: %s", req.State )
+		return
+	}
+
+	ht, port, vlan = gizmos.Split_hpv( req.Response_data.( *string ) ) 	// split off :port from token/project/name where name is name or address
+	hostx = *ht
+
+	return hostx, port, vlan, err
 }
 
 
@@ -514,6 +542,91 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 
 
 
+/*	Given a passthrough reservation (pledge) get the physical host for the reseration and then send the reservation off to 
+	reservation manager to do the rest (push flow-mods etc.)  The return values may seem odd, but are a result of 
+	breaking this out of the main parser which wants two reason strings and a count of errors in order to report 
+	an overall status and a status of each request that was received from the outside world.
+
+	This function will also check for a duplicate pledge already in the inventory and reject it
+	if a dup is found. As a final check the user link capacity is checked (network) and if it is not greater than
+	0, the reservation is rejected; user must be allowed bandwidth capacity to mark their own traffic.
+*/
+func finalise_pt_res( res *gizmos.Pledge_pass, res_paused bool ) ( reason string, jreason string, nerrors int ) {
+
+	nerrors = 0
+	jreason = ""
+	reason = ""
+
+	my_ch := make( chan *ipc.Chmsg )						// allocate channel for responses to our requests
+	defer close( my_ch )									// close it on return
+
+	req := ipc.Mk_chmsg( )
+	gp := gizmos.Pledge( res )								// convert to generic pledge
+	req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
+	req = <- my_ch											// get response from the res mgr thread
+	if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
+		rp := req.Response_data.( *string )
+		if rp != nil {
+			nerrors = 1
+			reason = fmt.Sprintf( "reservation duplicates existing reservation: %s",  *rp )
+			return
+		}
+	}
+
+	host, _ := res.Get_hosts()								// ---- verify that the ulcap for the project is > 0 ---------
+	tokens := strings.Split( *host, "/" )					// split project/endpoint
+	if len( tokens ) < 2 {
+		nerrors = 1
+		http_sheep.Baa( 1, "reject passthru: endpoint was not project/endpointL %s", host )
+		reason = fmt.Sprintf( "host name was not project/endpoint; unable to validate passthru reservation project" )
+		return
+	}
+
+	req = ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, my_ch, REQ_PT_RESERVE, &tokens[0], nil )	// must have network approval too
+	req = <- my_ch													// wait for response
+	ok := req.Response_data.( bool )
+	if !ok  {
+		nerrors = 1
+		http_sheep.Baa( 1, "reject passthru: %s: %s", tokens[0], req.State )
+		reason = fmt.Sprintf( "%s", req.State )
+		return
+	}
+
+	req = ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, my_ch, REQ_GETPHOST, host, nil )	// send to network to translate the VM ID into a physical host name
+	req = <- my_ch											// get response from the network thread
+
+	if req.Response_data != nil {
+		phost := req.Response_data.( *string )
+		res.Set_phost( phost )
+
+		req.Send_req( rmgr_ch, my_ch, REQ_ADD, res, nil )	// network OK'd it, so add it to the inventory
+		req = <- my_ch										// wait for completion
+
+		if req.State == nil {
+			ckptreq := ipc.Mk_chmsg( )
+			ckptreq.Send_req( rmgr_ch, nil, REQ_CHKPT, nil, nil )	// request a chkpt now, but don't wait on it
+			reason = fmt.Sprintf( "passthru reservation accepted" )
+			jreason =  res.To_json()
+		} else {
+			nerrors++
+			reason = fmt.Sprintf( "%s", req.State )
+		}
+
+		if res_paused {
+			rm_sheep.Baa( 1, "reservations are paused, passthru reservation accepted reservation will not be pushed until resumed" )
+			res.Pause( false )								// when paused we must mark the reservation as paused and pushed so it doesn't push until resume received
+			res.Set_pushed( )
+		}
+	} else {
+		reason = fmt.Sprintf( "passthru reservation rejected: %s", req.State )
+		nerrors++
+	}
+
+	return
+}
+
 
 // ---- main parsers ------------------------------------------------------------------------------------
 /*
@@ -795,7 +908,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 													} else {
 														http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
 														state = "ERROR"
-														nerrors += ecount - 1
+														nerrors += ecount - 1			// record 1 less here as nerrors increased at end when state is error
 													}
 
 												// refresh not supported for other types
@@ -876,7 +989,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							if ecount == 0 {
 								state = "OK"
 							} else {
-								nerrors += ecount - 1 												// number of errors added to the pile by the call
+								nerrors += ecount - 1 												// record 1 less here as nerrors increased at end when state is error
 							}
 						} else {
 							if err == nil {
@@ -943,7 +1056,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 						if ecount == 0 {
 							state = "OK"
 						} else {
-							nerrors += ecount - 1 												// number of errors added to the pile by the call
+							nerrors += ecount - 1 											// record 1 less here as when state is ERROR below nerrors is updated
 						}
 					} else {
 						if err == nil {
@@ -972,6 +1085,50 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							}
 						}
 					}
+
+				case "passthru":
+					var res *gizmos.Pledge_pass
+
+						key_list := "window host cookie"						// positional parameters supplied after any key/value pairs
+						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
+						ok, mlist := gizmos.Map_has_all( tmap, key_list )		// check to ensure all expected parms were supplied
+						if !ok {
+							nerrors++
+							reason = fmt.Sprintf( "missing parameters: (%s); usage: passthru {[<start>-]<end-time>|+sec} <host1> cookie; received: %s", mlist, recs[i] );
+							break
+						}
+
+						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
+						host := *tmap["host"]											// get the host (VM) name
+
+						res = nil
+						host, port, vlan, err := validate_one_host( host )			// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+
+						if err == nil {
+							update_graph( &host, true, true )						// pull all of the VM information from osif then send to fqmgr and netmgr (block until netmgr accepts it)
+
+							res_name := mk_resname( )								// name used to track the reservation in the cache and given to queue setting commands for visual debugging
+							res, err = gizmos.Mk_pass_pledge( &host,  port, startt, endt, &res_name, tmap["cookie"] )
+						}
+
+						if res != nil {												// able to make the reservation, continue and try to find a path with bandwidth
+							res.Set_vlan( vlan )									// augment the rest of the reservation
+							if tmap["prot"] != nil {
+								res.Set_proto( tmap["proto"] )
+							}
+
+							reason, jreason, ecount = finalise_pt_res( res, res_paused )			// check for dup, ensure good ulcap, and add to res manager inventory if all ok
+							if ecount == 0 {
+								state = "OK"
+							} else {
+								nerrors += ecount - 1 												// record 1 less here; if ERROR then nerrors increased at end of loop
+							}
+						} else {
+							if err == nil {
+								err = fmt.Errorf( "specific reason unknown" )						// ensure we have something for message
+							}
+							reason = fmt.Sprintf( "reservation rejected: %s", err )
+						}
 
 			case "steer":								// parse a steering request and make it happen
 					var res *gizmos.Pledge_steer
@@ -1089,11 +1246,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							} else {
 								reason = fmt.Sprintf( "unable to translate name: %s", tokens[1] )
 								state = "ERROR"
-								nerrors++
 							}
 						} else {
-							state = "ERROR"
-							nerrors++
+							state = "ERROR"			// nerrors incremented at end when error is set
 							reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
 						}
 					}
@@ -1107,8 +1262,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							state = "OK"
 						} else {
 							reason = fmt.Sprintf( "incorrect number of parameters received (%d); amount|percentage", ntokens )
-							nerrors++
-							state = "ERROR"
+							state = "ERROR"			// nerrors incremented at end when error is set
 						}
 					}
 

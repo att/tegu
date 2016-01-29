@@ -36,7 +36,6 @@
 package gizmos
 
 import (
-	"os"
 	"fmt"
 	"time"
 )
@@ -291,7 +290,6 @@ func (p *pledge_window) is_extinct( window int64 ) ( bool ) {
 */
 func (p *pledge_window) overlaps( p2 *pledge_window ) ( bool ) {
 	if p == nil || p2 == nil {
-fmt.Fprintf( os.Stderr, ">>>> one/both are nil %v | %v\n", p, p2 )
 		return false
 	}
 

@@ -87,6 +87,7 @@
 				17 Dec 2015 - Correct nil pointer crash trying to fill in the vm map.
 				09 Jan 2016 - Fixed some "go vet" problems.
 				10 Jan 2016 - Corrected typo in printf statement.
+				27 Jan 2016 - Added ability to query user cap value.
 */
 
 package managers
@@ -160,6 +161,10 @@ func (n *Network) Set_relaxed( state bool ) {
 	if n != nil {
 		n.relaxed = state
 	}
+}
+
+func (n *Network) Is_relaxed( ) ( bool ) {
+	return n.relaxed
 }
 
 /*
@@ -337,6 +342,23 @@ func (n *Network) get_fence( usr *string ) ( *gizmos.Fence ) {
 	}
 
 	return fence
+}
+
+/*	Given a user name find a fence in the table and return the maximum value.
+	If there is no fence, 0 is returned.
+*/
+func (n *Network) get_fence_max( usr *string ) ( int64 ) {
+
+	if usr == nil {
+		return 0
+	}
+
+	fence := n.limits[*usr] 								// get the default fence settings for the user or the overall defaults if none supplied for the user
+	if fence != nil {
+		return fence.Get_limit_max()
+	}
+
+	return 0
 }
 
 /*
@@ -1181,6 +1203,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							src, dest := p.Get_hosts( )									// we assume project/host-name
 
 							if src != nil && dest != nil {
+
 								net_sheep.Baa( 1,  "network: bwow reservation request received: %s -> %s", *src, *dest )
 
 								usr := "nobody"											// default dummy user if not project/host
@@ -1192,38 +1215,42 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 								ips, err := act_net.name2ip( src )
 								if err == nil {
 									ipd, _ = act_net.name2ip( dest )				// for an external dest, this can be nil which is not an error
-								}
+								} 
+								if ips != nil {
+									sh := act_net.hosts[*ips]
+									if ipd != nil {
+										dh = act_net.hosts[*ipd]						// this will be nil for an external IP
+									}
+									ssw, _ := sh.Get_switch_port( 0 )
+									gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
+									if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address
+										gate.Set_extip( dest )
+									}
 
-								sh := act_net.hosts[*ips]
-								if ipd != nil {
-									dh = act_net.hosts[*ipd]						// this will be nil for an external IP
-								}
-								ssw, _ := sh.Get_switch_port( 0 )
-								gate := gizmos.Mk_gate( sh, dh, ssw, p.Get_bandwidth(), usr )
-								if (*dest)[0:1] == "!" || dh == nil {			// indicate that dest IP cannot be converted to a MAC address
-									gate.Set_extip( dest )
-								}
+									c, e := p.Get_window( )														// commence/expiry times
+									fence := act_net.get_fence( &usr )
+									max := int64( -1 )
+									if fence != nil {
+										max = fence.Get_limit_max()
+									}
+									if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
+										qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
+										p.Set_qid( qid ) 												// and add the queue id to the pledge
 
-								c, e := p.Get_window( )														// commence/expiry times
-								fence := act_net.get_fence( &usr )
-								max := int64( -1 )
-								if fence != nil {
-									max = fence.Get_limit_max()
-								}
-								if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
-									qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
-									p.Set_qid( qid ) 												// and add the queue id to the pledge
-
-									if gate.Add_queue( c, e, p.Get_bandwidth(), qid, fence ) {		// create queue AND inc utilisation on the link
-										req.Response_data = gate									// finally safe to set gate as the return data
-										req.State = nil												// and nil state to indicate OK
+										if gate.Add_queue( c, e, p.Get_bandwidth(), qid, fence ) {		// create queue AND inc utilisation on the link
+											req.Response_data = gate									// finally safe to set gate as the return data
+											req.State = nil												// and nil state to indicate OK
+										} else {
+											net_sheep.Baa( 1, "owreserve: internal mishap: unable to set queue for gate: %s", gate )
+											req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
+										}
 									} else {
-										net_sheep.Baa( 1, "owreserve: internal mishap: unable to set queue for gate: %s", gate )
-										req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
+										net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
+										req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
 									}
 								} else {
-									net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
-									req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
+									net_sheep.Baa( 1, "cant map %s to ip: %s", src )
+									req.State = fmt.Errorf( "unable to create oneway reservation in network cannot map src (%s) to an IP address", src )
 								}
 							} else {
 								net_sheep.Baa( 1, "owreserve: one/both host names were invalid" )
@@ -1324,8 +1351,24 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
 						}
 
-
-
+					case REQ_PT_RESERVE:						// passthru reservations are allowed only in relaxed mode and only if user has link capacity set
+						req.Response_data = false				// assume bad
+						if req.Req_data != nil {
+							if act_net.Is_relaxed() {
+								u := req.Req_data.( *string )
+								if act_net.get_fence_max( u ) > 0 {
+									req.Response_data = true
+								} else {
+									req.State = fmt.Errorf( "user link capacity <= 0" )
+								}
+							} else {
+								req.State = fmt.Errorf( "passthru reservations not allowed in full path mode (relaxed is false)" )
+							}
+			
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" )
+						}
+					
 					case REQ_DEL:									// delete the utilisation for the given reservation
 						switch p := req.Req_data.( type ) {
 							case *gizmos.Pledge_bw:
@@ -1486,7 +1529,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						} else {
 							req.State = fmt.Errorf( "no data passed on request channel" )
 						}
-					
 					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
 						if req.Req_data != nil {
 							ip, mac, swid, port, err := act_net.host_info(  req.Req_data.( *string ) )

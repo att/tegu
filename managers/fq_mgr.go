@@ -741,6 +741,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				send_bw_fmods( fdata, ip2mac, phost_suffix )
 				msg.Response_ch = nil					// nothing goes back from this
 
+			case REQ_PT_RESERVE:						// DSCP passthru flow-mods need to be generated
+				fdata = msg.Req_data.( *Fq_req );
+				send_pt_fmods( fdata, ip2mac, phost_suffix )
+				msg.Response_ch = nil
+
 			case REQ_IE_RESERVE:						// proactive ingress/egress reservation flowmod  (this is likely deprecated as of 3/21/2015 -- resmgr invokes the bw_fmods script via agent)
 				fdata = msg.Req_data.( *Fq_req ); 		// user view of what the flow-mod should be
 

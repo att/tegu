@@ -241,7 +241,38 @@ func ( fq *Fq_req ) To_bwow_map( ) ( fmap map[string]string ) {
 
 	if fq_sheep.Would_baa( 2 ) {
 		for k, v := range fmap {
-			fq_sheep.Baa( 2, "fq_req to action id=%s %s = %s", fq.Id, k, v )
+			fq_sheep.Baa( 2, "fq_req to action id=%s %s = %s", *fq.Id, k, v )
+		}
+	}
+
+	return
+}
+
+/*
+	Build a map suitable for use as parms for a passthrough request to the agent manager.
+			build_opt( parms["smac"], "-s" ) +				// smac can (and should) be an endpoint UUID which is converted to mac/bridge on the host
+			build_opt( parms["sip"], "-S" ) +				// sip is [proto:][addr:][port] where either proto or address must be supplied
+			build_opt( parms["timeout"],  "-t" )
+*/
+func ( fq *Fq_req ) To_pt_map( ) ( fmap map[string]string ) {
+	fmap = make( map[string]string )
+
+	if fq == nil {
+		return
+	}
+
+	if fq.Match.Smac != nil {					// could be endpoint, but likely mac in the original Tegu.
+		fmap["smac"] = *fq.Match.Smac
+	} else {
+		fmap["smac"] = ""						// agent likely to barf on this
+	}
+
+	fmap["timeout"] =  fmt.Sprintf( "%d", fq.Expiry - time.Now().Unix() )
+	fmap["sip"] = *fq.Match.Ip1								// will be [{udp|tcp}:]address[:port]
+
+	if fq_sheep.Would_baa( 3 ) {
+		for k, v := range fmap {
+			fq_sheep.Baa( 3, "to_pt_map: fq_req value -> action id=%s %s = %s", *fq.Id, k, v )
 		}
 	}
 

@@ -41,11 +41,15 @@ import (
 
 //import "github.com/att/tegu"
 
+// DANGER:  do NOT change the order of these as the values end up hard coded in the checkpoint file
+//			once datacache is implemented there is no danger, but until then bad things will happen
+//			if the order is not preserved.  Add new ones to the end!
 const (
 	PT_BANDWIDTH	int = iota				// pledge types
 	PT_STEERING
 	PT_MIRRORING
 	PT_OWBANDWIDTH							// one way bandwidth
+	PT_PASSTHRU								// passthrough dscp marking reservation
 )
 
 var (
