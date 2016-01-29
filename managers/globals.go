@@ -156,6 +156,7 @@ const (
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
 	REQ_PT_RESERVE				// passthru reservation
+	REQ_GETULCAP				// get the current user limit cap maximum value
 )
 
 const (

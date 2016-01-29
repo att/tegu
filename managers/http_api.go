@@ -548,7 +548,8 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 	an overall status and a status of each request that was received from the outside world.
 
 	This function will also check for a duplicate pledge already in the inventory and reject it
-	if a dup is found.
+	if a dup is found. As a final check the user limit capacity is checked (network) and if it is not greater than
+	0, the reservation is rejected; user must be allowed bandwidth capacity to mark their own traffic.
 */
 func finalise_pt_res( res *gizmos.Pledge_pass, res_paused bool ) ( reason string, jreason string, nerrors int ) {
 
@@ -560,9 +561,9 @@ func finalise_pt_res( res *gizmos.Pledge_pass, res_paused bool ) ( reason string
 	defer close( my_ch )									// close it on return
 
 	req := ipc.Mk_chmsg( )
-	gp := gizmos.Pledge( res )								// convert to generic pledge to pass
+	gp := gizmos.Pledge( res )								// convert to generic pledge
 	req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
-	req = <- my_ch											// get response from the network thread
+	req = <- my_ch											// get response from the res mgr thread
 	if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
 		rp := req.Response_data.( *string )
 		if rp != nil {
@@ -572,8 +573,26 @@ func finalise_pt_res( res *gizmos.Pledge_pass, res_paused bool ) ( reason string
 		}
 	}
 
-	host, _ := res.Get_hosts()
-	rm_sheep.Baa( 1, "requesting phys host for: %s\n", *host )
+	host, _ := res.Get_hosts()								// ---- verify that the ulcap for the project is > 0 ---------
+	tokens := strings.Split( *host, "/" )					// split project/endpoint
+	if len( tokens ) < 2 {
+		nerrors = 1
+		http_sheep.Baa( 1, "reject passthru: endpoint was not project/endpointL %s", host )
+		reason = fmt.Sprintf( "host name was not project/endpoint; unable to validate user limit without project" )
+		return
+	}
+
+	req = ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, my_ch, REQ_GETULCAP, &tokens[0], nil )	// see if we have a duplicate in the cache
+	req = <- my_ch												// get response from the network thread
+	ulcap := req.Response_data.( int64 )
+	if ulcap <= 0 {
+		nerrors = 1
+		http_sheep.Baa( 1, "reject passthru: user cap for project is 0: %s", tokens[0] )
+		reason = fmt.Sprintf( "passthru reservation not permitted: ulcap <= 0 for %s", tokens[0] )
+		return
+	}
+
 	req = ipc.Mk_chmsg( )
 	req.Send_req( nw_ch, my_ch, REQ_GETPHOST, host, nil )	// send to network to translate the VM ID into a physical host name
 	req = <- my_ch											// get response from the network thread
@@ -889,7 +908,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 													} else {
 														http_sheep.Baa( 1, "unable to finalise refresh for pledge: %s", reason )
 														state = "ERROR"
-														nerrors += ecount - 1
+														nerrors += ecount - 1			// record 1 less here as nerrors increased at end when state is error
 													}
 
 												// refresh not supported for other types
@@ -970,7 +989,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							if ecount == 0 {
 								state = "OK"
 							} else {
-								nerrors += ecount - 1 												// number of errors added to the pile by the call
+								nerrors += ecount - 1 												// record 1 less here as nerrors increased at end when state is error
 							}
 						} else {
 							if err == nil {
@@ -1037,7 +1056,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 						if ecount == 0 {
 							state = "OK"
 						} else {
-							nerrors += ecount - 1 												// number of errors added to the pile by the call
+							nerrors += ecount - 1 											// record 1 less here as when state is ERROR below nerrors is updated
 						}
 					} else {
 						if err == nil {
@@ -1098,11 +1117,11 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 								res.Set_proto( tmap["proto"] )
 							}
 
-							reason, jreason, ecount = finalise_pt_res( res, res_paused )			// check for dup, allocate in network, and add to res manager inventory
+							reason, jreason, ecount = finalise_pt_res( res, res_paused )			// check for dup, ensure good ulcap, and add to res manager inventory if all ok
 							if ecount == 0 {
 								state = "OK"
 							} else {
-								nerrors += ecount - 1 												// number of errors added to the pile by the call
+								nerrors += ecount - 1 												// record 1 less here; if ERROR then nerrors increased at end of loop
 							}
 						} else {
 							if err == nil {
@@ -1227,11 +1246,9 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							} else {
 								reason = fmt.Sprintf( "unable to translate name: %s", tokens[1] )
 								state = "ERROR"
-								nerrors++
 							}
 						} else {
-							state = "ERROR"
-							nerrors++
+							state = "ERROR"			// nerrors incremented at end when error is set
 							reason = fmt.Sprintf( "incorrect number of parameters received (%d); expected tenant-name limit", ntokens )
 						}
 					}
@@ -1245,8 +1262,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 							state = "OK"
 						} else {
 							reason = fmt.Sprintf( "incorrect number of parameters received (%d); amount|percentage", ntokens )
-							nerrors++
-							state = "ERROR"
+							state = "ERROR"			// nerrors incremented at end when error is set
 						}
 					}
 

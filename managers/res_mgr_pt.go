@@ -71,10 +71,8 @@ func pass_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 	}
 
 	host, _,  _, expiry, proto := p.Get_values( )			// reservation info that we need
-	//v1, v2 := p.Get_vlan( )								// vlan match criteria for one/both endpoints
 
 	ip := name2ip( host )
-rm_sheep.Baa( 1, ">>>>> host name %s converted to ip address for freq", *host, *ip )
 
 	if ip != nil {											// good ip addresses so we're good to go
 		freq := Mk_fqreq( rname )						// default flow mod request with empty match/actions (for bw requests, we don't need priority or such things)
