@@ -115,7 +115,8 @@ function validate_contains
 		then
 			echo "OK:   $global_comment"
 		else
-			echo "FAIL: $fmsg, but did not contain expected data: $global_comment"
+			echo "FAIL: $fmsg, but did not contain expected data: ($2)"
+			echo "	log eye catcher: $global_comment"
 			(( errors++ ))
 			if (( short_circuit ))
 			then
@@ -423,6 +424,7 @@ capture $single_file "reservation with bad project is rejsected"
 validate_fail $single_file
 
 
+#====== LINK CAPACITY TESTING ==================================================================
 # ----- verify user link caps can be set ------------------------------------
 run tegu_req -c $secure $host setulcap $project1 1 >$single_file
 capture $single_file "can set user link cap (1%)"
@@ -455,7 +457,7 @@ capture $single_file "user link cap can be set back up (90%)"
 validate_ok $single_file
 
 
-# ------ oneway reservation testing ------------------------------------------------
+# ====== ONEWAY RESERVATION TESTING =====================================================================================
 run tegu_req -c -T $secure $host owreserve 10M +90 %t//${p1vm_list[0]},!//135.207.43.60 owcookie voice >$single_file
 capture $single_file "oneway reservation can be created"
 validate_ok $single_file
@@ -479,7 +481,51 @@ else
 	echo "SKIP: skipping oneway cancel test: no reservation id found"
 fi
 
-# ------ multi-project "half" reservations
+
+# ======== PASSTHRU TESTING =========================================================================================
+run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
+capture $single_file "passthru reservation can be created"
+validate_ok $single_file
+
+suss_rid $single_file | read rid
+if [[ -n $rid ]]
+then
+	run tegu_req -c $secure $host cancel all ptcookie >$single_file
+	capture $single_file "passthru reservation can be cancelled"
+	validate_ok $single_file
+	echo "INFO: pausing 20s to let cancel fall off"
+	run tegu_req -c $secure $host listres >$single_file
+	sleep 20
+	run tegu_req -c $secure $host listres | grep -c $rid |read count
+	if (( count ))
+	then
+		echo "FAIL: still found passthru reservation in list after cancel"
+		capture $single_file "reservation list active when passthru check failed (res=$rid)"
+	else
+		echo "OK:   passthru reservation cancel successfully removed the resrvation from the list"
+	fi
+else
+	echo "SKIP: skipping passthur cancel test: no reservation id found"
+fi
+
+# ---- set the ulcap to 0 to see that passthru is rejected -------------------------------
+run tegu_req -c $secure $host setulcap $project1 0 >$single_file
+capture $single_file "set ulcap to 0 to ensure it blocks passthru"
+validate_contains $single_file 'comment = user link cap set for.*0[%]*$'
+
+run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
+capture $single_file "passthru reservation can is rejected if ulcap is 0"
+validate_fail $single_file
+
+
+# ---- return link cap to sane value ----------------------------------------------------
+run tegu_req -c $secure $host setulcap $project1 90 >$single_file
+capture $single_file "user link cap can be set back up (90%)"
+validate_ok $single_file
+
+
+
+# ====== MULTI-PROJECT "HALF" RESERVATIONS ===============================================================================
 #trace="set -x"
 run tegu_req -c -T $secure $host reserve 5M +30 %t/$project1/${p1vm_list[0]},!//${external_ip} cookie voice >$single_file
 capture $single_file "can make half of a multi project reservation"
