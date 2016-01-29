@@ -163,6 +163,10 @@ func (n *Network) Set_relaxed( state bool ) {
 	}
 }
 
+func (n *Network) Is_relaxed( ) ( bool ) {
+	return n.relaxed
+}
+
 /*
 	Using the various vm2 and ip2 maps, build the host array as though it came from floodlight.
 */
@@ -1347,8 +1351,24 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							req.State = fmt.Errorf( "unable to create reservation in network, internal data corruption." )
 						}
 
-
-
+					case REQ_PT_RESERVE:						// passthru reservations are allowed only in relaxed mode and only if user has link capacity set
+						req.Response_data = false				// assume bad
+						if req.Req_data != nil {
+							if act_net.Is_relaxed() {
+								u := req.Req_data.( *string )
+								if act_net.get_fence_max( u ) > 0 {
+									req.Response_data = true
+								} else {
+									req.State = fmt.Errorf( "user link capacity <= 0" )
+								}
+							} else {
+								req.State = fmt.Errorf( "passthru reservations not allowed in full path mode (relaxed is false)" )
+							}
+			
+						} else {
+							req.State = fmt.Errorf( "no data passed on request channel" )
+						}
+					
 					case REQ_DEL:									// delete the utilisation for the given reservation
 						switch p := req.Req_data.( type ) {
 							case *gizmos.Pledge_bw:
@@ -1509,16 +1529,6 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						} else {
 							req.State = fmt.Errorf( "no data passed on request channel" )
 						}
-
-					case REQ_GETULCAP:							// returns the current max user limit capacity or 0 if user has none.
-						req.State = nil							// we never error on this
-						if req.Req_data != nil {
-							u := req.Req_data.( *string )
-							req.Response_data = act_net.get_fence_max( u )
-						} else {
-							req.Response_data = 0
-						}
-					
 					case REQ_HOSTINFO:							// generate a string with mac, ip, switch-id and switch port for the given host
 						if req.Req_data != nil {
 							ip, mac, swid, port, err := act_net.host_info(  req.Req_data.( *string ) )

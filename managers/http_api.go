@@ -548,7 +548,7 @@ func finalise_bwow_res( res *gizmos.Pledge_bwow, res_paused bool ) ( reason stri
 	an overall status and a status of each request that was received from the outside world.
 
 	This function will also check for a duplicate pledge already in the inventory and reject it
-	if a dup is found. As a final check the user limit capacity is checked (network) and if it is not greater than
+	if a dup is found. As a final check the user link capacity is checked (network) and if it is not greater than
 	0, the reservation is rejected; user must be allowed bandwidth capacity to mark their own traffic.
 */
 func finalise_pt_res( res *gizmos.Pledge_pass, res_paused bool ) ( reason string, jreason string, nerrors int ) {
@@ -578,18 +578,18 @@ func finalise_pt_res( res *gizmos.Pledge_pass, res_paused bool ) ( reason string
 	if len( tokens ) < 2 {
 		nerrors = 1
 		http_sheep.Baa( 1, "reject passthru: endpoint was not project/endpointL %s", host )
-		reason = fmt.Sprintf( "host name was not project/endpoint; unable to validate user limit without project" )
+		reason = fmt.Sprintf( "host name was not project/endpoint; unable to validate passthru reservation project" )
 		return
 	}
 
 	req = ipc.Mk_chmsg( )
-	req.Send_req( nw_ch, my_ch, REQ_GETULCAP, &tokens[0], nil )	// see if we have a duplicate in the cache
-	req = <- my_ch												// get response from the network thread
-	ulcap := req.Response_data.( int64 )
-	if ulcap <= 0 {
+	req.Send_req( nw_ch, my_ch, REQ_PT_RESERVE, &tokens[0], nil )	// must have network approval too
+	req = <- my_ch													// wait for response
+	ok := req.Response_data.( bool )
+	if !ok  {
 		nerrors = 1
-		http_sheep.Baa( 1, "reject passthru: user cap for project is 0: %s", tokens[0] )
-		reason = fmt.Sprintf( "passthru reservation not permitted: ulcap <= 0 for %s", tokens[0] )
+		http_sheep.Baa( 1, "reject passthru: %s: %s", tokens[0], req.State )
+		reason = fmt.Sprintf( "%s", req.State )
 		return
 	}
 

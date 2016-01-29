@@ -129,7 +129,7 @@ import (
 */
 type Inventory struct {
 	cache		map[string]*gizmos.Pledge		// cache of pledges
-	ulcap_cache	map[string]int					// cache of user limit values (max value)
+	ulcap_cache	map[string]int					// cache of user link capacity values (max value)
 	chkpt		*chkpt.Chkpt
 }
 
