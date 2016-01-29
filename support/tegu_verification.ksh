@@ -27,6 +27,11 @@
 #---------------------------------------------------------------------------------
 
 
+function log_failure
+{
+	echo "$1"
+	echo "$1" >>$out_file
+}
 
 # check the file for a simple ERROR or not. Return good (0)
 # if error not observed.
@@ -64,7 +69,7 @@ function validate_ok
 {
 	if ! isok $1
 	then
-		echo "FAIL: $global_comment"
+		log_failure "FAIL: $global_comment"
 		(( errors++ ))
 		if (( short_circuit ))
 		then
@@ -81,7 +86,7 @@ function validate_fail
 {
 	if isok $1
 	then
-		echo "FAIL: $global_comment"
+		log_failure "FAIL: $global_comment"
 		(( errors++ ))
 		if (( short_circuit ))
 		then
@@ -115,7 +120,7 @@ function validate_contains
 		then
 			echo "OK:   $global_comment"
 		else
-			echo "FAIL: $fmsg, but did not contain expected data: ($2)"
+			log_failure "FAIL: $fmsg, but did not contain expected data: ($2)"
 			echo "	log eye catcher: $global_comment"
 			(( errors++ ))
 			if (( short_circuit ))
@@ -125,7 +130,7 @@ function validate_contains
 			return
 		fi
 	else
-		echo "FAIL: $global_comment"
+		log_failure "FAIL: $global_comment"
 		(( errors++ ))
 		if (( short_circuit ))
 		then
@@ -156,7 +161,7 @@ function validate_missing
 		then
 			echo "OK:   $global_comment"
 		else
-			echo "FAIL: $fmsg, but contained unexpected data: ($2) $global_comment"
+			log_failure "FAIL: $fmsg, but contained unexpected data: ($2) $global_comment"
 			(( errors++ ))
 			if (( short_circuit ))
 			then
@@ -165,7 +170,7 @@ function validate_missing
 			return
 		fi
 	else
-		echo "FAIL: $global_comment"
+		log_failure "FAIL: $global_comment"
 		(( errors++ ))
 		return
 	fi
@@ -324,7 +329,7 @@ for v in $p1vm_list
 do
 	if ! grep -q "${endpts[$v]}" $single_file
 	then
-		echo "FAIL: $v (${endpts[$v]}) not found in list host output for project $project1"
+		log_failure "FAIL: $v (${endpts[$v]}) not found in list host output for project $project1"
 		(( count++ ))
 	fi
 done
@@ -433,12 +438,12 @@ validate_contains $single_file 'comment = user link cap set for.*1[%]*$'
 # ----- verify link cap is enforced (assuming 10G links, with 1% cap, a request for 500M should fail) ---------------------
 #trace="set -x"
 run tegu_req -c -T $secure $host reserve 500M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
-capture $single_file "reservation rejected when exceeds user cap"
+capture $single_file "reservation rejected when exceeds user cap (failure in relaxed mode is OK)"
 validate_contains -f $single_file "unable to generate a path"
 trace="set +x"
 
 run tegu_req -c -T $secure $host reserve 5M +90 %t/$project1/${p1vm_list[0]},%t/$project1/${p1vm_list[1]} cookie voice >$single_file
-capture $single_file "reservation accepted when less than link cap"
+capture $single_file "reservation accepted when less than link cap (failure in relaxed mode is OK)"
 validate_ok $single_file
 
 # ---- set zero link cap ----------------------------------------------------
@@ -473,7 +478,7 @@ then
 	run tegu_req -c $secure $host listres | grep -c $rid |read count
 	if (( count ))
 	then
-		echo "FAIL: still found oneway reservation in list after cancel"
+		log_failure "FAIL: still found oneway reservation in list after cancel"
 	else
 		echo "OK:   oneway reservation cancel successfully removed the resrvation from the list"
 	fi
@@ -484,7 +489,7 @@ fi
 
 # ======== PASSTHRU TESTING =========================================================================================
 run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
-capture $single_file "passthru reservation can be created"
+capture $single_file "passthru reservation can be created (failure if relaxed=false is expected)"
 validate_ok $single_file
 
 suss_rid $single_file | read rid
@@ -499,7 +504,7 @@ then
 	run tegu_req -c $secure $host listres | grep -c $rid |read count
 	if (( count ))
 	then
-		echo "FAIL: still found passthru reservation in list after cancel"
+		log_failure "FAIL: still found passthru reservation in list after cancel"
 		capture $single_file "reservation list active when passthru check failed (res=$rid)"
 	else
 		echo "OK:   passthru reservation cancel successfully removed the resrvation from the list"
@@ -514,13 +519,13 @@ capture $single_file "set ulcap to 0 to ensure it blocks passthru"
 validate_contains $single_file 'comment = user link cap set for.*0[%]*$'
 
 run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
-capture $single_file "passthru reservation can is rejected if ulcap is 0"
+capture $single_file "passthru reservation is rejected if ulcap is 0"
 validate_fail $single_file
 
 
 # ---- return link cap to sane value ----------------------------------------------------
 run tegu_req -c $secure $host setulcap $project1 90 >$single_file
-capture $single_file "user link cap can be set back up (90%)"
+capture $single_file "reset ulcap back up after passthru reject test (cap=90%)"
 validate_ok $single_file
 
 
@@ -553,7 +558,7 @@ capture $single_file "canceling all with non-matching cookie leave non-matching 
 grep -c time $single_file.more | read count
 if (( count <= 0 ))
 then
-	echo "FAIL:	cancel all reservations with cookie leave non-matching reservations"
+	log_failure "FAIL:	cancel all reservations with cookie leave non-matching reservations"
 else
 	echo "OK:   cancel all left non-matching reservations"
 fi
@@ -565,8 +570,9 @@ tegu_req -c $host $secure listres >$single_file
 grep  "time =" $single_file| awk '($NF)+0 > 15 { count++ } END { print count+0 }' | read count
 if (( count > 0 ))
 then
-	echo "FAIL:	reservations with cookie remain"
-	capture $single_file "cookie reservations remained (expected all to be deleted)"
+	log_failure "FAIL:	reservations with cookie remain"
+	echo "NOTE:  this can happen if reservations that _should_ have been deleted earlier still exist" >>$out_file
+	capture $single_file "$count cookie reservations remained with time >15s  (reservation dump below)"
 	grep  "time =" $single_file| grep  -v "time.*=.*15"
 else
 	echo "OK:   delete of all reservations with the same cookie"
