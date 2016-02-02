@@ -93,6 +93,7 @@
 #				18 Jan 2016 - Added ability to detect and properly handle a source TCP address (e.g.
 #								token/project/endpoint/123.45.67.89[:port][{vlan}] can be supplied on the 
 #								reservation to Tegu which yields -P {tcp|udp}[:address]:{port|0}. 
+#								Deprecated running on remote host with -h option.
 # ---------------------------------------------------------------------------------------------------------
 
 function cleanup
@@ -143,9 +144,10 @@ function uuid2mac
 	grep "$1" ${ovs_data:-/dev/null} | awk '{ print $5, $7, $3, $8 }'		#  mac, vlan, port, bridge
 }
 
-# given a bridge name, find the qosirl0 port number (port that attaches a main bridge to the rate limiting bridge)
-# port is written on stdout for caller
-function get_rlport
+# given a bridge name, find the qosirl0 and qosirl10 port numbers (irl0 is out, irl10 is in)
+# port numbers are written on stdout for caller (out in).  qosirl1 is a port on the rate limiting
+# bridge.
+function get_rlports
 {
 	#CAUTION: don't write to stdout other than the port from awk
 
@@ -158,48 +160,18 @@ function get_rlport
 	suss_ovs_data
 
 	awk -v bridge="$1" '
-		BEGIN { port = -1 }
-		/^port: / &&  $8 == bridge  && $4 == "qosirl0" {
-			port = $3
-			exit( 0 )
+		BEGIN { 
+			iport = -1 
+			oport = -1 
+			otarget = bridge "-qosirl0"
+			itarget = bridge "-qosirl10"
 		}
+		/^port: / &&  $8 == bridge  && $4 == otarget { oport = $3; next; }
+		/^port: / &&  $8 == bridge  && $4 == otarget { iport = $3; next; }
 		END {
-			printf( "%d\n", port )				# just out the port
+			printf( "%d %d\n", oport, iport )		# dump the output and input port numbers
 		}
 	' $ovs_data
-}
-
-# accept proto:[address:]port and split them echoing three strings: proto, addr, port
-# if address is missing the string 'none' is echoed
-function split_pap
-{
-	typeset proto=${1%%:*}		# strip off protocol
-	typeset rest=${1#*:}		# address:port or just port
-
-	case $rest in 
-		\[*\]:)					# ipv6 address:port
-			typeset addr="${rest%%]*}"
-			ip_type="-6"								# must force the type
-			echo "$proto ${addr##*\[} ${rest##*]:}"
-			;;
-
-		\[*)					# ipv6 address
-			typeset addr="${rest%%]*}"
-			echo "$proto ${addr##*\[} 0"
-			;;
-
-		*.*.*.*:)					# ipv4:port
-			echo "$proto ${rest%%:*} ${rest##*:}"
-			;;
-
-		*.*.*.*)					# ipv4
-			echo "$proto ${rest%%:*} 0"
-			;;
-
-		*)						# just port
-			echo "$proto none $rest"
-			;;
-	esac
 }
 
 # ----------------------------------------------------------------------------------------------------------
@@ -215,7 +187,6 @@ rmac=""					# remote mac	src inbound, dest outbound
 queue=""
 idscp=""
 odscp=""
-host=""
 forreal=""
 pri_base=0				# priority is bumpped up a bit for protocol specific f-mods
 vp_base=0				# priority added if vlan match supplied (outbound)
@@ -247,10 +218,18 @@ do
 	case $1 in
 		-6)		ip_type="-6";;								# force ip6 option to be given to send_ovs_fmod (outbound only).
 		-b)		mt_base="$2"; shift;;
-		-d)		uuid2mac "$2" | read rmac dvlan dofport dbridge junk; shift;;	# get the mac, vlan, bridge and openflow port from ovs based on neutron uuid
+		-d)		uuid2mac "$2" | read rmac dvlan dofport dbridge junk; 	# get the mac, vlan, bridge and openflow port from ovs based on neutron uuid
+				duuid=$2												# could be needed for rate limiting if they reversed -s and -d
+				shift
+				;;
+
 		-D)		ex_local=0;;								# external IP is "associated" with the rmac (-d) address
 		-E)		exip="$2"; shift;;
-		-h)		host="-h $2"; shift;;
+
+		-h)		echo "ERROR: running on a remote host is deprecated; -h is not supported  [FAIL]"
+				exit 1
+				;;
+
 		-k)		koe=1;;
 
 		-n)		forreal="-n"
@@ -260,8 +239,8 @@ do
 
 		-o)		one_switch=1;;
 
-		-P)		pri_base=5;									# source proto:[addr:]port priority must increase to match over more generic f-mods
-				split_pap "$2" | read proto addr port junk	# expect {tcp|udp}:[address:]port
+		-P)		pri_base=5;												# source proto:[addr:]port priority must increase to match over more generic f-mods
+				ql_split_pap "$2" | read proto addr port ip_type junk	# expect {tcp|udp}:[address:]port ip-type-flag
 				if [[ $addr != "none" ]]
 				then
 					ob_netaddr="-S $addr"					# transport protocol address
@@ -273,7 +252,7 @@ do
 				;;		
 
 		-p)		pri_base=5	 								# dest proto:port priority must increase to match over more generic f-mods
-				split_pap "$2" | read proto addr port junk	# expect {tcp|udp}:[address:]port
+				split_pap "$2" | read proto addr port ip_type junk	# expect {tcp|udp}:[address:]port
 				if [[ $addr != "none" ]]
 				then
 					ib_netaddr="-S $addr"					# transport protocol address
@@ -284,8 +263,12 @@ do
 				shift
 				;;		
 
-		-q)		queue="-q $2"; shift;;					# soon to change to meter
-		-s)		uuid2mac "$2" | read lmac svlan sofport sbridge junk; shift;;	# get the mac, vlan and openflow port from ovs based on neutron uuid
+		-q)		queue="-q $2"; shift;;									# soon to change to meter
+		-s)		uuid2mac "$2" | read lmac svlan sofport sbridge junk; 	# get the mac, vlan and openflow port from ovs based on neutron uuid
+				luuid=$2												# we need this to set -R port if rate limiting
+				shift
+				;;
+
 		-S)		ex_local=1;;								# external IP is "associaetd" with the lmac (-s) address.
 		-t)		to_value=$2; timeout="-t $2"; shift;;
 		-T)		odscp="-T $2"; shift;;
@@ -317,6 +300,7 @@ then
 else
 	if (( dofport > 0 ))			# if caller got them backwards
 	then
+		luuid=$duuid					# switch in case we're rate limiting
 		vp_base=5
 		match_port="-i $dofport"		# for outbound fmod
 		match_vlan="-v $dvlan"			# for inbound fmod
@@ -376,54 +360,55 @@ fi
 
 if (( ! one_switch )) && [[ -n ${bandwidth.rate_limit} ]]  &&  [[ " ${bandwidth.rate_limit} "  ==  *" $bridge "* ]]				
 then 			# if this bridge is flagged for rate limiting, push all traffic through the rate limiting extension bridge
-	rl_port=$( get_rlport $bridge )
-	to_rl=" -o $rl_port"					# to/from parms for fmod
-	fr_rl=" -i $rl_port"
+	get_rlports $bridge | read rl_oport rl_iport		# get oubound and inbound ports
 
-	# inbound
-	#	dest is endpoint & traffic NOT from the rl bridge: push traffic on the bridge (no queue)
-	#	dest is endpoint & input port is the rl bridge: output traffic to the endpoint's port
+if (( $rl_iport <= 0 ))		# TESTING
+then
+	rl_iport=$rl_oport
+fi
 	#
 	# outbound
-	#	source is endpoint/IP pair & traffic is NOT from the rl bridge: push traffic on the rl bridge with queue
-	#	source is endpoint & traffic is NOT from the rl bridge: push on rl bridge q==0
-	#	source is endpoint & from rl bridge NORMAL processing
+	#	p900: source is endpoint & from rl bridge: set in-port to the endpoint's port, strip vlan id,  resub (,0) for normal
+	#	p400+base: source is endpoint optionally w/IP and port & traffic is NOT from the rl bridge: push traffic on the rl bridge with queue
+	#
+	# inbound
+	#	dest is endpoint set meta data and resubmit to prevent p10 flow-mod from marking down
+	#		(this flow-mod is not added if koe flag is not set)
+	#
+	# flow-mods must go in in this order, and we must abort if there is a failure. 
 
-	####	send_ovs_fmod $forreal $host $timeout -p xxx  --match $match_vlan $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $ib_lproto $ib_rproto $ib_netaddr --action $queue $idscp -M 0x01 -R ,0 -N $operation ${bandwidth.cookie} $bridge
-	echo "not ready for this quite yet :)"
+	to_rl=" -o $rl_oport"					# to/from parms for fmod
+	fr_rl=" -i $rl_iport"
+	rl_port=JUNK_FIX_THE_CODE
 
+	####	send_ovs_fmod $forreal $timeout -p xxx  --match $match_vlan $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $ib_lproto $ib_rproto $ib_netaddr --action $queue $idscp -M 0x01 -R ,0 -N $operation ${bandwidth.cookie} $bridge
+	echo "WARNING:  not ready for this quite yet :)   Hey watch this...."
 
-	#--send_ovs_fmod      -p 850 -t 180 --match -m 0/0x7 -i 55 -s  fa:de:ad:f8:d0:0e  --action   -M 0x01 -R ,0 -N  add 0xffee br-int
-	# match all traffic off of the rate limiting bridge and route normally
-	if ! send_ovs_fmod	$forreal  -p 800 $timeout --match -m 0/0x7 -i $rl_port --action   -M 0x01 -R ,0 -N  add ${bandwidth.cookie} $bridge			# anything off of rl bridge is send normally
+	# outbound - match traffic from rate limiting bridge
+	# manual prototype: sudo ovs-ofctl -O OpenFlow10 add-flow br-int 'hard_timeout=210,cookie=0xbaff,metadata=0/0x7,dl_src=fa:de:ad:f8:d0:0e,in_port=57,priority=900,action=strip_vlan,set_field:9->in_port,set_field:0x01->metadata,NORMAL'
+	if ! send_ovs_fmod $forreal -p 900 $timeout --match -m 0/0x07 -i $rl_iport -s $lmac  -d $rmac $ob_lproto $ob_rproto $ob_netaddr --action -M 0x01 -V -i $luuid -R ,0 -N  $operation ${bandwidth.cookie} $bridge
 	then
-		logit "could not set rate limiting p 850 (inbund from br0rl) flowmod	[FAIL]"
-		cleanup 1
+		logit "could not set flow-mod to route reservation traffic from rate limiting bridge	[FAIL]"
+		exit 1
 	fi
 
-    # route all arp traffic 'normally'
-    if ! send_ovs_fmod     $forreal -p 550 $timeout --match -a -s $lmac -m 0/0x07 --action  -M 0x01 -R ,0  add ${bandwidth.cookie} $bridge 			# ensure all arp doesn't hit rl
-	then
-		logit "could not set rate limiting p 550 flowmod	[FAIL]"
-		cleanup 1
-	fi
-
-
-#TODO -- add queue
-	# force the reservation traffic to the rate limiting bridge after setting the vlan
-    if ! send_ovs_fmod     $forreal -p $(( pri_base + 400 )) $timeout --match -s $lmac -d $rmac -m 0/0x07 $ip_type $iexip  $ib_lproto $ib_rproto $ib_netaddr --action  -v $svlan -o $rl_port  add ${bandwidth.cookie} $bridge			#res traffic over bridge
+	#TODO -- add queue
+	# outbound: force the reservation traffic to the rate limiting bridge after setting the vlan
+    if ! send_ovs_fmod $forreal -p $(( pri_base + 400 )) $timeout --match -s $lmac -d $rmac -m 0/0x07 $ip_type $iexip  $ob_lproto $ob_rproto $ob_netaddr --action  -v $svlan -o $rl_oport  $operation ${bandwidth.cookie} $bridge
 	then
 		logit "could not set rate limiting p 400 (out to br-rl) flowmod	[FAIL]"
 		cleanup 1
 	fi
 
-	# must push anything inbound to the endpoint  directly as the switch likely things it lives on br-rl
-	if ! send_ovs_fmod      $forreal -p 500 $timeout --match -v $svlan  -d $lmac -m 0/0x07 --action  -V -o $lmac  add ${bandwidth.cookie} $bridge		# send_ovs_fmod allows late binding on -o
+	# inbound -- if outbound fmods were successful, and koe flag, prevent DSCP umarking
+	if (( koe ))
 	then
-		logit "could not set rate limiting p 500 (inbound direct) flowmod	[FAIL]"
-		cleanup 1
+    	if ! send_ovs_fmod $forreal -p $(( pri_base + 300 )) $timeout --match -d $lmac -s $rmac -m 0/0x07 $ip_type $iexip  $ib_lproto $ib_rproto $ib_netaddr --action  -M 0x01 $operation ${bandwidth.cookie} $bridge	# prevent p10 rule from marking down
+		then
+			logit "unable to create inbound flow-mod to prevent DSCP markings from being removed (koe)	[FAIL]"
+			exit 1
+		fi
 	fi
-	
 else
 	# CAUTION:	action options to send_ovs_fmods are probably order dependent, so be careful.
 	# DANGER:	NEVER set queues here, only if bridge is rate limiting and above code will handle
@@ -431,7 +416,7 @@ else
 	then
 		# inbound -- only if they are not on the same switch
 		$trace_on
-		send_ovs_fmod $forreal $host $timeout -p $(( 450 + pri_base )) --match $match_vlan $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $ib_lproto $ib_rproto $ib_netaddr --action $idscp -M 0x01 -R ,0 -N $operation ${bandwidth.cookie} $bridge
+		send_ovs_fmod $forreal $timeout -p $(( 450 + pri_base )) --match $match_vlan $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $ib_lproto $ib_rproto $ib_netaddr --action $idscp -M 0x01 -R ,0 -N $operation ${bandwidth.cookie} $bridge
 		rc=$?
 		$trace_off
 	else
@@ -450,7 +435,7 @@ else
 	fi
 	
 	$trace_on
-	send_ovs_fmod $forreal $host $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip $ob_smac -d $rmac $ob_lproto $ob_rproto $ob_netaddr --action $odscp -M 0x01  -R ,0 -N $operation ${bandwidth.cookie} $bridge
+	send_ovs_fmod $forreal $timeout -p $(( 400 + vp_base + pri_base )) --match  $match_port $ip_type -m 0x0/0x7 $oexip $ob_smac -d $rmac $ob_lproto $ob_rproto $ob_netaddr --action $odscp -M 0x01  -R ,0 -N $operation ${bandwidth.cookie} $bridge
 	(( rc = rc + $? ))
 	$trace_off
 fi
