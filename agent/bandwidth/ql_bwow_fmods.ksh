@@ -51,6 +51,7 @@
 # 	Author: 	E. Scott Daniels
 #
 #	Mods:		17 Jun 2015 - Corrected handling of queue value when 0.
+#				03 Feb 2016 - Tweak to support any destination as a remote endpoint.
 # ---------------------------------------------------------------------------------------------------------
 
 function logit
@@ -126,27 +127,25 @@ then
 	exit 1
 fi
 
-if [[ -n $exip ]]
+open_dest=0
+if [[ $exip == "any" ]]
 then
-	exip="-D $exip"
+	exip=""
+	open_dest=1
+else
+	if [[ -n $exip ]]
+	then
+		exip="-D $exip"
+	fi
 fi
 
-if [[ -n $sproto && -z sip ]]			# must have a source IP if source proto is supplied
+if (( ! open_dest ))					# if not an open destination (!//any not supplied as second host)
 then
-	logit "source IP address required when source prototype is supplied   [FAIL]"
-	exit 1
-fi
-
-if [[ -n $dproto && -z $exip ]]
-then
-	logit "external (-E) ip address required when destionation prototype (-P) given    [FAIL]"
-	exit 1
-fi
-
-if [[ -z $dmac && -z $exip ]]		# fail if both missing
-then
-	logit "must have either destination mac address or external IP address to generate oneway flow-mods; both missing   [FAIL]"
-	exit 1
+	if [[ -z $dmac && -z $exip ]]		# fail if both missing
+	then
+		logit "must have either destination mac address or external IP address to generate oneway flow-mods; both missing   [FAIL]"
+		exit 1
+	fi
 fi
 
 if (( queue > 0 ))
