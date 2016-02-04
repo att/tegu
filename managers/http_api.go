@@ -98,6 +98,9 @@
 				03 Sep 2015 : Added latency option to verbose.
 				12 Nov 2015 : Pulled in httplogger from steering branch.
 				27 Jan 2016 : Added support for passthrough reservations.
+				04 Feb 2016 : Add support for direct protocol type rather than assuming both udp and tcp.
+								Corrected typo in passthru sussing out protocol setting. Added additional
+								error checking to host name in validate hosts function.
 */
 
 package managers
@@ -928,7 +931,17 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 					}
 
 				case "reserve":
-					var res *gizmos.Pledge_bw
+					var (
+						res *gizmos.Pledge_bw
+						h1 string
+						h2 string
+						p1 *string
+						p2 *string
+						v1 *string
+						v2 *string
+						err error
+					)
+
 
 						key_list := "bandw window hosts cookie dscp"			// positional parameters supplied after any key/value pairs
 						tmap := gizmos.Mixtoks2map( tokens[1:], key_list )		// map tokens in order key list names allowing key=value pairs to precede them and define optional things
@@ -949,10 +962,21 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 						}
 
 						startt, endt = gizmos.Str2start_end( *tmap["window"] )		// split time token into start/end timestamps
-						h1, h2 := gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
+						h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
+						htoks := strings.Split( h1, "/" )							// trap bad host names early
+						if len( htoks ) > 3 {
+							err = fmt.Errorf( "invalid host name: %s", h1 )
+						} else {
+							htoks = strings.Split( h2, "/" )
+							if len( htoks ) > 3 {
+								err = fmt.Errorf( "invalid host name: %s", h2 )
+							} else {
+								h1, h2, p1, p2, v1, v2, err = validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
+							}
+						}
+						
 						res = nil
-						h1, h2, p1, p2, v1, v2, err := validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project
 
 						if err == nil {
 							update_graph( &h1, false, false )						// pull all of the VM information from osif then send to netmgr
@@ -980,6 +1004,11 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 						}
 
 						if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+							if tmap["proto"] != nil {
+								res.Add_proto( tmap["proto"] )
+								http_sheep.Baa( 1, "proto added for reservation: %s", *tmap["proto"] )
+							}
+
 							res.Set_vlan( v1, v2 )							// augment the rest of the reservation
 							if tmap["ipv6"] != nil {
 								res.Set_matchv6( *tmap["ipv6"] == "true" )
@@ -1047,6 +1076,10 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 					}
 
 					if res != nil {															// able to make the reservation, continue and try to find a path with bandwidth
+						if tmap["proto"] != nil {
+							res.Add_proto( tmap["proto"] )
+						}
+
 						res.Set_vlan( v1 )													// augment the rest of the reservation
 						if tmap["ipv6"] != nil {
 							res.Set_matchv6( *tmap["ipv6"] == "true" )
@@ -1113,7 +1146,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 
 						if res != nil {												// able to make the reservation, continue and try to find a path with bandwidth
 							res.Set_vlan( vlan )									// augment the rest of the reservation
-							if tmap["prot"] != nil {
+							if tmap["proto"] != nil {
 								res.Set_proto( tmap["proto"] )
 							}
 

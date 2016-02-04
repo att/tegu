@@ -28,6 +28,7 @@
 				16 Jan 2015 : Support port masks in flow-mods.
 				20 Apr 2015 : Correct bug - not passing direction of external IP address to agent.
 				01 Sep 2015 : Changed bleat level for bwow debugging message.
+				04 Feg 2015 : Tweak to allow udp:0 and tcp:0 to be passed to agent.
 */
 
 package managers
@@ -166,11 +167,12 @@ func ( fq *Fq_req ) To_bw_map( ) ( fmap map[string]string ) {
 	//fmap["mtbase"] =  fmt.Sprintf( "%d", fq.Mtbase )
 	fmap["oneswitch"] = fmt.Sprintf( "%v", fq.Single_switch )
 	fmap["koe"] = fmt.Sprintf( "%v", fq.Dscp_koe )
-	if fq.Tptype != nil && *fq.Tptype != "none" {
-		if fq.Match.Tpsport != nil && *fq.Match.Tpsport != "0" {
+
+	if fq.Tptype != nil && *fq.Tptype != "none"  && *fq.Tptype != "" {					// if a transport proto type supplied, turn it on
+		if fq.Match.Tpsport != nil {													// set src/dest ports if they are defined
 			fmap["sproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpsport )
 		}
-		if fq.Match.Tpdport != nil && *fq.Match.Tpdport != "0" {
+		if fq.Match.Tpdport != nil {
 			fmap["dproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpdport )
 		}
 	}
@@ -230,11 +232,11 @@ func ( fq *Fq_req ) To_bwow_map( ) ( fmap map[string]string ) {
 	fmap["dscp"] =  fmt.Sprintf( "%d", fq.Dscp << 2 )						// shift left 2 bits to match what OVS wants
 	fmap["ipv6"] =  fmt.Sprintf( "%v", fq.Ipv6 )							// force ipv6 fmods is on
 	fmap["timeout"] =  fmt.Sprintf( "%d", fq.Expiry - time.Now().Unix() )
-	if fq.Tptype != nil && *fq.Tptype != "none" {
-		if fq.Match.Tpsport != nil && *fq.Match.Tpsport != "0" {
+	if fq.Tptype != nil && *fq.Tptype != "none" && *fq.Tptype != "" {					// if transport prototype defined, turn it on
+		if fq.Match.Tpsport != nil 	{													// set src and dest ports if they are defined too
 			fmap["sproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpsport )
 		}
-		if fq.Match.Tpdport != nil && *fq.Match.Tpdport != "0" {
+		if fq.Match.Tpdport != nil 	{
 			fmap["dproto"] = fmt.Sprintf( "%s:%s", *fq.Tptype, *fq.Match.Tpdport )
 		}
 	}
