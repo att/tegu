@@ -35,6 +35,7 @@
 	Mods:		18 Jun 2015 : Added set_qid() function.
 				29 Jun 2015 : Corrected bug in Equals().
 				16 Aug 2015 : Move common code into Pledge_base
+				04 Feb 2016 : Add proto to chkpt and string output.
 */
 
 package gizmos
@@ -462,8 +463,8 @@ func (p *Pledge_bwow) String( ) ( s string ) {
 	v1 := p.vlan2string( )
 
 	//NEVER put the usrkey into the string!
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%s%s h2=%s:%s id=%s qid=%s st=%d ex=%d bwo=%d push=%v dscp=%d ptype=bw_oneway", state, diff, caption,
-		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.id, *p.qid, commence, expiry, p.bandw_out, p.pushed, p.dscp )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%s%s h2=%s:%s id=%s qid=%s st=%d ex=%d bwo=%d push=%v dscp=%d proto=%s ptype=bw_oneway", state, diff, caption,
+		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.id, *p.qid, commence, expiry, p.bandw_out, p.pushed, *p.protocol, p.dscp )
 	return
 }
 
@@ -484,8 +485,8 @@ func (p *Pledge_bwow) To_json( ) ( json string ) {
 	state, _, diff := p.window.state_str()		// get state as a string
 	v1 := p.vlan2string( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwout": %d, "src": "%s:%s%s", "dest": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "ptype": %d }`,
-				state, diff,  p.bandw_out, *p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport, *p.id, *p.qid, p.dscp, PT_OWBANDWIDTH )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwout": %d, "src": "%s:%s%s", "dest": "%s:%s", "id": %q, "qid": %q, "dscp": %d, "protocol": %q, "ptype": %d }`,
+				state, diff,  p.bandw_out, *p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport, *p.id, *p.qid, p.dscp, *p.protocol, PT_OWBANDWIDTH )
 
 	return
 }
@@ -512,8 +513,8 @@ func (p *Pledge_bwow) To_chkpt( ) ( chkpt string ) {
 	commence, expiry := p.window.get_values()
 	v1 := p.vlan2string( )
 
-	chkpt = fmt.Sprintf( `{ "src": "%s:%s%s", "dest": "%s:%s", "commence": %d, "expiry": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "ptype": %d }`,
-			*p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport,  commence, expiry, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, PT_OWBANDWIDTH )
+	chkpt = fmt.Sprintf( `{ "src": "%s:%s%s", "dest": "%s:%s", "commence": %d, "expiry": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "protocol": %q, "ptype": %d }`,
+			*p.src, *p.src_tpport, v1, *p.dest, *p.dest_tpport,  commence, expiry, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, *p.protocol, PT_OWBANDWIDTH )
 
 	return
 }

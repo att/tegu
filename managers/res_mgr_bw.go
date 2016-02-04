@@ -31,6 +31,8 @@
 				26 May 2015 - Changes to support pledge as an interface.
 				11 Jun 2015 - Added bwow support and renamed bw push function.
 				18 Jun 2015 - Added oneway rate limiting support.
+				04 Feb 2015 - Allow single proto (udp or tcp) when specifically indicated on 
+						a reservation.
 */
 
 package managers
@@ -133,12 +135,12 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 			}
 			freq.Exttyp = plist[i].Get_extflag()		// indicates whether the external IP is the source or dest along this path
 
-											//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
-			tptype_list := "none"							// default to no specific protocol
-			if *p1 != "0" || *p2 != "0" {					// if either port is specified, then we need to generate for both udp and tcp
-				tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
+			tptype_list := p.Get_proto()								// pick up protocol supplied on the reservation
+			if (*p1 != "0" || *p2 != "0") && *tptype_list == "" {		// if either port is specified, and no specific proto on reservation
+				tpl := "udp tcp"										// if port supplied, generate f-mods for both udp and tcp matches on the port
+				tptype_list = &tpl
 			}
-			tptype_toks := strings.Split( tptype_list, " " )
+			tptype_toks := strings.Split( *tptype_list, " " )
 
 			for tidx := range( tptype_toks ) {				// must have a req for each transport proto type, clone base, add the proto specific changes, & send to fqmgr
 				cfreq := freq.Clone()						// since we send this off for asynch processing we must make a copy
@@ -232,13 +234,12 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 			freq.Espq = gate.Get_spq( rname, now + 16 )					// switch port queue
 			freq.Extip = gate.Get_extip( )								// returns nil if not an external and that's what we need
 
-
-											//FUTURE: accept proto=udp or proto=tcp on the reservation to provide ability to limit, or supply alternate protocols
-			tptype_list := "none"							// default to no specific protocol
-			if *src_tpport != "0" || *dest_tpport != "0" {	// if either port is specified, then we need to generate for both udp and tcp
-				tptype_list = "udp tcp"						// if port supplied, generate f-mods for both udp and tcp matches on the port
+			tptype_list := p.Get_proto()											// pick up protocol supplied on the reservation
+			if (*src_tpport != "0" || *dest_tpport != "0") && *tptype_list == ""  {	// if port supplied we must set proto; default to both if
+				tpl := "udp tcp"												// user didn't supply one
+				tptype_list = &tpl
 			}
-			tptype_toks := strings.Split( tptype_list, " " )
+			tptype_toks := strings.Split( *tptype_list, " " )
 
 			for tidx := range( tptype_toks ) {				// must have a req for each transport proto type, clone base, add the proto specific changes, & send to fqmgr
 				cfreq := freq.Clone()						// since we send this off for asynch processing we must make a copy

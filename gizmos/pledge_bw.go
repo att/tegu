@@ -41,6 +41,7 @@
 				01 Jun 2015 - Added equal() support
 				26 Jun 2015 - Return nil pledge if one bw value is <= 0.
 				16 Aug 2015 - Move common code into Pledge_base
+				04 Feb 2016 - Added protocol to chkpt, and string functions.
 */
 
 package gizmos
@@ -511,8 +512,8 @@ func (p *Pledge_bw) String( ) ( s string ) {
 	v1, v2 := p.bw_vlan2string( )
 
 	//NEVER put the usrkey into the string!
-	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d%s h2=%s:%d%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=bandwidth koe=%v", state, diff, caption,
-		*p.host1, *p.tpport2, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, commence, expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe )
+	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%d%s h2=%s:%d%s id=%s qid=%s st=%d ex=%d bwi=%d bwo=%d push=%v dscp=%d ptype=bandwidth koe=%v proto=%s", state, diff, caption,
+		*p.host1, *p.tpport2, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, commence, expiry, p.bandw_in, p.bandw_out, p.pushed, p.dscp, p.dscp_koe, *p.protocol )
 	return
 }
 
@@ -533,8 +534,8 @@ func (p *Pledge_bw) To_json( ) ( json string ) {
 	state, _, diff := p.window.state_str()		// get state as a string
 	v1, v2 := p.bw_vlan2string( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s%s", "host2": "%s:%s%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`,
-				state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, p.dscp, p.dscp_koe, PT_BANDWIDTH )
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "bandwin": %d, "bandwout": %d, "host1": "%s:%s%s", "host2": "%s:%s%s", "id": %q, "qid": %q, "dscp": %d, "dscp_koe": %v, "protocol": %q, "ptype": %d }`,
+				state, diff, p.bandw_in,  p.bandw_out, *p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, *p.id, *p.qid, p.dscp, p.dscp_koe, *p.protocol, PT_BANDWIDTH )
 
 	return
 }
@@ -565,8 +566,8 @@ func (p *Pledge_bw) To_chkpt( ) ( chkpt string ) {
 	commence, expiry := p.window.get_values()
 	v1, v2 := p.bw_vlan2string( )
 
-	chkpt = fmt.Sprintf( `{ "host1": "%s:%s%s", "host2": "%s:%s%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "ptype": %d }`,
-			*p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, commence, expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, PT_BANDWIDTH )
+	chkpt = fmt.Sprintf( `{ "host1": "%s:%s%s", "host2": "%s:%s%s", "commence": %d, "expiry": %d, "bandwin": %d, "bandwout": %d, "id": %q, "qid": %q, "usrkey": %q, "dscp": %d, "dscp_koe": %v, "protocol": %q, "ptype": %d }`,
+			*p.host1, *p.tpport1, v1, *p.host2, *p.tpport2, v2, commence, expiry, p.bandw_in, p.bandw_out, *p.id, *p.qid, *p.usrkey, p.dscp, p.dscp_koe, *p.protocol, PT_BANDWIDTH )
 
 	return
 }

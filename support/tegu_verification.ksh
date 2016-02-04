@@ -201,6 +201,7 @@ function usage
 	echo "usage: $argv0 [-e] [-E external-ip] [-o output-capture-file] [-h host[:port]] [-O] [-s] [-S] [-p project] [-u user] vm1,vm2...,vmN"
 	echo "-e causes a quick exit on first failure, otherwise all tests are attempted"
 	echo "-O  old mode (pre 4.x versions of tegu)"
+	echo "-r  indicates that relaxed mode is on in tegu; passthru reservations should be successful"
 	echo "-s skips long running tests"
 	echo "-S turns off secure (ssl) mode"
 	echo "vm1 (etc) are the VM names that this uses to set reservations up. Supply 2 or 4 different names"
@@ -225,6 +226,7 @@ short_circuit=0						# -e enables this; stop on first error
 project_list=""						# cloudqos:cloudqos used if not supplied with -p
 external_ip=135.207.223.80			# bornoeo, but it shouldn't matter
 disable_endpts=0
+relaxed=0
 
 export OS_USERNAME=${OS_USERNAME:-tegu}
 user=$OS_USERNAME					# -u overrides
@@ -238,6 +240,7 @@ do
 		-o)	out_file=$2; shift;;
 		-O)	disable_endpts=1;;
 		-p)	project_list="$2"; shift;;
+		-r) relaxed=1;;				# relaxed mode is on in tegu
 		-s)	skip_long=1;;			# short tests only
 		-S)	secure="-s";;
 		-u) user=$2; shift;;
@@ -490,10 +493,16 @@ fi
 # ======== PASSTHRU TESTING =========================================================================================
 run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
 capture $single_file "passthru reservation can be created (failure if relaxed=false is expected)"
-validate_ok $single_file
+
+if (( ! relaxed ))
+then
+	validate_ok $single_file
+else
+	validate_fail $single_file
+fi
 
 suss_rid $single_file | read rid
-if [[ -n $rid ]]
+if (( relaxed )) && [[ -n $rid ]]
 then
 	run tegu_req -c $secure $host cancel all ptcookie >$single_file
 	capture $single_file "passthru reservation can be cancelled"
@@ -509,18 +518,41 @@ then
 	else
 		echo "OK:   passthru reservation cancel successfully removed the resrvation from the list"
 	fi
+
+	# ---- set the ulcap to 0 to see that passthru is rejected --------------------------------------------------
+	# these tests will fail if relaxed mode is off, but that is a false positive; ulcap protection can only be 
+	# be verified when in relaxed mode, so if the first reservation fails don't bother with these either
+	run tegu_req -c $secure $host setulcap $project1 0 >$single_file
+	capture $single_file "set ulcap to 0 to ensure it blocks passthru"
+	validate_contains $single_file 'comment = user link cap set for.*0[%]*$'
+	
+	run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
+	capture $single_file "passthru reservation is rejected if ulcap is 0"
+	validate_fail $single_file
+
+	# ---- check to see that passthru with a proto works
+	run tegu_req -k proto=udp:135.23.45.67:8800 -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
+	capture $single_file "passthru reservation can be created (failure if relaxed=false is expected)"
+	validate_ok $single_file
+
+	# should default to tcp flow-mods
+	run tegu_req -k proto=135.23.45.67:8800 -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
+	capture $single_file "passthru reservation can be created (failure if relaxed=false is expected)"
+	validate_ok $single_file
+
+	# cancel the proto reservations (no check, but we wait)
+	run tegu_req -c $secure $host cancel all ptcookie >$single_file
+	echo "INFO: pausing 20s to let cancel fall off"
+	sleep 20
 else
-	echo "SKIP: skipping passthur cancel test: no reservation id found"
+	if (( relaxed ))
+	then
+		echo "SKIP: skipping passthru cancel test: no reservation id found"
+	fi
+	echo "SKIP: skipping passthru ulcap rejection test: no successful passthru test before this or not in relaxed mode"
+	echo "SKIP: skipping passthru specific proto test: no successful passthru test before this or not in relaxed mode"
 fi
 
-# ---- set the ulcap to 0 to see that passthru is rejected -------------------------------
-run tegu_req -c $secure $host setulcap $project1 0 >$single_file
-capture $single_file "set ulcap to 0 to ensure it blocks passthru"
-validate_contains $single_file 'comment = user link cap set for.*0[%]*$'
-
-run tegu_req -c -T $secure $host passthru +90 %t/%p/${p1vm_list[0]} ptcookie >$single_file
-capture $single_file "passthru reservation is rejected if ulcap is 0"
-validate_fail $single_file
 
 
 # ---- return link cap to sane value ----------------------------------------------------
