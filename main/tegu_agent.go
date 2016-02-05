@@ -60,6 +60,7 @@
 				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
 				02 Sep 2015 : Pick up new agent script.
 				12 Nov 2015 : Updated to return stdout/stderr for do_mirrorwiz()
+				21 Jan 2016 : Updated rsync list.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -86,7 +87,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.3/1b165"
+	version		string = "v2.3/11216"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -885,7 +886,13 @@ func main() {
 			"/usr/bin/ql_bwow_fmods " +
 			"/usr/bin/ql_set_trunks " +
 			"/usr/bin/ql_filter_rtr " +
+			"/usr/bin/ql_parse_config " +
 			"/usr/bin/setup_ovs_intermed "
+
+	_, err := os.Stat( "/etc/tegu/tegu_agent.cfg" )
+	if err == nil {
+		def_rlist += "/etc/tegu/tegu_agent.cfg "			// we'll put this in the mix if there
+	}
 
 	if home == "" {
 		home = "/home/tegu"					// probably bogus, but we'll have something
