@@ -133,8 +133,34 @@ function attach_veth
 		return
 	fi
 
+	typeset have0=0
+	typeset have1=0
+	ql_suss_ovsd | egrep "$ve0|$ve1"
+	ql_suss_ovsd | awk -v target0=" $ve0 "  -v target1=" $ve1 " '
+		/^port: / {
+			if( match( $0, target0 ) ) {
+				have0=1;
+				next;
+			}
+			if( match( $0, target1 ) ) {
+				have1=1;
+				next;
+			}
+		}
+
+		END {
+			printf( "%d %d\n", have0, have1 );
+		}
+	' | read have0 have1
+
+	if (( have0 && have1 ))
+	then
+		logit "veth pair $ve0 -> $ve1 already exists; no action [OK]"
+		return
+	fi
+
 	logit "cleaning previous attachments: $ve0 and $ve1 to $1 and $1-rl   [OK]"
-	# drop the ports if one or the other were already there (ignoring failures)
+	# ensure that they are gone
 	detach_veth $1
 
 	$forreal timeout 15  $sudo ovs-vsctl add-port $1 $ve0 			#-- set interface $ve0  ofport=4000
@@ -168,6 +194,8 @@ function attach_patch
 	typeset port=0
 	typeset p0=$2
 	typeset p1=$3
+	typeset have0=0
+	typeset have1=0
 
 	if [[ -z $p1 ]]			# if p0 is nil, p1 will be too, so need test just the one
 	then
@@ -175,6 +203,31 @@ function attach_patch
 		warned=1
 		return
 	fi
+
+	ql_suss_ovsd | awk -v target0=" $p0 "  -v target1=" $p1 " '
+		/^port: / {
+			if( match( $0, target0 ) ) {
+				have0=1;
+				next;
+			}
+			if( match( $0, target1 ) ) {
+				have1=1;
+				next;
+			}
+		}
+
+		END {
+			printf( "%d %d\n", have0, have1 );
+		}
+	' | read have0 have1
+
+	if (( have0 && have1 ))
+	then
+		logit "patch pair $p0 -> $p1 already exists; no action [OK]"
+		return
+	fi
+
+	rm_patch $p0 $p1
 
 	# the add port commands here always generate an error msg to stderr referencing the ovs
 	# log, and this seems normal.  There is a _warning_ in the log indicating that the 
@@ -186,7 +239,6 @@ function attach_patch
 		logit "unable to add patch port $p1"
 		cat /tmp/PID$$.std 2>&1
 		warned=1
-		rm -f /tmp/PID$$.*
 		return
 	fi
 
@@ -196,11 +248,8 @@ function attach_patch
 		cat /tmp/PID$$.std 2>&1
 		$forreal $sudo ovs-vsctl --if-exists del-port $p1
 		warned=1
-		rm -f /tmp/PID$$.*
 		return
 	fi
-
-	rm -f /tmp/PID$$.*
 
 	$forreal $sudo ovs-vsctl set interface $p1 type=patch "options:peer=$p0"	# point ports at the other bridge's port
 	if (( $? != 0 ))
@@ -357,6 +406,7 @@ do
 		if [[ -e /etc/tegu/no_irl ]]		# check here -- we allow delete to go even when no-irl is set
 		then
 			logit "abort: /etc/tegu/no_irl file exists which prevents setting up ingress rate limiting bridge and flow-mods	[WARN]"
+			rm -f /tmp/PID$$.*
 			exit 1
 		fi
 
@@ -419,7 +469,7 @@ do
 				fi
 				if ((force_attach ))				# need to add the patch
 				then
-					rm_patch $bridge $patch0 $patch1			# ensure they are gone; if one existed we don't want to fail trying to create it again
+					#rm_patch $patch0 $patch1			# ensure they are gone; if one existed we don't want to fail trying to create it again
 					attach_patch $bridge $patch0 $patch1
 				else
 					logit "patch pair exists, not creating  [OK]"
