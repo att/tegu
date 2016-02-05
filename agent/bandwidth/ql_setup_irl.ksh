@@ -76,7 +76,7 @@ function warn_if_bad
 # create the rate limit bridge
 function mk_bridge
 {
-	$forreal timeout 15 $ssh $sudo /usr/bin/ovs-vsctl add-br $1-rl
+	$forreal timeout 15  $sudo /usr/bin/ovs-vsctl add-br $1-rl
 	ensure_ok $? "unable to make bridge $1-rl"
 	logit "created bridge $1-rl"
 }
@@ -91,19 +91,19 @@ function rm_bridge
 	fi
 
 	logit "deleting bridge $1-rl"
-	$forreal timeout 15 $ssh $sudo /usr/bin/ovs-vsctl del-br $1-rl
+	$forreal timeout 15  $sudo /usr/bin/ovs-vsctl del-br $1-rl
 }
 
 # create our veth that will be used for the loop round
 function mk_veth
 {
-	$forreal timeout 15 $ssh $sudo ip link add  $ve0 type veth peer name $ve1
+	$forreal timeout 15  $sudo ip link add  $ve0 type veth peer name $ve1
 	ensure_ok $? "unable to create veth link $ve0-$ve1"
 
-	$forreal timeout 15 $ssh $sudo ip link set dev $ve0  up
+	$forreal timeout 15  $sudo ip link set dev $ve0  up
 	ensure_ok $? "unable to bring up veth link end point $ve0"
 
-	$forreal timeout 15 $ssh $sudo ip link set dev $ve1 up
+	$forreal timeout 15  $sudo ip link set dev $ve1 up
 	ensure_ok $? "unable to bring up veth link end point $ve1"
 	logit "created veth pair $ve0-$ve1   [OK]"
 }
@@ -112,16 +112,16 @@ function mk_veth
 function rm_veth
 {
 	logit "deleting link"
-	$forreal timeout 15 $ssh $sudo ip link set dev $ve0 down
-	$forreal timeout 15 $ssh $sudo ip link set dev $ve1 down
-	$forreal timeout 15 $ssh $sudo ip link delete  $ve0 type veth peer name $ve1
+	$forreal timeout 15  $sudo ip link set dev $ve0 down
+	$forreal timeout 15  $sudo ip link set dev $ve1 down
+	$forreal timeout 15  $sudo ip link delete  $ve0 type veth peer name $ve1
 }
 
 # detach the ports -- ignore output and return codes
 function detach_veth
 {
-	$forreal timeout 15 $ssh $sudo ovs-vsctl del-port $ve0 >/dev/null 2>&1
-	$forreal timeout 15 $ssh $sudo ovs-vsctl del-port $ve1 >/dev/null 2>&1
+	$forreal timeout 15  $sudo ovs-vsctl --if-exists del-port $ve0 >/dev/null 2>&1
+	$forreal timeout 15  $sudo ovs-vsctl --if-exists del-port $ve1 >/dev/null 2>&1
 }
 
 # attach the veth to the bridge and its rate limit (-rl) counterpart.
@@ -137,34 +137,37 @@ function attach_veth
 	# drop the ports if one or the other were already there (ignoring failures)
 	detach_veth $1
 
-	$forreal timeout 15 $ssh $sudo ovs-vsctl add-port $1 $ve0 			#-- set interface $ve0  ofport=4000
+	$forreal timeout 15  $sudo ovs-vsctl add-port $1 $ve0 			#-- set interface $ve0  ofport=4000
 	ensure_ok $? "unable to attach veth $ve0 to $1"
 
-	$forreal timeout 15 $ssh $sudo ovs-vsctl add-port $1-rl  $ve1 		#-- set interface $ve1  ofport=4001
+	$forreal timeout 15  $sudo ovs-vsctl add-port $1-rl  $ve1 		#-- set interface $ve1  ofport=4001
 	ensure_ok $? "unable to attach veth $ve1 to $1-rl"
 
-	logit "attached $ve0-$ve1 to $1 and $1-rl   [OK]"
+	logit "attached veth  $ve0 and $ve1 to $1 and $1-rl   [OK]"
 }
 
 # delete the patch pair p0 and p1 passed in as $1 and $2
-function delete_patch
+function rm_patch
 {
 	typeset p0=$1
 	typeset p1=$2
 
-	$forreal $sudo  ovs-vsctl del-port $p0 >/dev/null 2>&1			# these can fail if not there, and that's ok
-	$forreal $sudo  ovs-vsctl del-port $p1 >/dev/null 2>&1
+	$forreal $sudo  ovs-vsctl --if-exists del-port $p0 >/dev/null 2>&1			# these can fail if not there, and that's ok
+	$forreal $sudo  ovs-vsctl --if-exists del-port $p1 >/dev/null 2>&1
 }
 
 # Attach the patch pair to the bridges setting the necessary no flood option on the 
 # main bridge side so we don't try to write to the port. Parm $1 is the bridge
 # name and the assumption that $1-rl is the ratelimiting bridge.
 # Assumes $1 is patch0 (main bridge side) and $2 is patch1 (rl bridge side)
+#
+# Both ports must exist before they can be configured.
 function attach_patch
 {
+	typeset bridge=$1
 	typeset port=0
-	typeset p0=$1
-	typeset p1=$2
+	typeset p0=$2
+	typeset p1=$3
 
 	if [[ -z $p1 ]]			# if p0 is nil, p1 will be too, so need test just the one
 	then
@@ -173,74 +176,84 @@ function attach_patch
 		return
 	fi
 
-	# set up the rate limit side first
-	$forreal $sudo ovs-vsctl add-port $1-rl $p1
-	warn_if_bad $? "unable to add patch port $p1"
-	
-	ql_suss_ovsd | awk -v target="$p1" ' $4 == target { print $3 }' | read port		# verify that the port is valid; have seen it show ok, but not have a good port
-	if [[ -z $forreal ]]			# skip this check if in -n mode as there won't be anything :)
+	# the add port commands here always generate an error msg to stderr referencing the ovs
+	# log, and this seems normal.  There is a _warning_ in the log indicating that the 
+	# network device which matches the port name cannot be opened. This is expected as 
+	# this is a patch between logical bridges and doesn't involve any real or OS 'hardware'.
+	# to avoid panic, the stderr is captured and squelched unless the return is not good.
+	if ! $forreal $sudo ovs-vsctl add-port $bridge-rl $p1 >/tmp/PID$$.std 2>&1		# port creation first
 	then
-		if (( port <= 0 ))
-		then
-			logit "port $p1 created, but port number isn't good: $port	[WARN]"
-			$forreal $sudo ovs-vsctl del-port $p1
-			warned=1
-		fi
-	fi
-
-	if ! $forreal $sudo ovs-vsctl set interface $p1 type=patch
-	then
-		logit "unable to set $p1 as type patch" 
-		$forreal $sudo ovs-vsctl del-port $p1
+		logit "unable to add patch port $p1"
+		cat /tmp/PID$$.std 2>&1
 		warned=1
+		rm -f /tmp/PID$$.*
+		return
 	fi
 
-	$forreal $sudo ovs-vsctl set interface $p1 "options:peer=$p0"
+	if ! $forreal $sudo ovs-vsctl add-port br-int $p0 >/tmp/PID$$.std 2>&1
+	then
+		logit "unable to create port $p0"
+		cat /tmp/PID$$.std 2>&1
+		$forreal $sudo ovs-vsctl --if-exists del-port $p1
+		warned=1
+		rm -f /tmp/PID$$.*
+		return
+	fi
+
+	rm -f /tmp/PID$$.*
+
+	$forreal $sudo ovs-vsctl set interface $p1 type=patch "options:peer=$p0"	# point ports at the other bridge's port
 	if (( $? != 0 ))
 	then
 		logit "unable to set $p0 as peer for $p1"
-		$forreal $sudo ovs-vsctl del-port $p1
+		$forreal $sudo ovs-vsctl --if-exists del-port $p1
+		$forreal $sudo ovs-vsctl --if-exists del-port $p0
 		warned=1
+		return
 	fi
 
-	$forreal $sudo ovs-vsctl add-port br-int $p0												# ok on the rl side, add to the main bridge now
-	if (( $? != 0 ))
+	if ! $forreal $sudo ovs-vsctl set interface $p0 type=patch "options:peer=$p1"
 	then
-		logit "unable to create port $p0"
-		$forreal $sudo ovs-vsctl del-port $p1
+		logit "unable to set type to patch $p0"
+		$forreal $sudo ovs-vsctl --if-exists del-port $p1
+		$forreal $sudo ovs-vsctl --if-exists del-port $p0
 		warned=1
+		return
 	fi
-	ql_suss_ovsd | awk -v target="$p0" ' $4 == target { print $3 }' | read port		# verify that the port is valid; have seen it show ok, but not have a good port
+
+	if ! $forreal $sudo ovs-ofctl mod-port $bridge $p0  noflood						# prevent writing to the patch, it's an exit only ramp from the rl bridge
+	then
+		logit "attempt to set noflood on $p0 failed  [WARN]"
+	fi
+
+	# verify that there are valid port numbers (they won't be valid until everything is set)
 	if [[ -z $forreal ]]			# skip this check if in -n mode as there won't be anything :)
 	then
+		ql_suss_ovsd | awk -v target="$p1" ' $4 == target { print $3 }' | read port
 		if (( port <= 0 ))
 		then
-			logit "port $p0 created, but port number isn't good: $port	[WARN]"
-			$forreal $sudo ovs-vsctl del-port $p1
-			$forreal $sudo ovs-vsctl del-port $p0
+			logit "port $p1 created, but port number isn't good: $port	[WARN]"
+			$forreal $sudo ovs-vsctl --if-exists del-port $p1
+			$forreal $sudo ovs-vsctl --if-exists del-port $p0
 			warned=1
+			return
 		fi
 	fi
 
-	$forreal $sudo ovs-vsctl set interface $p0 type=patch
-	if (( $? != 0 ))
+	if [[ -z $forreal ]]			# skip this check if in -n mode as there won't be anything :)
 	then
-		logit "unable to create set type to patch $p0"
-		$forreal $sudo ovs-vsctl del-port $p1
-		$forreal $sudo ovs-vsctl del-port $p0
-		warned=1
+		ql_suss_ovsd | awk -v target="$p0" ' $4 == target { print $3 }' | read port
+		if (( port <= 0 ))
+		then
+			logit "port $p0 created, but port number isn't good: $port	[WARN]"
+			$forreal $sudo ovs-vsctl --if-exists del-port $p1
+			$forreal $sudo ovs-vsctl --if-exists del-port $p0
+			warned=1
+			return
+		fi
 	fi
 
-	$forreal $sudo ovs-vsctl set interface $p0 "options:peer=$p1"
-	if (( $? != 0 ))
-	then
-		logit "unable to create set type to patch $p0"
-		$forreal $sudo ovs-vsctl del-port $p1
-		$forreal $sudo ovs-vsctl del-port $p0
-		warned=1
-	fi
 
-	$forreal $sudo ovs-ofctl mod-port $p0  noflood						# prevent writing to the patch, it's an exit only ramp from the rl bridge
 	logit "patch pair attached:  $p0 --> $p1"
 }
 
@@ -406,8 +419,8 @@ do
 				fi
 				if ((force_attach ))				# need to add the patch
 				then
-					delete_patch $patch0 $patch1	# ensure they are gone; if one existed we don't want to fail trying to create it again
-					attach_patch $patch0 $patch1
+					rm_patch $bridge $patch0 $patch1			# ensure they are gone; if one existed we don't want to fail trying to create it again
+					attach_patch $bridge $patch0 $patch1
 				else
 					logit "patch pair exists, not creating  [OK]"
 				fi
@@ -416,11 +429,18 @@ do
 			fi
 		fi
 
+		if (( ! warned ))
+		then
+			$forreal timeout 15 $sudo ovs-ofctl mod-port $bridge $ve0 noflood		# must do before setting fmods
+			warn_if_bad $? "unable to set no flood on $bridge:$ve0"
+		fi
+
 		if (( ! warned  &&  add_fmod ))						# finally add flow-mods that are needed to support this
 		then
+			send_ovs_fmod $no_exec -t 0 --match -a --action  -X add $irl_fmod_cookie $bridge-rl 		# arp traffic not allowed to pass
 			if (( parallel )) 								# if parallel, we need 2: one to flip traffic to the patch and one to drop if received on patch
 			then
-				ql_suss_ovsd | awk -v target_in=ve1 -v target_out=$patch1 '				# get the port numbers for each pipe
+				ql_suss_ovsd | awk -v target_in=$ve1 -v target_out=$patch1 '				# get the port numbers for each pipe
 					$4 == target_in { in_port = $3; next; }
 					$4 == target_out { out_port = $3; next; }
 					END {
@@ -453,11 +473,6 @@ do
 			fi
 		fi
 
-		if (( ! warned ))
-		then
-			$forreal timeout 15 $sudo ovs-ofctl mod-port $bridge $ve0 noflood		# we should always do this
-			warn_if_bad $? "unable to set no flood on $bridge:$ve0"
-		fi
 	fi
 done
 
