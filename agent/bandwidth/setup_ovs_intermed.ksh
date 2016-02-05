@@ -128,6 +128,7 @@
 #				31 Aug 2015 - Prevent setting iptables rules in name spaces other than routers.
 #				02 Sep 2015 - Extracted the iptables setup (now in ql_setup_ipt) and replaed with a call.
 #				12 Oct 2015 - Explicitly delete the br-rl setup if -I is not given.
+#				05 Feb 2016 - Put rate limiting support back in and deprecate -h option.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -204,6 +205,7 @@ function usage
 # --------------------------------------------------------------------------------------------------------------
 
 argv0=${0##*/}
+config="${TEGU_AGENT_CONFIG:-tegu_agent.cfg}"
 
 if [[ $argv0 == "/"* ]]
 then
@@ -223,7 +225,7 @@ allow_irl=0				# -I turns on irl configuration
 allow_irl_meta=0		# -M turns on (not needed once VLAN trunking, bw_fmods, are in use)
 delete_data=0
 						# both host values set when -h given on the command line
-rhost=""				# given on commands like ovs_sp2uuid (will be -h foo)
+rhost=""				# given on commands like ovs_sp2uuid (will be -h foo) DEPRECATED
 thost=$(hostname)		# target host defaults here, but overridden by -h
 diffserv=184			# diffserv bit to set; voice (46), default
 min=$( expand 500K )	# this generally sets the quantum to about 6000
@@ -243,6 +245,8 @@ do
 		-D)	allow_reset=0;;						# do not write the dscp reset flowmods
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-h)	
+			echo "the -h option is deprecated"
+			exit 1
 			if [[ $2 != "localhost"  && $2 != "localhost" && $2 != "127.0.0.1" ]]
 			then
 				thost=$2; 							# override target host
@@ -278,6 +282,9 @@ do
 	shift
 done
 
+typeset -C bandwidth												# must ensure this is set to handle missing config file
+ql_parse_config -f $config >/tmp/PID$$.cfg && . /tmp/PID$$.cfg		# xlate config file into variables and source them
+
 if [[ -n $log_file ]]			# force stdout/err to a known place; helps when executing from the agent
 then
 	exec >$log_file 2>&1
@@ -300,18 +307,25 @@ fi
 
 if [[ -n $bridges ]]			# if user supplies bridges then we must set them up, so flag goes on
 then
-	allow_bridges=1
+	allow_bridges=1				# if from the command line, allow them to just set queues and not rl bridges, so don't turn allow_irl on
+else
+	bridges="${bandwidth.rate_limit}"		# else operate on all rate limit bridges in the config
+	if [[ -n $bridges ]]
+	then
+		allow_irl=1							# bridge list from config implies -I if it wasn't set
+		allow_bridges=1
+	fi
 fi
 
 if (( allow_irl ))				# do this first so that we can snag the assigned rate limit port from ovs_sp2uuid output
 then
 	logit "setting up ingress rate limiting bridge and flow-mods   [OK]"
-	ql_setup_irl $noexec $rhost
+	ql_setup_irl $noexec $bridges
 	# errors are written  to stderr by ql_setup, and return status is ignored as failure to set up
 	# the rl bridge is not harmful to, and should not prevent, the remainder of the chores.
 else
 	logit "-I given; ingress rate limiting setup was deleted  [OK]"
-	ql_setup_irl $noexec -D $rhost
+	ql_setup_irl $noexec -D 
 fi
 
 fmod_data=/tmp/PID$$.fdata
@@ -320,7 +334,7 @@ queue_data=/tmp/PID$$.qdata
 >$fmod_data							# must exist and enusre it's empty
 
 # generate the data that will be given to create_ovs_queues and used to find br-rl ports
-ovs_sp2uuid -a $rhost any |	awk \
+ovs_sp2uuid -a any |	awk \
 	-v thost="${thost%%.*}" \
 	-v sudo="$sudo" \
 	-v max_rate=$entry_max_rate \
@@ -406,20 +420,20 @@ then
 			logit "setting rate limiting flow-mods from br-rl port $rl_port to patch-tun $tun_port and into br-rl	[OK]"
 																													# use a cookie different than all others as we delete all that match the cookie
 			irl_rc=0
-			# bug fix 227 send_ovs_fmod $noexec $rhost -t 0 -p 190 --match  --action del 0xdeaf br-int							# must delete the preivous ones on the off chance that the veth port changed
+			# bug fix 227 send_ovs_fmod $noexec -t 0 -p 190 --match  --action del 0xdeaf br-int							# must delete the preivous ones on the off chance that the veth port changed
 			# irl_rc=$(( irl_rc += $? ))
 
 			# because we check for rate limiting before trying to set these, it is safe to invoke with -I and not duplicate the check
-			send_ovs_fmod $noexec $rhost -I -t 0 -p 999 --match -m 0x0/0x08 -i $tun_port --action -R ",98" -R ",0" -N add 0xdeaf br-int	# in from tunnel; set high meta flag (0x08) to prevent pushing into br-rl
+			send_ovs_fmod $noexec  -I -t 0 -p 999 --match -m 0x0/0x08 -i $tun_port --action -R ",98" -R ",0" -N add 0xdeaf br-int	# in from tunnel; set high meta flag (0x08) to prevent pushing into br-rl
 			irl_rc=$(( irl_rc += $? ))
 
-			send_ovs_fmod $noexec $rhost -I -t 0 -p 190 --match -i $rl_port  --action -o $tun_port add 0xdeaf br-int		# reservation f-mods are used to set the queue, so match after
+			send_ovs_fmod $noexec  -I -t 0 -p 190 --match -i $rl_port  --action -o $tun_port add 0xdeaf br-int		# reservation f-mods are used to set the queue, so match after
 			irl_rc=$(( irl_rc += $? ))
 
-			send_ovs_fmod $noexec $rhost -I -T ${QL_M8_TABLE:-98} -t 0  --match --action -m 0x8/0x8  -N  add 0xbeef br-int	# cannot set meta before resub, so set in alternate table
+			send_ovs_fmod $noexec  -I -T ${QL_M8_TABLE:-98} -t 0  --match --action -m 0x8/0x8  -N  add 0xbeef br-int	# cannot set meta before resub, so set in alternate table
 			irl_rc=$(( irl_rc += $? ))
 
-			send_ovs_fmod $noexec $rhost -I -t 0 -p 180 --match -m 0x02  --action -o $rl_port add 0xdeaf br-int 	#  packet matched outbound reservation rule; CAUTION: the match is a _hard_ value match not a mask match
+			send_ovs_fmod $noexec  -I -t 0 -p 180 --match -m 0x02  --action -o $rl_port add 0xdeaf br-int 	#  packet matched outbound reservation rule; CAUTION: the match is a _hard_ value match not a mask match
 			irl_rc=$(( irl_rc += $? ))
 
 			if (( irl_rc != 0 ))
@@ -433,9 +447,9 @@ then
 		logit "WRN: ingress rate limiting flow mods not set -- OVS data missing from target-host: ${thost#* }    [QLTSOM002]"
 	fi
 else		# ensure these are turned off as they might get in the way
-	send_ovs_fmod $noexec $rhost -I -t 0 -p 999 --match -m 0x0/0x08  --action -R ",98" -R ",0" -N del 0xdeaf br-int	
-	send_ovs_fmod $noexec $rhost -I -t 0 -p 190 --match   --action  del 0xdeaf br-int
-	send_ovs_fmod $noexec $rhost -I -t 0 -p 180 --match -m 0x02  --action  del 0xdeaf br-int
+	send_ovs_fmod $noexec  -I -t 0 -p 999 --match -m 0x0/0x08  --action -R ",98" -R ",0" -N del 0xdeaf br-int	
+	send_ovs_fmod $noexec  -I -t 0 -p 190 --match   --action  del 0xdeaf br-int
+	send_ovs_fmod $noexec  -I -t 0 -p 180 --match -m 0x02  --action  del 0xdeaf br-int
 fi
 
 if (( verbose ))
@@ -466,7 +480,7 @@ then
 	kflag=""
 	for br in $bridges
 	do
-		if ! create_ovs_queues $kflag $vflag -l "$br" $noexec $rhost $queue_data >/tmp/PID$$.coq		# kflag (-k) keeps unreferenced queues; delete them only on first call
+		if ! create_ovs_queues $kflag $vflag -l "$br" $noexec  $queue_data >/tmp/PID$$.coq		# kflag (-k) keeps unreferenced queues; delete them only on first call
 		then
 			logit "CRI: unable to set one or more ovs queues on target-host: ${thost#* }   [FAIL] [QLTSOM003]"
 			cat /tmp/PID$$.coq >&2
@@ -478,7 +492,7 @@ then
 	done
 else
 	logit "did not create queues: bridge update not on (-b or -B missing) or no queue setup data was generated"
-	logit "to verify: ovs_sp2uuid -a $rhost any"
+	logit "to verify: ovs_sp2uuid -a  any"
 fi
 
 # Send flow-mods which cause packets with DSCP values in our list to be queued on the priority queue and
@@ -496,10 +510,10 @@ then
 		logit "set DSCP pri/best-eff fmods on bridge: $b  dscp=$diffserv"
 		for dscp in ${diffserv//,/ }			# might be multiple values, space or comma separated
 		do
-			send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  add 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
+			send_ovs_fmod $noexec  -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  add 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
 			lrc=0
 			rc=$(( lrc + $? ))
-			send_ovs_fmod $noexec $rhost -T 91 -t 0  --match -T $dscp --action -m 1/1  -N  add 0xbeef $b				# cannot set meta before resub, so set in alternate table
+			send_ovs_fmod $noexec  -T 91 -t 0  --match -T $dscp --action -m 1/1  -N  add 0xbeef $b				# cannot set meta before resub, so set in alternate table
 			rc=$(( lrc + $? ))
 
 			if (( lrc == 0  ))
@@ -517,7 +531,7 @@ else
 		logit "delete DSCP pri/best-eff fmods on bridge: $b  dscp=$diffserv"
 		for dscp in ${diffserv//,/ }			# might be multiple values, space or comma separated
 		do
-			send_ovs_fmod $noexec $rhost -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  del 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
+			send_ovs_fmod $noexec  -t 0  --match -m 0/1 -T $dscp --action -q 1 -R ",91" -R ",0" -N  del 0xbeef $b			# set queue and drive rule in tabl 1 then drive table 0 for ostack
 			lrc=0
 			rc=$(( lrc + $? ))
 
@@ -585,18 +599,18 @@ then
 else
 	if (( verbose ))
 	then
-		logit "no gre ports found on host ($rhost); no promotion of tos set"
+		logit "no gre ports found on host (); no promotion of tos set"
 	fi
 fi
 
 if (( allow_reset ))		# write the f-mods that drop the DSCP values from traffic that have tegu dscp markings and were not set by a tegu f-mod (meta & 0x02 == 0)
 then
-	send_ovs_fmod $noexec $rhost -T ${QL_M4_TABLE:-94} -t 0  --match --action -m 0x4/0x4  -N  add 0xbeef br-int			# cannot set meta before resub, so set in alternate table
+	send_ovs_fmod $noexec  -T ${QL_M4_TABLE:-94} -t 0  --match --action -m 0x4/0x4  -N  add 0xbeef br-int			# cannot set meta before resub, so set in alternate table
 
 	if [[ ! -f /etc/tegu/no_dscp_reset ]]			# safety valve
 	then
 		# CAUTION:  the meta value match is a _hard_ value of zero, not a mask match so we don't turn off any packet that matched a reservation fmod or inbound traffic
-		if ! send_ovs_fmod $rhost $noexec -t 0 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N add 0xfeed br-int  # turn off dscp, submit for meta mark, then resubmit to 0
+		if ! send_ovs_fmod  $noexec -t 0 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N add 0xfeed br-int  # turn off dscp, submit for meta mark, then resubmit to 0
 		then
 			logit "CRI: unable to set dscp reset rule for ${thost#* }   [FAIL] [QOSSOM006]"
 			rc=1

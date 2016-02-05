@@ -167,7 +167,7 @@ function get_rlports
 			itarget = bridge "-qosirl10"
 		}
 		/^port: / &&  $8 == bridge  && $4 == otarget { oport = $3; next; }
-		/^port: / &&  $8 == bridge  && $4 == otarget { iport = $3; next; }
+		/^port: / &&  $8 == bridge  && $4 == itarget { iport = $3; next; }
 		END {
 			printf( "%d %d\n", oport, iport )		# dump the output and input port numbers
 		}

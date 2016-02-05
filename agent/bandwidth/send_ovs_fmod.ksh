@@ -345,7 +345,7 @@ function late_binding
 
 	awk -v target=${1/#:/} ' 							# strip lead : from target (back compat allowing :name to match outside and be passed here)
 		/^port:/ {
-			if( $2 == target || $5 == target || $4 == target )	# match uuid(2), mac(5) or port name(4)
+			if( $2 == target || $6 == target || $5 == target || $4 == target )	# match uuid(2), mac(5) or port name(4)
 			 {
 				print $8, $3;						# $8 is the bridge (switch)
 				exit( 0 )
