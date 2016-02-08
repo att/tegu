@@ -242,7 +242,7 @@ function attach_patch
 		return
 	fi
 
-	if ! $forreal $sudo ovs-vsctl add-port br-int $p0 >/tmp/PID$$.std 2>&1
+	if ! $forreal $sudo ovs-vsctl add-port $bridge $p0 >/tmp/PID$$.std 2>&1
 	then
 		logit "unable to create port $p0"
 		cat /tmp/PID$$.std 2>&1
@@ -434,7 +434,8 @@ do
 		timeout 15 ip link > $link_list						# links will show the veth pair, but NOT the patch 
 		warn_if_bad $? "unable to generate a list of links"
 
-		if ! grep -q "$link_prefix" $link_list				# no veth found, make it
+		#if ! grep -q "$link_prefix" $link_list				# no veth found, make it
+		if ! grep -q "$ve0" $link_list						# no veth found, make it
 		then
 			mk_veth	$bridge
 			attach_veth $bridge
