@@ -73,11 +73,15 @@
 #
 #				There is also now the need to allow a queue number to be supplied for a switch
 #				multiple times, and for the max value to be the sum of each specification. This
-#				is a requirement because if engress queues are turned off, what would be the
+#				is a requirement because if ingress queues are turned off, what would be the
 #				egress queue for the VM is turned into the queue on br-rl which may be a dup.
 #				There isn't a way to avoid the dup without really hacking Tegu, and since the
 #				hope is that ratelimting will eventually be built into OVS, the hack will be
 #				here.
+#
+#				This now parses the agent config file if present (TEGU_AGENT_CONFIG) and looks
+#				for bandwidth.rate_limit as a list of bridges which are allowed to have rate
+#				limiting queues.  If this var is set, then it implies the -f option.
 #
 #	Author:		E. Scott Daniels
 #	Date: 		10 November 2013
@@ -190,20 +194,22 @@ function usage
 	-d delete the data file after reading it
 	-e defines the overarching max rate that is assigned to the QoS set. This defaults to 10Gbps.
 	-E enables egress queues to be established.  this is a queue on the VM's qvo interface to br-int.
-	-g disable the generation of the generic q1 created on all outward interfaces
+	-g deprecated.
 	-h causes queues to be created on the named host
 	-k keep existing queues (do not purge unreferenced queues from OVS)
-	-l defines the OVS bridges that will be affected (defaults to br-int). May be supplied multiple times
-	   or multiple bridge names may be supplied with spaces separating them.
-	   use "all" to affect all bridges without naming them individually.
-	-n is no execute mode
-	-s disable static queue 0 sizing. (implies -g)
+	-l defines the OVS bridges that will be affected overrides bridges supplied via the config file
+       rate limiting parameter, but does NOT imply the -f option as the config file option does.
+       (Use this option to add queues to bridges not listed in the config, but be advised that as
+       the queues on the bridges specified change, they will NOT be automatically updated; the 
+       config file list should be changed and is the only way to properly manage the list.)
+	-n is no execute mode.
+	-s disable static queue 0 sizing.
 	-v verbose mode (dumps the OVS queue setting commands)
 
     NOTE:  with the elimination of HTB queue use by qos-lite, this script now just cleans up
            the various queues created in OVS and should _not_ lay down any new queues. If it is
-		   desired to create the HTB queues as they once were, then the file /etc/tegu/allow_cq
-           should exist.
+		   desired to create the HTB queues as they once were, then the the list of bridges which
+           may have HTB queues must be defined in the agent config file (bandwidth.rate_limit).
 	endKat
 	
 	exit 1
@@ -248,6 +254,7 @@ function preprocess_data
 # --------------------------------------------------------------------------------------------------------------
 
 argv0=${0##*/}
+config="${TEGU_AGENT_CONFIG:-tegu_agent.cfg}"
 
 if [[ $argv0 == "/"* ]]
 then
@@ -264,34 +271,34 @@ verbose=0
 forreal=1
 delete_data=0
 						# both host values set when -h given on the command line
-rhost=""				# given on commands like ovs_sp2uuid (will be -h foo)
 ssh_host=""				# when -h given, sets so that commands are executed on host
 ssh_opts="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"
-thost=$(hostname)		# target host defaults here, but overridden by -h
+thost=$(hostname)		# target host (our physical host)
 limit=""				# limit to just the named switch(es) (-l) (default set on awk call NOT here)
 log_file=""
 static_q0size=1			# -S disables; causes q0 to be statically sized rather than variable based on other queue sizes
 egress_queue=0			# set a queue into (egress) the VM (off by default, -E sets it so we create one)
-all_outward_ports=0		# -A and -l enables this; if off, then we set queues only on br-rl's qosirl0 port
-gen_q1=1				# -g disables; generate a 'synthetic' q1 for outward queues assuming setup intermediate queues is disabled
+gen_q1=0				# -g disables; generate a 'synthetic' q1 for outward queues assuming setup intermediate queues is disabled
 noexec_arg=""			# set to -n by -n to pass to various things
 force=0
-if [[ -f /etc/tegu/allow_cq ]]
-then
-	force=1
-fi
+
+typeset -C bandwidth												# must ensure this is set to handle missing config file
+ql_parse_config -f $config >/tmp/PID$$.cfg && . /tmp/PID$$.cfg		# override script defaults with config; command line trumps config
+cat /tmp/PID$$.cfg
 
 while [[ $1 == -* ]]
 do
 	case $1 in
-		-A)	all_outward_ports=1;;
 		-D)	;;							# ignore deprecated
 		-d)	delete_data=1;;
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-E)	egress_queue=1;;
 		-f) force=1;;
-		-g)	gen_q1=0;;
+		-g)	gen_q1=1;;
 		-h)	
+			echo "-h is deprecated"
+			exit 1
+
 			if [[ $2 != $thost && $2 != "localhost" ]]			# set for ssh if -h is a differnt host
 			then
 				thost=$2; 						# override target host
@@ -302,7 +309,7 @@ do
 			;;
 
 		-k)	purge_ok=0;;
-		-l) all_outward_ports=1; limit+="$2 "; shift;;		# implies all outward ports
+		-l) limit+="$2 "; shift;;				# list of bridges for rate limiting (overrides config, but does not imply -f)
 		-L)	log_file=$2; shift;;
 		-n)	purge_ok=0; delete_data=0; forreal=0; noexec_arg="-n";;
 		-s)	static_q0size=1;;					# now the default, but backward compatable
@@ -321,6 +328,16 @@ do
 	shift
 done
 
+if [[ -n ${bandwidth.rate_limit} ]]
+then
+	if [[ -z $limit ]]
+	then
+		limit=${bandwidth.rate_limit}
+	fi
+	force=1
+
+	echo "rate limiting enabled on: $limit  [OK]"
+fi
 
 if [[ -n $log_file ]]			# helps to capture output when executed by agent
 then
@@ -375,7 +392,7 @@ fi
 
 create_list=""
 (											# order here is IMPORTANT as awk must have switch list first
-	if ! ovs_sp2uuid -a $rhost any				# list each switch on the host and a uuid to port mapping for each switch/port combination
+	if ! ql_suss_ovsd						# dig out all of the data we need from ovs in one shot
 	then
 		echo "ERROR!"
 	fi
@@ -385,17 +402,12 @@ create_list=""
 	fi
 
 	preprocess_data $data_file				# must preprocess to combine queues for the vlinks
-	#if ! sed 's/^/data: /' $data_file
-	#then
-	#	echo "ERROR!"
-	#fi
 ) | awk \
 	-v static_q0size="${static_q0size:-1}" \
 	-v limit_lst="${limit:-br-int}" \
 	-v thost="${thost%%.*}" \
 	-v sudo="$sudo" \
 	-v max_rate=$entry_max_rate \
-	-v aop=${all_outward_ports:-0} \
 	-v egress_queues=${egress_queues:0} \
 	'
 	BEGIN {
@@ -435,36 +447,34 @@ create_list=""
 		swpt2uuid[cur_switch,$3] = $2;		# map switch/port combination to uuid
 		swpt2uuid[cur_swmac,$3] = $2;
 
+		swpt2uuid[cur_swmac,$6] = $2;		# openstack uuid to the ovs uuid	(allow endpoint to be sent as late binding)
+		swpt2uuid[cur_switch,$6] = $2;
+
 		q0max[cur_switch,$3] = max_rate;	# q0 on switch/port starts at full bandwidth
 		q0max[cur_swmac,$3] = max_rate;
 
 		assigned[cur_switch"-"$3] = -1;		# track what we assigned so we can delete everything else
 		assigned[cur_swmac"-"$3] = -1;
 
-		if( NF > 5 )						# add mac to allow mac to port mapping for late binding (2014.10.04)
+		if( match( $4, "-qosirl0$" ) )						# if this is the rate limting 'outbound' veth, then capture the link to rl bridge info
 		{
-			xmac = $5;
-			gsub( ":", "", xmac );
-			mac2port[cur_switch,xmac] = $3				# needed to do late binding of switch to vm ports
-			mac2port[cur_swmac,xmac] = $3
-		}
-		else								# assume this is something like int-br-em* (no mac or additional information available)
-		{
-			if( alt2switch[$4] == "" )		# there is an "internal port" which maps to the switch name; ignore that and capture all others
-			{
-				if( aop || substr( $4, 1, 6 )  == "qosirl" )						# mapping to all outward ports, or this is the br-rl interface
-				{
-					sw2sw_links[cur_switch] = sw2sw_links[cur_switch] $4 " "		# collect all switch to switch link names (e.g. int-br-eth2)
-					sw2sw_links[cur_swmac] = sw2sw_links[cur_swmac] $4 " "
+			sw2sw_ports[cur_switch] = $3 					# snag the port number
+			sw2sw_ports[cur_swmac] = $3						# also with xlation by mac and name
+
+			swlinks2port[cur_switch,$4] = $3				# this captures the name which we will use if we add ability to map to @br-eth3 or somesuch
+			swlinks2port[cur_swmac,$4] = $3
+		} else {
+			if( $5 != "." ) {								# an endpoint has a non-empty mac address
+				xmac = $5;
+				gsub( ":", "", xmac );
+				mac2port[cur_switch,xmac] = $3				# needed to do late binding of switch to vm ports
+				mac2port[cur_swmac,xmac] = $3
 	
-					sw2sw_ports[cur_switch] = sw2sw_ports[cur_switch] $3 " " 		# collect all switch to switch port numberss
-					sw2sw_ports[cur_swmac] = sw2sw_ports[cur_swmac] $3 " "
-	
-					swlinks2port[cur_switch,$4] = $3								# this captures the name which we will use if we add ability to map to @br-eth3 or somesuch
-					swlinks2port[cur_swmac,$4] = $3
-				}
+				mac2port[cur_switch,$6] = $3				# allow openstack endpoint uuid to be used for the late binding too
+				mac2port[cur_swmac,$6] = $3
 			}
 		}
+
 		next;
 	}
 
@@ -477,15 +487,28 @@ create_list=""
 		pt = b[2];
 		spq = a[3]+0;
 
+		n = split( sw, b, "!" )			# we could see something like qos101!br-st and need to split host!switch into pieces parts
+		if( n > 1 ) {
+			swhost = b[1]
+			sw = b[2]
+		} else {
+			swhost = sw
+			sw = "br-int"				# back compat that the rate limit bridge is on br-int by default
+		}
 										# embarrassing hack for q-lite :(
-		if( sw == thost )				# if this is the host we are working for, then it imples br-int and we will interpret port accordingly
+		if( swhost == thost )			# if this is the host we are working for, then it imples br-int, or some other ovs bridge, and we will interpret port accordingly
 		{								# if its a host, but not ours, we leave it alone as that will have the same effect as a switch in the list that isnt here
-			sw = alt2switch["br-int"]				# translate to mac
+			### origsw = alt2switch["br-int"]				# translate to mac
+			sw = alt2switch[sw]			# translate to mac
 
-			if( pt != "-128" )			# port is a mac; implies inward toward vm port (-128 is handled later)
+
+			### -- this should be ignored as ingress queues on the VMs switch are deprecated because of performance issues
+			if( pt != "-128" )			# port is a openstack uuid or mac; implies inward toward vm port (-128 is handled later)
 			{
 				pt = mac2port[sw,pt];
 			}
+			### ---
+
 		}
 
 		if( !(sw in swmap) )			# switch not on this host
@@ -504,7 +527,7 @@ create_list=""
 	
 		if( pt == -128  )							 # for now we will set a queue on all outward interfaces; we need to be smarter and accept @brxxx data instead of -128
 		{
-			n = split( sw2sw_ports[sw], d, " " );
+			n = split( sw2sw_ports[sw], d, " " );		# using qosirl0 exclusively there should be just one port now
 			for( i = 1; i <= n; i++ )
 			{
 				pt = d[i];
@@ -623,7 +646,11 @@ create_list=""
 			}
 		}
 	}
-'  | while read buf				# collect all of the ovs command fragments and build into a single ovs command "tail"
+'  
+
+rm -f /tmp/PID$$.*
+exit
+| while read buf				# collect all of the ovs command fragments and build into a single ovs command "tail"
 do								# CAUTION:  any use of ssh in the loop MUST have -n on the command line
 	if (( verbose ))
 	then
@@ -633,6 +660,7 @@ do								# CAUTION:  any use of ssh in the loop MUST have -n on the command lin
 	case $buf in
 		*ERROR!*)	
 				logit "CRI: error generating ovs data target-host: ${rhost#* }   [FAIL]  [QLTCOQ001]"
+				rm -f /tmp/PID$$.*
 				exit 1
 				;;
 
@@ -711,4 +739,5 @@ exit
 #qos102/-128,res3fbe_00000,2,20000000,20000000,200
 #qos106/fa:de:ad:7a:3a:72,E1res3fbe_00000,2,20000000,20000000,200
 #qos102/fa:de:ad:cc:48:f9,E0res3fbe_00000,2,10000000,10000000,200
+#qos102|br-io/fa:de:ad:cc:48:f9,E0res3fbe_00000,2,10000000,10000000,200
 
