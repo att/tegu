@@ -49,6 +49,8 @@
 #	Author:		E. Scott Daniels
 #
 #	Mods:		13 Nov 2015 - removed some debugging.
+#				08 Feb 2016 - Picks up mac in use as an alternate; needed for non-openstack 
+#					endpoints as there will be no 'external' mac added.
 # -----------------------------------------------------------------------------------------------
 
 # executes the needed ovs commands which generate all the bits that we need to parse through.
@@ -149,6 +151,14 @@ awk \
 		next;
 	}
 
+	/^mac_in_use / {     				// non-ovs things seem to show this way
+		gsub( "\"", "" );
+		if( $NF != "" && $NF != "[]" ) {
+			alt_mac[id] = $NF;
+		}
+		next;
+	}
+
 	/^name/ {
 		gsub( "\"", "" );
 		gsub( "}", "" );
@@ -225,13 +235,18 @@ awk \
 
 			for( i = 0; i < nports[id]; i++ )
 			{
+				mac = exmac[iface[pid,0]]
+				if(  mac == "." && alt_mac[iface[pid,0]] != "" ) {
+					mac = alt_mac[iface[pid,0]]
+				}
+
 				pid = ports[id,i];	
 				if( pid != ""  &&  ofport[iface[pid,0]] != "" )
 					if( ! drop_if[iface[pid,0]] ) {
 						if( label )
-							printf( "port: uuid=%s of_portn=%s of_name=%s mac=%s neutron_uuid=%s vlan=%d br=%s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], exmac[iface[pid,0]], exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id] );
+							printf( "port: uuid=%s of_portn=%s of_name=%s mac=%s neutron_uuid=%s vlan=%d br=%s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], mac, exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id] );
 						else
-							printf( "port: %s %s %s %s %s %d %s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], exmac[iface[pid,0]], exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id]);
+							printf( "port: %s %s %s %s %s %d %s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], mac, exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id]);
 					}
 			}
 		}
