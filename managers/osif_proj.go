@@ -534,6 +534,8 @@ func (p *osif_project) Fill_ip2mac( umap map[string]*string ) {
 	that can be passed into the network manager as an add host to graph request. This
 	expects to run as a go routine and to write the response directly back on the channel
 	givn in the message block.
+
+	We allow additional junk as vmname/addres and port info might follow: token/proj/ipaddr:port
 */
 func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_projs map[string]*osif_project, id2pname map[string]*string, pname2id map[string]*string ) {
 	if msg == nil || msg.Response_ch == nil {
@@ -543,7 +545,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 	msg.Response_data = nil
 
 	tokens := strings.Split( *(msg.Req_data.( *string )), "/" )			// break project/host into bits
-	if len( tokens ) != 2 || tokens[0] == "" || tokens[1] == "" {
+	if len( tokens ) < 2 || tokens[0] == "" || tokens[1] == "" {
 		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s bad tokens",  *(msg.Req_data.( *string )) )
 		msg.State = fmt.Errorf( "invalid project/hostname string: %s", *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
