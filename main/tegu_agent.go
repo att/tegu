@@ -61,6 +61,7 @@
 				02 Sep 2015 : Pick up new agent script.
 				12 Nov 2015 : Updated to return stdout/stderr for do_mirrorwiz()
 				21 Jan 2016 : Updated rsync list.
+				11 Feb 2016 : Allow for rate limiting on multiple bridges. (2.4)
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -76,6 +77,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/att/gopkgs/bleater"
@@ -87,7 +89,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.3/11216"
+	version		string = "v2.4/12176"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -303,7 +305,8 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
 																		// do NOT close the channel here; only senders should close
 
-	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// for now, there will only ever be one host for these commands
+	tokens := strings.Split( act.Hosts[0], "!" )						// split swtich off; we don't need as script will find proper bridge
+	err = broker.NBRun_cmd( tokens[0], cmd_str, 0, ssh_rch )
 	if err != nil {
 		sheep.Baa( 1, "WRN: error submitting bandwidth command  to %s: %s", act.Hosts[0], err )
 		jout, _ = json.Marshal( msg )
@@ -392,9 +395,11 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
 																		// do NOT close the channel here; only senders should close
-	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// oneway fmods are only ever applied to one host so [0] is ok
+
+	tokens := strings.Split( act.Hosts[0], "!" )						// oneway fmods are only ever applied to one host so [0] is ok
+	err = broker.NBRun_cmd( tokens[0], cmd_str, 0, ssh_rch )			// we don't need !switch, script will find the right bridge
 	if err != nil {
-		sheep.Baa( 1, "WRN: error submitting bwow command  to %s: %s", act.Hosts[0], err )
+		sheep.Baa( 1, "WRN: error submitting bwow command  to %s: %s", tokens[0], err )			
 		jout, _ = json.Marshal( msg )
 		return
 	}
@@ -582,6 +587,11 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 		endKat
 
 	We'll use the brokers 'send script for execution' feature rather to execute our script.
+
+	With the support of rate limiting on multiple bridges, we allow the host name to be host!bridge
+	and thus must split these so we can execute on the correct host, and ensure that we execute only
+	once per physical host.  The script will do all of the bridges listed in the file, so it need be
+	run only once per real host.
 */
 func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
     var (
@@ -612,18 +622,29 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
         return
     }
 
+	done := make( map[string]bool, 128 )					// track phys host sent to (128 is only a hint, not a limit)
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
 															// do NOT close the channel here; only senders should close
 
 	wait4 := 0												// number of responses to wait for
 	for i := range req.Hosts {
-    	sheep.Baa( 1, "via broker on %s: create_ovs_queues embedded in %s", req.Hosts[i], fname )
+		h := req.Hosts[i]									// default to the host as is
+		tokens := strings.SplitN( req.Hosts[i], "!", 2 )
+		if len( tokens ) == 2  {
+			h = tokens[0]									// assume physhost!bridge; use physhost
+		}
 
-		err := broker.NBRun_on_host( req.Hosts[i], fname, "", wait4, ssh_rch )		// sends the file as input to be executed on the host
-		if err != nil {
-			msg_007( req.Hosts[i], "create_ovs_queues", err )
-		} else {
-			wait4++
+		if ! done[h] {										// only need to run once per physical host, so if we haven't....
+    		sheep.Baa( 1, "via broker on %s: create_ovs_queues embedded in %s", h, fname )
+
+			err := broker.NBRun_on_host( h, fname, "", wait4, ssh_rch )		// sends the file as input to be executed on the host
+			if err != nil {
+				msg_007( h, "create_ovs_queues", err )
+			} else {
+				wait4++
+			}
+
+			done[h] = true
 		}
 	}
 
