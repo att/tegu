@@ -39,6 +39,14 @@
 #				02 Feb 2016 - Added support for a parallel exit patch pair to reduce overhead.
 # -----------------------------------------------------------------------------------------------------------------
 
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
+
 function logit
 {
 	echo "$(date "+%s %Y/%m/%d %H:%M:%S") $rhost $argv0: $@" >&2
@@ -50,7 +58,6 @@ function ensure_ok
 	then
 		shift
 		logit "abort: ssh timout: $@  target-host: $rhost  [FAIL]"
-		rm -f $tmp/PID$$.*
 		exit 1
 	fi
 
@@ -58,7 +65,6 @@ function ensure_ok
 	then
 		shift
 		logit "abort:  $@  target-host: $rhost  [FAIL]"
-		rm -f $tmp/PID$$.*
 		exit 1
 	fi
 }
@@ -406,7 +412,6 @@ do
 		if [[ -e /etc/tegu/no_irl ]]		# check here -- we allow delete to go even when no-irl is set
 		then
 			logit "abort: /etc/tegu/no_irl file exists which prevents setting up ingress rate limiting bridge and flow-mods	[WARN]"
-			rm -f /tmp/PID$$.*
 			exit 1
 		fi
 
@@ -527,7 +532,6 @@ do
 	fi
 done
 
-rm -f $tmp/PID$$.*
 exit 0
 
 

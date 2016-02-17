@@ -148,6 +148,9 @@
 
 # ----------------------------------------------------------------------------------------------------------
 
+exec 2>/tmp/daniels.tcoqlog
+set -x
+
 trap "cleanup" 1 2 3 15 EXIT
 function cleanup
 {
@@ -267,7 +270,7 @@ entry_max_rate=$(expand 10G)
 forreal=1
 purge_ok=1
 
-verbose=0
+verbose=1
 forreal=1
 delete_data=0
 						# both host values set when -h given on the command line
@@ -458,6 +461,7 @@ create_list=""
 
 		if( match( $4, "-qosirl0$" ) )						# if this is the rate limting 'outbound' veth, then capture the link to rl bridge info
 		{
+printf( ">>> snagging port for cur-sw=%s $4=%s port=%s\n", cur_switch, $4, $3 ) >"/dev/fd/2"
 			sw2sw_ports[cur_switch] = $3 					# snag the port number
 			sw2sw_ports[cur_swmac] = $3						# also with xlation by mac and name
 
@@ -528,6 +532,7 @@ create_list=""
 		if( pt == -128  )							 # for now we will set a queue on all outward interfaces; we need to be smarter and accept @brxxx data instead of -128
 		{
 			n = split( sw2sw_ports[sw], d, " " );		# using qosirl0 exclusively there should be just one port now
+printf( ">>> splitting for switch %s: %s\n", sw, sw2sw_ports[sw] ) >"/dev/fd/2"
 			for( i = 1; i <= n; i++ )
 			{
 				pt = d[i];
@@ -646,11 +651,7 @@ create_list=""
 			}
 		}
 	}
-'  
-
-rm -f /tmp/PID$$.*
-exit
-| while read buf				# collect all of the ovs command fragments and build into a single ovs command "tail"
+'  | while read buf				# collect all of the ovs command fragments and build into a single ovs command "tail"
 do								# CAUTION:  any use of ssh in the loop MUST have -n on the command line
 	if (( verbose ))
 	then

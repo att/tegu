@@ -98,7 +98,18 @@
 #								accept a endpoint uuid. Offically deprecated the use of -h.
 #				02 Feb 2016 - Added -i action to allow the in-port to be forced to a specific value.
 #								Removed backlevel (pre 2.0) checking.
+#				15 Feb 2016 - Fixed warnings associated with setting the DSCP value which are caused by
+#								OVS not accepting protocol types on the command where the mod action is
+#								given. Added cleanup of tmp files.
 # ---------------------------------------------------------------------------------------------------------
+
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
 
 function logit
 {
@@ -260,6 +271,8 @@ function suss_vid
 
 # check for the ingress rate limiting things. Returns good if both the rate limiting
 # brige (br-rl) with a qosirlM port and a br-int port qosirlN all exist.
+# DEPRECATED -- caller is now responsible for checking; this script should not worry
+# 				about 'policy' such that this is.
 function check_irl
 {
 	if (( ignore_irl ))		# safety valve for human operation and probably steering
@@ -400,12 +413,14 @@ arp_type="dl_type=0x0806"
 lbswitch=""					# set by late binding -i or -o uuid|mac and overrides bridge name on command line if set
 of_protolist="OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13"		# default openflow protos; some options require different combinations
 of_shortprotolist="OpenFlow10,OpenFlow12,OpenFlow13"			# OpenFlow11 not suported on v1.10
+of_limitedprotolist="OpenFlow10" 								# some options need the proto list to be very limited when they are present
 of_protoopt="-O"
+limit_openflow=0												# when set of_proto list will be set to the limited option from the get go
+
 type=""						# no specific type to match (unless -S or -D given) -4, -6 or -a can be used if -S/D is not needed.
 mode="options"
 output="normal"
 match=""
-ignore_irl=1				# -I will set to 0 and we'll require br-rl and veth to set fmods on br-int
 rhost=""					# parm for commands like ovs_sp2uuid that need to know; default to this host
 thost="$(hostname)"
 priority=200
@@ -443,7 +458,7 @@ do
 					shift
 					;;
 
-				-I)	ignore_irl=1;;
+				-I)	ignore_irl=1;;						# DEPRECATED -- here for back compat
 				-n)	sudo="echo noexec mode: ";;
 				-p)	priority=$2; shift;;
 				-t)	
@@ -493,6 +508,7 @@ do
 					if [[ -n $lbswitch ]]  &&  [[ $lbswitch != $s ]]
 					then
 						logit "-i (match) and -o (action) reference endpoints which are not on the same bridge ($s != $lbswitch)   [FAIL]"
+						rm -f /tmp/PID$$.*
 						exit 1
 					fi
 					lbswitch=$s
@@ -535,9 +551,18 @@ do
 
 				-t)	match+="tun_id=$2 "; shift;;		# id[/mask]
 				-T) match+="nw_tos=$2 "; shift;;
-				-v)	match+="dl_vlan=$( late_binding_vlan ${2} ) "; shift;; 			# tci_vlan[/mask] (allow uuid/mac and suss from ovs data)
+				-v)	tvl=$( late_binding_vlan ${2} )
+					if [[ $tvl != *"/"* ]]  &&  (( tvl < 0 || tvl > 0xffff ))
+					then
+						echo "invalid vlan set with -v ($tvl) using $2	[FAIL]"
+						exit 1
+					fi
+					match+="dl_vlan=$tvl "				# tci_vlan[/mask] (allow uuid/mac and suss from ovs data)
+					shift
+					;;
 
 				*)	echo "unrecognised match option: $1  [FAIL]"
+					rm -f /tmp/PID$$.*
 					exit 1
 					;;
 			esac
@@ -557,6 +582,7 @@ do
 					if [[ -n $lbswitch ]]  &&  [[ $lbswitch != $as ]]
 					then
 						logit "-i (action) and -o (action) or -i (match)  reference endpoints which are not on the same bridge ($as != $lbswitch)   [FAIL]"
+						rm -f /tmp/PID$$.*
 						exit 1
 					fi
 					lbswitch=$as
@@ -573,6 +599,7 @@ do
 					if [[ -n $lbswitch ]]  &&  [[ $lbswitch != $s ]]
 					then
 						logit "-i (match) and -o (action) reference endpoints which are not on the same bridge ($s != $lbswitch)   [FAIL]"
+						rm -f /tmp/PID$$.*
 						exit 1
 					fi
 					lbswitch=$s
@@ -610,7 +637,12 @@ do
 				-s)	action+="mod_dl_src:$2 "; shift;;
 				-S)	action+="mod_nw_src:$2 "; shift;;
 				-t)	action+="set_tunnel:$2 "; shift;;
-				-T) action+="mod_nw_tos:$2 "; shift;;
+				-T) 									
+					limit_openflow=1					# ovs seems unable to accept this with OpenFlow* where * is not 10.
+					action+="mod_nw_tos:$2 " 
+					shift
+					;;
+
 				-v)	
 					vid="${2%%/*}"						# strip off if id/priority given
 					vpri="${2##*/}"						# snag the priority if there
@@ -669,6 +701,7 @@ do
 				-x)	action+="$2 "; shift;;				# externally supplied action
 		
 				*)	echo "unrecognised action option: $1  [FAIL]"
+					rm -f /tmp/PID$$.*
 					exit 1
 					;;
 			esac
@@ -676,6 +709,12 @@ do
 
 	shift
 done
+
+if (( limit_openflow ))
+then
+	logit "limited openflow options must be used; setting limited options"
+	of_protolist="$of_limitedprotolist"
+fi
 
 # remaining parameters should be {add|del} cookie switch; switch can be omitted in the case of
 # late binding as it will be set by the ovs_sp2uuid search.
@@ -685,16 +724,8 @@ case $1 in
 		if [[ -z ${lbswitch:-$3} ]]
 		then
 			echo "set_ovs_fmod: no bridge on command line, or late binding resulted in nil string.	[FAIL]"
+			rm -f /tmp/PID$$.*
 			exit 1
-		fi
-
-		if [[ ${lbswitch:-$3} == "br-int" ]]		# must ensure that ingress rate limiting is on for br-int fmods
-		then
-			if ! check_irl
-			then
-				rm -f /tmp/PID$$.*
-				exit 1		# error msg written in function, so just exit bad here
-			fi
 		fi
 
 		if [[ -n $match ]]

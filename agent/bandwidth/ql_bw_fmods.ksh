@@ -96,10 +96,12 @@
 #								Deprecated running on remote host with -h option.
 # ---------------------------------------------------------------------------------------------------------
 
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
 function cleanup
 {
 	rm -f /tmp/PID$$.*
-	exit $1	
 }
 
 function logit
@@ -112,8 +114,7 @@ function usage
 	echo "$argv0 v1.1/15125"
 	echo "usage: $argv0 [-6] [-d dest-endpt] [-E external-ip] [-h host] [-k] [-n] [-o] [-p|P proto[:addr]:port] [-s src-endpt] [-T dscp] [-t hard-timeout] [-v]"
 	echo "usage: $argv0 [-X] 		# delete all"
-	echo ""
-	echo "  -6 forces IPv6 address matching to be set"
+	echo "" echo "  -6 forces IPv6 address matching to be set"
 }
 
 function suss_ovs_data
@@ -176,11 +177,11 @@ function get_rlports
 
 # ----------------------------------------------------------------------------------------------------------
 
+typeset -C bandwidth			# must predefine on the off chance that config is nil
 config="${TEGU_AGENT_CONFIG:-tegu_agent.cfg}"
-ovs_data=/tmp/PID$$.ovsd		# output from ovs_susd
 
 bridge="br-int"
-mt_base=90				# meta table base 90 sets 0x01, 91 sets 0x02, 94 sets 0x04...
+ovs_data=/tmp/PID$$.data		# data from suss_ovsd
 
 lmac=""					# local mac 	src outbound, dest inbound
 rmac=""					# remote mac	src inbound, dest outbound
@@ -217,7 +218,6 @@ while [[ $1 == -* ]]
 do
 	case $1 in
 		-6)		ip_type="-6";;								# force ip6 option to be given to send_ovs_fmod (outbound only).
-		-b)		mt_base="$2"; shift;;
 		-d)		uuid2mac "$2" | read rmac dvlan dofport dbridge junk; 	# get the mac, vlan, bridge and openflow port from ovs based on neutron uuid
 				duuid=$2												# could be needed for rate limiting if they reversed -s and -d
 				shift
@@ -277,12 +277,12 @@ do
 		-X)		operation="del";;
 
 		-\?)	usage
-				cleanup 0
+				exit 0
 				;;
 
 		*)	echo "unrecognised option: $1"
 			usage
-			cleanup 1
+			exit 1
 			;;
 	esac
 
@@ -291,11 +291,16 @@ done
 
 
 match_port=""
+match_vlan=""
 if (( sofport > 0 ))				# source should be local and what we have, so use it first
 then
 	vp_base=5
 	match_port="-i $sofport"		# for outbound fmod
-	match_vlan="-v $svlan"			# for inbound fmod
+	if (( svlan >= 0 ))
+	then
+		match_vlan="-v $svlan"			# for inbound fmod
+		set_vlan="-v $svlan"
+	fi
 	logit "openflow vlan/port ($svlan, $sofport) captured from source uuid"
 else
 	if (( dofport > 0 ))			# if caller got them backwards
@@ -303,7 +308,11 @@ else
 		luuid=$duuid					# switch in case we're rate limiting
 		vp_base=5
 		match_port="-i $dofport"		# for outbound fmod
-		match_vlan="-v $dvlan"			# for inbound fmod
+		if (( dvlan >= 0 ))
+		then
+			match_vlan="-v $dvlan"			# for inbound fmod
+			set_vlan="-v $dvlan"
+		fi
 		logit "openflow vlan/port ($dvlan, $dofport) captured from dest uuid"
 	else
 		logit "openflow port and vlan information not found"
@@ -342,13 +351,13 @@ if [[ -z $lmac || -z $rmac ]]
 then
 	logit "must have source and dest mac addresses in order to generate flow-mods   [FAIL]"
 	rm -f /tmp/PID$$.*
-	cleanup 1
+	exit 1
 fi
 
 if [[ -z $bridge ]]
 then
 	logit "flow_mods not set: unable to determine bridge"
-	cleanup 1
+	exit 1
 fi
 
 if (( koe ))			# true == keep dscp marking as packet 'exits' our control area
@@ -362,10 +371,12 @@ if (( ! one_switch )) && [[ -n ${bandwidth.rate_limit} ]]  &&  [[ " ${bandwidth.
 then 			# if this bridge is flagged for rate limiting, push all traffic through the rate limiting extension bridge
 	get_rlports $bridge | read rl_oport rl_iport		# get oubound and inbound ports
 
-if (( $rl_iport <= 0 ))		# TESTING
-then
-	rl_iport=$rl_oport
-fi
+	if (( $rl_iport <= 0 ))		# TESTING
+	then
+		rl_iport=$rl_oport
+		echo ">>>> fix me now" >&2
+		exit 1
+	fi
 	#
 	# outbound
 	#	p900: source is endpoint & from rl bridge: set in-port to the endpoint's port, strip vlan id,  resub (,0) for normal
@@ -381,9 +392,6 @@ fi
 	fr_rl=" -i $rl_iport"
 	rl_port=JUNK_FIX_THE_CODE
 
-	####	send_ovs_fmod $forreal $timeout -p xxx  --match $match_vlan $ip_type -m 0x0/0x7 $iexip -d $lmac -s $rmac $ib_lproto $ib_rproto $ib_netaddr --action $queue $idscp -M 0x01 -R ,0 -N $operation ${bandwidth.cookie} $bridge
-	echo "WARNING:  not ready for this quite yet :)   Hey watch this...."
-
 	# outbound - match traffic from rate limiting bridge
 	# manual prototype: sudo ovs-ofctl -O OpenFlow10 add-flow br-int 'hard_timeout=210,cookie=0xbaff,metadata=0/0x7,dl_src=fa:de:ad:f8:d0:0e,in_port=57,priority=900,action=strip_vlan,set_field:9->in_port,set_field:0x01->metadata,NORMAL'
 	if ! send_ovs_fmod $forreal -p 900 $timeout --match -m 0/0x07 -i $rl_iport -s $lmac  -d $rmac $ob_lproto $ob_rproto $ob_netaddr --action -M 0x01 -V -i $luuid -R ,0 -N  $operation ${bandwidth.cookie} $bridge
@@ -393,11 +401,11 @@ fi
 	fi
 
 	#TODO -- add queue
-	# outbound: force the reservation traffic to the rate limiting bridge after setting the vlan
-    if ! send_ovs_fmod $forreal -p $(( pri_base + 400 )) $timeout --match -s $lmac -d $rmac -m 0/0x07 $ip_type $iexip  $ob_lproto $ob_rproto $ob_netaddr --action  -v $svlan -o $rl_oport  $operation ${bandwidth.cookie} $bridge
+	# outbound: force the reservation traffic to the rate limiting bridge after setting the vlan (vlan always set to 1 since it's stripped on the way out anyway)
+    if ! send_ovs_fmod $forreal -p $(( pri_base + 400 )) $timeout --match -s $lmac -d $rmac -m 0/0x07 $ip_type $iexip  $ob_lproto $ob_rproto $ob_netaddr --action  -v 1 -o $rl_oport  $operation ${bandwidth.cookie} $bridge
 	then
 		logit "could not set rate limiting p 400 (out to br-rl) flowmod	[FAIL]"
-		cleanup 1
+		exit 1
 	fi
 
 	# inbound -- if outbound fmods were successful, and koe flag, prevent DSCP umarking

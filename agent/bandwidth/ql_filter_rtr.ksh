@@ -37,6 +37,14 @@
 #	Date:		14 April 2015
 # --------------------------------------------------------------------------------------------------
 
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
+
 
 age=300								# reload only every 5 minutes by default
 while [[ $1 == -* ]]

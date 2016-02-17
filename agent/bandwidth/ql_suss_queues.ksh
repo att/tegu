@@ -34,6 +34,14 @@
 # -----------------------------------------------------------------------------------------------------------------
 
 
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
+
 if (( $( id -u ) != 0 ))
 then
 	sudo="sudo"
@@ -74,9 +82,10 @@ done
 (
 	if (( ! backlevel_ovs ))
 	then
-		$ssh $sudo ovs-vsctl --data=bare --column=name,_uuid,port list Bridge $bridge | sed 's/^/BRIDGE: /'
-		$ssh $sudo ovs-vsctl --data=bare --column=name,_uuid,qos list Port | sed 's/^/PORT: /'
+		$ssh $sudo ovs-vsctl --data=bare --column=_uuid,name,port list Bridge $bridge | sed 's/^/BRIDGE: /'
+		$ssh $sudo ovs-vsctl --data=bare --column=_uuid,name,qos list Port | sed 's/^/PORT: /'
 		$ssh $sudo ovs-vsctl --data=bare --column=_uuid,queues,other_config list QoS | sed 's/^/QOS: /'
+		$ssh $sudo ovs-vsctl --data=bare list Queue | sed 's/^/QUEUE: /'
 	else
 
 		# turning off columns we can only hope that _uuid is always output first (another claim by the man page, but we will see)
@@ -104,9 +113,15 @@ done
 	}
 
 
-	/^PORT: _uuid/	{ puname = $NF; next; }		 # CAUTION -- uuid is (should) always be printed first
+						# CAUTION -- uuid is (should) always be printed first; we dont assume anything about the order of the rest
+	/^PORT: _uuid/ {
+						puname = $NF;
+						pname = "unknown";
+						p2qos[puname] = "";
+						next;
+					}
 	/^PORT: name/	{ pname = $NF; u2pname[puname] = pname; next; }	# map the port uuid to human name
-	/^PORT: qos/	{ p2qos[puname] = $NF; next; }			# map port to the qos entry
+	/^PORT: qos.*:/	{ p2qos[puname] = $NF; next; }			# map port to the qos entry
 
 	/^QOS: _uuid/	{ qoname = $NF; next; }
 	/^QOS: other_config/	{
