@@ -143,6 +143,7 @@
 				16 Dec 2015 : Strips domain from phys host names for path finding
 				17 Dec 2015 : Lists only L3 nodes for network hosts.
 				09 Jan 2016 : Bump version (added more options for add-mirror)
+				17 Feb 2016 : Bump version for rate liming on multiple bridges.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -181,13 +182,12 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v4.0.1/11136"
+		version		string = "v4.0.2/12176"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
 		needs_help 	*bool
 		fl_host		*string
-		//chkpt_file	*string
 
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager
@@ -264,7 +264,7 @@ func main() {
 			break
 		}
 
-		sheep.Baa( 2, "waiting for network to initialise: need state 2, current state = %d", req.Response_data.(int)  )
+		sheep.Baa( 2, "waiting for network to initialise: need state 1, current state = %d", req.Response_data.(int)  )
 		time.Sleep( 5 * time.Second )
 	}
 
@@ -273,8 +273,8 @@ func main() {
 	req = <- my_chan												// block until we load from the datacache
 
 	if req.State != nil {
-		sheep.Baa( 0, "WRN: datacache info was NOT loaded: %s	[TGUEPT000]\n", req.State )
-		//os.Exit( 1 )
+		sheep.Baa( 0, "CRI: datacache info was NOT loaded: %s	[TGUEPT000]\n", req.State )
+		os.Exit( 1 )
 	} else {
 		sheep.Baa( 1, "network initialised, reservations loaded from cache, opening up system for all requests" )
 	}
