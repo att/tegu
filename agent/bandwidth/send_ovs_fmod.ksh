@@ -100,7 +100,8 @@
 #								Removed backlevel (pre 2.0) checking.
 #				15 Feb 2016 - Fixed warnings associated with setting the DSCP value which are caused by
 #								OVS not accepting protocol types on the command where the mod action is
-#								given. Added cleanup of tmp files.
+#								given. Added cleanup of tmp files. Removed -h option as we cannot support
+#								late binding via ssh invocation of ovs commands.
 # ---------------------------------------------------------------------------------------------------------
 
 trap "cleanup" EXIT
@@ -118,7 +119,7 @@ function logit
 
 function usage
 {
-	echo "$argv0 v1.3/15125"
+	echo "$argv0 v1.4/12176"
 	echo "usage: $argv0 [-I] [-n] [-p priority] [-t hard-timeout] [--match match-options] [--action action-options] {add|del} cookie[/mask] switch-name"
 	echo ""
 }
@@ -136,11 +137,6 @@ function help
 		-t seconds      (applies the hard timeout to the generated flow-mod when adding)
                         if set to 0, then no timeout is added to the flowmod.
 
-
-	Deprecated options
-		-h host         (execute the ovs command(s) on the indicated host) Deprecated because it
-                        is not capable of late binding in this mode which is now very important
-                        to endpoint processing.
 
 	Match Options:
 	Each match option is followed by a single token parameter
@@ -214,6 +210,11 @@ function help
 
 	Backlevel versions of OVS (before 2.x) are NOT supported.  The -b and -B options
 	previously used to detect and use a backlevel OVS version are ignored.
+
+	Deprecated options
+		-h host         (execute the ovs command(s) on the indicated host) Deprecated because it
+                        is not capable of late binding in this mode which is now very important
+                        to endpoint processing.
 endKat
 
 }
@@ -424,7 +425,6 @@ match=""
 rhost=""					# parm for commands like ovs_sp2uuid that need to know; default to this host
 thost="$(hostname)"
 priority=200
-ssh_host=""					# if -h given set to the ssh command needed to execute on the remote host
 ssh_opts="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"	# we tollerate a bit more connect time wait here
 hto="hard_timeout=60," 		# must have comma so we can ommit it if -t 0 on command line
 if (( $( id -u ) ))
@@ -446,16 +446,10 @@ do
 				-B)	;;					# ingored as we make no effort to support a backlevel version (pre 2.x) of OVS
 				-b) ;;	
 
-				-h)	
-					# this is deprecated.  The script should be available on the remote hosts and run via ssh directly
-					# rather than running the ovs commands via ssh. Late binding canNOT be supported if -h is used.
-					if [[ $2 != $thost &&  $2 != "localhost" ]]		# if a different host set up to run the command there
-					then
-						logit "WARNING:  use of the -h option is deprecated"
-						rhost="-h $2" 							# simple rhost for ovs_sp2uuid calls
-						ssh_host="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
-					fi
-					shift
+				-h)						# this is deprecated.  The script should be available on all hosts via ssh broker and run 
+										# locally in order to support late binding.  Error if -h given
+					logit "ERROR:  use of the -h option is deprecated	[FAIL]"
+					exit 1
 					;;
 
 				-I)	ignore_irl=1;;						# DEPRECATED -- here for back compat
@@ -612,25 +606,20 @@ do
 				-q)	action+="set_queue:$2 "; shift;;	# special ovs set queue
 				-r) action+="resubmit $2 "; shift;;
 				-R) 										# $2 should be [port],table where port can be a uuid if running locally
-					if [[ -z $ssh_host ]]					# if running locally (can support late binding, and quoting is different)
+					if [[ $2 == *","* ]]				# break so we can allow an endpoint uuid to translate late into a port number
 					then
-						if [[ $2 == *","* ]]				# break so we can allow an endpoint uuid to translate late into a port number
+						p="${2%%,*}"
+						t="${2##*,}"
+						if [[ -n $p ]]					# uuid given, xlate it to the port (if port,table was given the original port comes back)
 						then
-							p="${2%%,*}"
-							t="${2##*,}"
-							if [[ -n $p ]]					# uuid given, xlate it to the port (if port,table was given the original port comes back)
-							then
-								late_binding $p | read p junk
-							fi
-						else
-							p=""
-							t=$2
+							late_binding $p | read p junk
 						fi
-
-						action+="resubmit($p,$t) ";
 					else
-						action+="resubmit'($2)' "; 		# must quote if sending via ssh
+						p=""
+						t=$2
 					fi
+
+					action+="resubmit($p,$t) ";
 					shift
 					;;			
 
@@ -736,11 +725,11 @@ case $1 in
 		action="${action}${meta}${goto}$output"		# bang them all into one (goto/meta must be last)
 		action="${action% }"						# remove trailing blank
 
-		timeout 20 $ssh_host $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_protolist 2>/dev/null		# ignore errors; we retry after 1st error and retry will spill guts if needed
+		timeout 20 $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_protolist 2>/dev/null		# ignore errors; we retry after 1st error and retry will spill guts if needed
 		if (( $? != 0 ))
 		then
 			sleep 1
-			timeout 20  $ssh_host $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_shortprotolist
+			timeout 20  $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_shortprotolist
 			if (( $? != 0 ))
 			then
 				echo "unable to set protocols for brige: ${lbswitch:-$3} on ${thost#* }" >&2
@@ -756,7 +745,7 @@ case $1 in
 		rc=1
 		while (( tries > 0 )) &&  (( rc != 0 ))
 		do
-			timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist add-flow ${lbswitch:-$3} "$fmod"
+			timeout 15 $sudo ovs-ofctl $of_protoopt $of_protolist add-flow ${lbswitch:-$3} "$fmod"
 			rc=$?
 			(( tries-- ))
 
@@ -792,7 +781,7 @@ case $1 in
 
 		fmod="cookie=$cookie,${type}${match// /,}"
 
-		timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist del-flows ${lbswitch:-$3} "$fmod"
+		timeout 15 $sudo ovs-ofctl $of_protoopt $of_protolist del-flows ${lbswitch:-$3} "$fmod"
 		if (( $? != 0 ))
 		then
 			logit "unable to delete flow mod on ${thost#* }: $fmod		[FAIL]"

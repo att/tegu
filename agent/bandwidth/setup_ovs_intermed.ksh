@@ -537,7 +537,7 @@ do
 		-D)	allow_reset=0;;						# do not write the dscp reset flowmods
 		-e)	entry_max_rate=$( expand $2 ); shift;;
 		-h)	
-			echo "the -h option is deprecated"
+			echo "ERROR: the -h option is deprecated		[FAIL]"
 			exit 1
 			;;
 
