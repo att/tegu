@@ -211,7 +211,7 @@ ob_rproto=""            # out/inbound remote proto set sith -p
 ib_rproto=""
 
 typeset -C bandwidth											# must ensure this is set to handle missing config file
-ql_parse_config -f $config >/tmp/PID$$.cfg && . /tmp/PID$$.cfg		# xlate config file into variables and source them
+ql_parse_config -f $config >/tmp/PID$$.cfg && . /tmp/PID$$.cfg	# xlate config file into variables and source them
 bandwidth.cookie=${bandwidth.cookie:-0xb0ff}					# default if not in config or config missing
 
 while [[ $1 == -* ]]
@@ -252,7 +252,7 @@ do
 				;;		
 
 		-p)		pri_base=5	 								# dest proto:port priority must increase to match over more generic f-mods
-				split_pap "$2" | read proto addr port ip_type junk	# expect {tcp|udp}:[address:]port
+				ql_split_pap "$2" | read proto addr port ip_type junk	# expect {tcp|udp}:[address:]port
 				if [[ $addr != "none" ]]
 				then
 					ib_netaddr="-S $addr"					# transport protocol address
@@ -371,12 +371,6 @@ if (( ! one_switch )) && [[ -n ${bandwidth.rate_limit} ]]  &&  [[ " ${bandwidth.
 then 			# if this bridge is flagged for rate limiting, push all traffic through the rate limiting extension bridge
 	get_rlports $bridge | read rl_oport rl_iport		# get oubound and inbound ports
 
-	if (( $rl_iport <= 0 ))		# TESTING
-	then
-		rl_iport=$rl_oport
-		echo ">>>> fix me now" >&2
-		exit 1
-	fi
 	#
 	# outbound
 	#	p900: source is endpoint & from rl bridge: set in-port to the endpoint's port, strip vlan id,  resub (,0) for normal
@@ -392,17 +386,15 @@ then 			# if this bridge is flagged for rate limiting, push all traffic through 
 	fr_rl=" -i $rl_iport"
 	rl_port=JUNK_FIX_THE_CODE
 
-	# outbound - match traffic from rate limiting bridge
-	# manual prototype: sudo ovs-ofctl -O OpenFlow10 add-flow br-int 'hard_timeout=210,cookie=0xbaff,metadata=0/0x7,dl_src=fa:de:ad:f8:d0:0e,in_port=57,priority=900,action=strip_vlan,set_field:9->in_port,set_field:0x01->metadata,NORMAL'
+	# outbound - match traffic from rate limiting bridge. set endpoint's port and resub for regular processing
 	if ! send_ovs_fmod $forreal -p 900 $timeout --match -m 0/0x07 -i $rl_iport -s $lmac  -d $rmac $ob_lproto $ob_rproto $ob_netaddr --action -M 0x01 -V -i $luuid -R ,0 -N  $operation ${bandwidth.cookie} $bridge
 	then
 		logit "could not set flow-mod to route reservation traffic from rate limiting bridge	[FAIL]"
 		exit 1
 	fi
 
-	#TODO -- add queue
-	# outbound: force the reservation traffic to the rate limiting bridge after setting the vlan (vlan always set to 1 since it's stripped on the way out anyway)
-    if ! send_ovs_fmod $forreal -p $(( pri_base + 400 )) $timeout --match -s $lmac -d $rmac -m 0/0x07 $ip_type $iexip  $ob_lproto $ob_rproto $ob_netaddr --action  -v 1 -o $rl_oport  $operation ${bandwidth.cookie} $bridge
+	# outbound: force the reservation traffic to the rate limiting bridge after setting the vlan (vlan always set to 1 since it's stripped on the way out  of -rl anyway)
+    if ! send_ovs_fmod $forreal -p $(( pri_base + 400 )) $timeout --match -s $lmac -d $rmac -m 0/0x07 $ip_type $iexip  $ob_lproto $ob_rproto $ob_netaddr --action  $queue -v 1 -o $rl_oport  $operation ${bandwidth.cookie} $bridge
 	then
 		logit "could not set rate limiting p 400 (out to br-rl) flowmod	[FAIL]"
 		exit 1
@@ -411,7 +403,7 @@ then 			# if this bridge is flagged for rate limiting, push all traffic through 
 	# inbound -- if outbound fmods were successful, and koe flag, prevent DSCP umarking
 	if (( koe ))
 	then
-    	if ! send_ovs_fmod $forreal -p $(( pri_base + 300 )) $timeout --match -d $lmac -s $rmac -m 0/0x07 $ip_type $iexip  $ib_lproto $ib_rproto $ib_netaddr --action  -M 0x01 $operation ${bandwidth.cookie} $bridge	# prevent p10 rule from marking down
+    	if ! send_ovs_fmod $forreal -p $(( pri_base + 300 )) $timeout --match $odscp -d $lmac -s $rmac -m 0/0x07 $ip_type $iexip  $ib_lproto $ib_rproto $ib_netaddr --action  -M 0x01 -R ,0 -N $operation ${bandwidth.cookie} $bridge
 		then
 			logit "unable to create inbound flow-mod to prevent DSCP markings from being removed (koe)	[FAIL]"
 			exit 1
@@ -419,7 +411,7 @@ then 			# if this bridge is flagged for rate limiting, push all traffic through 
 	fi
 else
 	# CAUTION:	action options to send_ovs_fmods are probably order dependent, so be careful.
-	# DANGER:	NEVER set queues here, only if bridge is rate limiting and above code will handle
+	# DANGER:	NEVER set queues here, if bridge is rate limiting previous code will handle
 	if (( ! one_switch ))
 	then
 		# inbound -- only if they are not on the same switch
