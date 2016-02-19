@@ -111,7 +111,7 @@ function logit
 
 function usage
 {
-	echo "$argv0 v1.1/15125"
+	echo "$argv0 v2.0/12196"
 	echo "usage: $argv0 [-6] [-d dest-endpt] [-E external-ip] [-h host] [-k] [-n] [-o] [-p|P proto[:addr]:port] [-s src-endpt] [-T dscp] [-t hard-timeout] [-v]"
 	echo "usage: $argv0 [-X] 		# delete all"
 	echo "" echo "  -6 forces IPv6 address matching to be set"
