@@ -193,6 +193,9 @@ then
 	exit 1
 fi
 
+# we now use a cassandra database as our cache of information so no need for this.
+if false
+then
 if [[ ! -d $ckpt_dir ]]					# ensure checkpoint spot
 then
 	if ! mkdir -p $ckpt_dir
@@ -212,6 +215,7 @@ else
 			echo "latest checkpoint was empty; no need to give it to tegu   [OK]" >&2
 		fi
 	fi
+fi
 fi
 
 if ! cd $logd						# get us to some place we can scribble if needed
