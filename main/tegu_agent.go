@@ -62,6 +62,9 @@
 				12 Nov 2015 : Updated to return stdout/stderr for do_mirrorwiz()
 				21 Jan 2016 : Updated rsync list.
 				11 Feb 2016 : Allow for rate limiting on multiple bridges. (2.4)
+				22 Feb 2016 : Now pick rsync files from /var/lib/tegu/bin so we don't have to list them
+					all as hard coded things here. Command line can still override them. We also abort
+					if there is nothing to rsync and the list is empty.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -75,6 +78,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"strings"
@@ -89,7 +93,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.4/12176"
+	version		string = "v2.4/12226"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -129,6 +133,37 @@ type agent_msg struct {
 	Vinfo	string			// agent version info for debugging
 	Rid		uint32			// original request id
 }
+
+//--- utility functions -----------------------------------------------------------------------------
+
+/*
+	Return a list of all regular files in the directory dname.
+	If fq is true, then a fully qualified name is returned, otherwise
+	just the basename is returned.
+*/
+func list_files( dname string, fq bool ) ( files []string, err error ) {
+	items, err := ioutil.ReadDir( dname )
+	if err == nil {
+		files = make( []string, len( items ) )	// won't need more than # items; we trim on return
+		i := 0
+		for _, f := range items {
+			if ! f.IsDir() 	 {
+				if fq {
+					files[i] = dname + "/" + f.Name()
+				} else {
+					files[i] = f.Name()
+				}
+
+				i++
+			}
+		}	
+
+		return files[:i], err
+	}
+
+	return nil, err
+}
+
 //--- generic message functions ---------------------------------------------------------------------
 
 /*
@@ -893,24 +928,32 @@ func main() {
 	home := os.Getenv( "HOME" )
 	def_user := os.Getenv( "LOGNAME" )
 	def_rdir := "/tmp/tegu_b"					// rsync directory created on remote hosts
-	def_rlist := 								// list of scripts to copy to remote hosts for execution
+
+	blist, err := list_files( "/var/lib/tegu/bin", true )	// get anything in this dir as the default rsync list
+	def_rlist := ""
+	if err == nil {											// not an error if it's not there, user could supply list on cmd line
+		def_rlist = strings.Join( blist, " " )				// bang them into a single string
+	}
+/*
 			"/usr/bin/create_ovs_queues " +
 			"/usr/bin/map_mac2phost " +
 			"/usr/bin/ovs_sp2uuid " +
 			"/usr/bin/purge_ovs_queues " +
+			"/usr/bin/ql_bw_fmods " +
+			"/usr/bin/ql_bwow_fmods " +
+			"/usr/bin/ql_set_trunks " +
+			"/usr/bin/ql_suss_ovsd " +
+			"/usr/bin/ql_filter_rtr " +
+			"/usr/bin/ql_parse_config " +
 			"/usr/bin/ql_setup_irl " +
 			"/usr/bin/ql_setup_ipt " +
 			"/usr/bin/send_ovs_fmod " +
 			"/usr/bin/tegu_add_mirror " +
 			"/usr/bin/tegu_del_mirror " +
-			"/usr/bin/ql_bw_fmods " +
-			"/usr/bin/ql_bwow_fmods " +
-			"/usr/bin/ql_set_trunks " +
-			"/usr/bin/ql_filter_rtr " +
-			"/usr/bin/ql_parse_config " +
 			"/usr/bin/setup_ovs_intermed "
+*/
 
-	_, err := os.Stat( "/etc/tegu/tegu_agent.cfg" )
+	_, err = os.Stat( "/etc/tegu/tegu_agent.cfg" )
 	if err == nil {
 		def_rlist += "/etc/tegu/tegu_agent.cfg "			// we'll put this in the mix if there
 	}
@@ -991,8 +1034,13 @@ func main() {
 		os.Exit( 1 )
 	}
 	if ! *no_rsync {
-		sheep.Baa( 1, "will sync these files to remote hosts: %s", *rlist )
-		broker.Add_rsync( rlist, rdir )
+		if *rlist != "" {
+			sheep.Baa( 1, "will sync these files to remote hosts: %s", *rlist )
+			broker.Add_rsync( rlist, rdir )
+		} else {
+			sheep.Baa( 0, "abort:  nothing to rsync and '--no-rsync' was not specified on the command line" )
+			os.Exit( 1 )
+		}
 	}
 	sheep.Baa( 1, "successfully created ssh_broker for user: %s, command path: %s", *user, *rdir )
 	broker.Start_initiators( *parallel )
