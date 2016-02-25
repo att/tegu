@@ -88,12 +88,14 @@
 				09 Jan 2016 - Fixed some "go vet" problems.
 				10 Jan 2016 - Corrected typo in printf statement.
 				27 Jan 2016 - Added ability to query user cap value.
+				25 Feb 2016 - Corrected missing nil pointer check in find_vlink()
 */
 
 package managers
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"strings"
 
@@ -589,9 +591,20 @@ func (n Network) find_vlink( sw string, p1 int, p2 int, m1 *string, m2 *string )
 		id string
 	)
 
+	if m1 == nil {					// no mac id known (more often than not), generate something.
+		rn := fmt.Sprintf( "%d", rand.Intn( 32765 ) )
+		m1 = &rn
+	}
+
+	if m2 == nil {					// no mac id known (more often than not), generate something.
+		rn := fmt.Sprintf( "%d", rand.Intn( 32765 ) )
+		m2 = &rn
+	}
+
 	if p2 < 0 {
 		if p2 == p1 {
-			id = fmt.Sprintf( "%s.%s.%s", sw, *m1, *m2 ) 			// late binding, we don't know port, so use mac for ID
+			id = fmt.Sprintf( "%s.%s.%s", sw, *m1, *m2 )		// late binding, we don't know port, so use mac for ID
+			net_sheep.Baa( 2, "late binding id: %s", id )
 		} else {
 			id = fmt.Sprintf( "%s.%d", sw, p1 )					// endpoint -- only a forward link to p1
 		}
