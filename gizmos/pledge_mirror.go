@@ -33,6 +33,7 @@
 				16 Aug 2015 - Move common code into Pledge_base
 				16 Nov 2015 - Add tenant_id, stdout, stderr to Pledge_mirror
 				24 Nov 2015 - Add options
+				25 Feb 2016 - Correct formatting issue in json output.
 */
 
 package gizmos
@@ -309,7 +310,7 @@ func (p *Pledge_mirror) To_json( ) ( json string ) {
 
 	state, _, diff := p.window.state_str( )
 
-	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id", %q, "options", %q, "ptype": %d }`,
+	json = fmt.Sprintf( `{ "state": %q, "time": %d, "host1": "%s", "host2": "%s", "id": %q, "tenant_id": %q, "options": %q, "ptype": %d }`,
 		state, diff, *p.host1, *p.host2, *p.id, *p.tenant_id, *p.options, PT_MIRRORING )
 
 	return
