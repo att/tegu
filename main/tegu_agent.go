@@ -934,34 +934,25 @@ func main() {
 	if err == nil {											// not an error if it's not there, user could supply list on cmd line
 		def_rlist = strings.Join( blist, " " )				// bang them into a single string
 	}
-/*
-			"/usr/bin/create_ovs_queues " +
-			"/usr/bin/map_mac2phost " +
-			"/usr/bin/ovs_sp2uuid " +
-			"/usr/bin/purge_ovs_queues " +
-			"/usr/bin/ql_bw_fmods " +
-			"/usr/bin/ql_bwow_fmods " +
-			"/usr/bin/ql_set_trunks " +
-			"/usr/bin/ql_suss_ovsd " +
-			"/usr/bin/ql_filter_rtr " +
-			"/usr/bin/ql_parse_config " +
-			"/usr/bin/ql_setup_irl " +
-			"/usr/bin/ql_setup_ipt " +
-			"/usr/bin/send_ovs_fmod " +
-			"/usr/bin/tegu_add_mirror " +
-			"/usr/bin/tegu_del_mirror " +
-			"/usr/bin/setup_ovs_intermed "
-*/
-
 	_, err = os.Stat( "/etc/tegu/tegu_agent.cfg" )
 	if err == nil {
-		def_rlist += "/etc/tegu/tegu_agent.cfg "			// we'll put this in the mix if there
+		def_rlist += " /etc/tegu/tegu_agent.cfg "			// we'll put this in the mix if there
 	}
 
 	if home == "" {
-		home = "/home/tegu"					// probably bogus, but we'll have something
+		home = "/home/tegu"						// probably bogus, but we'll have something
 	}
-	def_key := home + "/.ssh/id_rsa," + home + "/.ssh/id_dsa"		// default ssh key to use
+	def_key := ""
+	key_str := home + "/.ssh/id_rsa"			// build a default key string to use if -k doesn't override
+	_, err = os.Stat( key_str )					// add only if they exist
+	if err == nil {
+		def_key = key_str
+	}
+	key_str = home + "/.ssh/id_dsa"
+	_, err = os.Stat( key_str )
+	if err == nil {
+		def_key += " " + key_str
+	}
 
 	needs_help := flag.Bool( "?", false, "show usage" )				// define recognised command line options
 	id := flag.Int( "i", 0, "id" )
