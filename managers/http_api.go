@@ -965,11 +965,11 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 						h1, h2 = gizmos.Str2host1_host2( *tmap["hosts"] )			// split h1-h2 or h1,h2 into separate strings
 
 						htoks := strings.Split( h1, "/" )							// trap bad host names early
-						if len( htoks ) > 3 {
+						if len( htoks ) > 4 {										// must allow 0xaaaa/0xbbbb  port masks at end (2016.02.28)
 							err = fmt.Errorf( "invalid host name: %s", h1 )
 						} else {
 							htoks = strings.Split( h2, "/" )
-							if len( htoks ) > 3 {
+							if len( htoks ) > 4 {
 								err = fmt.Errorf( "invalid host name: %s", h2 )
 							} else {
 								h1, h2, p1, p2, v1, v2, err = validate_hosts( h1, h2 )		// translate project/host[:port][{vlan}] into pieces parts and validates token/project

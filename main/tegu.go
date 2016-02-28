@@ -144,6 +144,7 @@
 				28 Jan 2015 : Added passthru reservation support.
 				03 Feb 2016 : Added individual protocol support for bw and bwow reservations.
 				25 Feb 2016 : Correct late binding bug in network. Correct bad json formatting in mirror pledge.
+				28 Feb 2016 : Correct bug preventing port masks from being recognised as valid on bandwidth reservations.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -178,7 +179,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.6/12256a"
+		version		string = "v3.1.7/12296a"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
