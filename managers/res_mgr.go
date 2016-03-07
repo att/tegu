@@ -102,6 +102,9 @@
 				27 Jan 2015 : Changes to support passthru reservations.
 				06 Mar 2016 : Added a second channel interface (rmgrlu_ch) to deal with lookup requests for 
 						mirrors since they need this from agent manager which was creating a deadlock.
+				07 Mar 2016 : Special tickle channel introduced.  It allows only 5 tickels to be queued; tickle will
+						drop and not block if full.  This prevents the main queue from being overrun with tickles
+						if a request takes a while (chkpt load).
 */
 
 package managers
@@ -547,10 +550,12 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
 
 									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
+									rm_sheep.Baa( 2, "reserving path starts" )
 									req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
 									req = <- my_ch										// should be OK, but the underlying network could have changed
 
 									if req.Response_data != nil {
+									rm_sheep.Baa( 2, "reserving path finished" )
 										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
 										sp.Set_path_list( path_list )
 										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
@@ -1037,157 +1042,165 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	inv.chkpt = chkpt.Mk_chkpt( ckptd, 10, 90 )
 
 	last_qcheck = time.Now().Unix()
-	tklr.Add_spot( 2, my_chan, REQ_PUSH, nil, ipc.FOREVER )			// push reservations to agent just before they go live
-	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
-	tklr.Add_spot( 5, my_chan, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
+
+	tkl_ch := make( chan *ipc.Chmsg, 5 )								// special, short buffer, channel for tickles allows 5 to queue before blocking sender
+	tklr.Add_spot( 2, tkl_ch, REQ_PUSH, nil, ipc.FOREVER )				// push reservations to agent just before they go live
+	tklr.Add_spot( 1, tkl_ch, REQ_SETQUEUES, nil, ipc.FOREVER )			// drives us to see if queues need to be adjusted
+	tklr.Add_spot( 5, tkl_ch, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
 
 	go rm_lookup( rmgrlu_ch, inv )
 
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
-		msg = <- my_chan					// wait for next message
+		select {									// select next ready message on either channel
+			case msg = <- tkl_ch:					// msg available on tickle channel
+				msg.State = nil						// nil state is OK, no error
+				my_chan <- msg;						// just pass it through; tkl_ch has a small buffer (blocks quickly) and this prevents filling the main queue w/ tickles if we get busy	
 
-		rm_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
-		switch msg.Msg_type {
-			case REQ_NOOP:			// just ignore
+			case msg = <- my_chan:					// process message from the main channel
+				rm_sheep.Baa( 3, "processing message: %d", msg.Msg_type )
+				switch msg.Msg_type {
+					case REQ_NOOP:			// just ignore
 
-			case REQ_ADD:
-				msg.State = inv.Add_res( msg.Req_data )			// add will determine the pledge type and do the right thing
-				msg.Response_data = nil
+					case REQ_ADD:
+						msg.State = inv.Add_res( msg.Req_data )			// add will determine the pledge type and do the right thing
+						msg.Response_data = nil
 
 
-			case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
-				all_sys_up = true
-				// periodic checkpointing turned off with the introduction of tegu_ha
-				//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
+					case REQ_ALLUP:			// signals that all initialisation is complete (chkpting etc. can go)
+						all_sys_up = true
+						// periodic checkpointing turned off with the introduction of tegu_ha
+						//tklr.Add_spot( 180, my_chan, REQ_CHKPT, nil, ipc.FOREVER )		// tickle spot to drive us every 180 seconds to checkpoint
 
-			case REQ_RTRY_CHKPT:									// called to attempt to send a queued checkpoint request
-				if all_sys_up {
-					if retry_chkpt {
-						rm_sheep.Baa( 3, "invoking checkpoint (retry)" )
+					case REQ_RTRY_CHKPT:									// called to attempt to send a queued checkpoint request
+						if all_sys_up {
+							if retry_chkpt {
+								rm_sheep.Baa( 3, "invoking checkpoint (retry)" )
+								retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
+							}
+						}
+
+					case REQ_CHKPT:											// external thread has requested checkpoint
+						if all_sys_up {
+							rm_sheep.Baa( 3, "invoking checkpoint" )
+							retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
+						}
+
+					case REQ_DEL:											// user initiated delete -- requires cookie
+						data := msg.Req_data.( []*string )					// assume pointers to name and cookie
+						if data[0] != nil  &&  *data[0] == "all" {
+							inv.Del_all_res( data[1] )
+							msg.State = nil
+						} else {
+							msg.State = inv.Del_res( data[0], data[1] )
+						}
+
+						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// must force a push to push augmented (shortened) reservations
+						msg.Response_data = nil
+
+					case REQ_DUPCHECK:
+						if msg.Req_data != nil {
+							msg.Response_data, msg.State = inv.dup_check(  msg.Req_data.( *gizmos.Pledge ) )
+						}
+
+					case REQ_GET:											// user initiated get -- requires cookie
+						data := msg.Req_data.( []*string )					// assume pointers to name and cookie
+						msg.Response_data, msg.State = inv.Get_res( data[0], data[1] )
+
+					case REQ_LIST:											// list reservations	(for a client)
+						msg.Response_data, msg.State = inv.res2json( )
+
+					case REQ_LOAD:								// load from a checkpoint file
+						data := msg.Req_data.( *string )		// assume pointers to name and cookie
+						msg.State = inv.load_chkpt( data )
+						msg.Response_data = nil
+						rm_sheep.Baa( 1, "checkpoint file loaded" )
+
+					case REQ_PAUSE:
+						msg.State = nil							// right now this cannot fail in ways we know about
+						msg.Response_data = ""
+						inv.pause_on()
+						res_refresh = 0;						// must force a push of everything on next push tickle
+						rm_sheep.Baa( 1, "pausing..." )
+
+					case REQ_RESUME:
+						msg.State = nil							// right now this cannot fail in ways we know about
+						msg.Response_data = ""
+						res_refresh = 0;						// must force a push of everything on next push tickle
+						inv.pause_off()
+
+					case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
+						now := time.Now().Unix()
+						if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
+							rm_sheep.Baa( 1, "channel states: rm=%d rmlu=%d fq=%d net=%d agent=%d", len( rmgr_ch ), len( rmgrlu_ch ), len( fq_ch ), len( nw_ch ), len( am_ch ) )
+							rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
+							tmsg := ipc.Mk_chmsg( )
+							tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr and trigger flow-mod push
+						}
+						last_qcheck = now
+
+					case REQ_PUSH:								// driven every few seconds to check for need to refresh because of switch max timeout setting
+						if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
+							now := time.Now().Unix()
+							if now > res_refresh {
+								rm_sheep.Baa( 2, "refreshing all reservations" )
+								inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
+								res_refresh = now + int64( rr_rate )		// push everything again in an hour
+
+								inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// force a push of all
+							}
+						}
+
+
+					case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
+						msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
+
+					case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
+						data := msg.Req_data.( []*string )
+						inv.add_ulcap( data[0], data[1] )
 						retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
-					}
-				}
 
-			case REQ_CHKPT:											// external thread has requested checkpoint
-				if all_sys_up {
-					rm_sheep.Baa( 3, "invoking checkpoint" )
-					retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
-				}
+					// CAUTION: the requests below come back as asynch responses rather than as initial message
+					case REQ_IE_RESERVE:						// an IE reservation failed
+						msg.Response_ch = nil					// immediately disable to prevent loop
+						inv.failed_push( msg )					// suss out the pledge and mark it unpushed
 
-			case REQ_DEL:											// user initiated delete -- requires cookie
-				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
-				if data[0] != nil  &&  *data[0] == "all" {
-					inv.Del_all_res( data[1] )
-					msg.State = nil
-				} else {
-					msg.State = inv.Del_res( data[0], data[1] )
-				}
+					case REQ_GEN_QMAP:							// response caries the queue map that now should be sent to fq-mgr to drive a queue update
+						fallthrough
 
-				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// must force a push to push augmented (shortened) reservations
-				msg.Response_data = nil
+					case REQ_GEN_EPQMAP:
+						rm_sheep.Baa( 1, "received queue map from network manager" )
 
-			case REQ_DUPCHECK:
-				if msg.Req_data != nil {
-					msg.Response_data, msg.State = inv.dup_check(  msg.Req_data.( *gizmos.Pledge ) )
-				}
+						qlist := msg.Response_data.( []string )							// get the qulist map for our use first
+						send_meta_fmods( qlist, alt_table )								// push meta rules
 
-			case REQ_GET:											// user initiated get -- requires cookie
-				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
-				msg.Response_data, msg.State = inv.Get_res( data[0], data[1] )
+						msg.Response_ch = nil											// immediately disable to prevent loop
+						fq_data := make( []interface{}, 1 )
+						fq_data[FQ_QLIST] = msg.Response_data
+						tmsg := ipc.Mk_chmsg( )
+						tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 
-			case REQ_LIST:											// list reservations	(for a client)
-				msg.Response_data, msg.State = inv.res2json( )
+						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
 
-			case REQ_LOAD:								// load from a checkpoint file
-				data := msg.Req_data.( *string )		// assume pointers to name and cookie
-				msg.State = inv.load_chkpt( data )
-				msg.Response_data = nil
-				rm_sheep.Baa( 1, "checkpoint file loaded" )
+					case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
+						if msg.Response_ch != nil {
+							msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
+						}
 
-			case REQ_PAUSE:
-				msg.State = nil							// right now this cannot fail in ways we know about
-				msg.Response_data = ""
-				inv.pause_on()
-				res_refresh = 0;						// must force a push of everything on next push tickle
-				rm_sheep.Baa( 1, "pausing..." )
+					/* deprecated -- moved to rm_lookup
+					case REQ_GET_MIRRORS:									// user initiated get list of mirrors
+						t := inv.Get_mirrorlist()
+						msg.Response_data = &t;
+					*/
 
-			case REQ_RESUME:
-				msg.State = nil							// right now this cannot fail in ways we know about
-				msg.Response_data = ""
-				res_refresh = 0;						// must force a push of everything on next push tickle
-				inv.pause_off()
+					default:
+						rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )
+						msg.Response_data = nil
+						msg.State = fmt.Errorf( "res_mgr: unknown message (%d)", msg.Msg_type )
+						msg.Response_ch = nil				// we don't respond to these.
+				}	// end main channel case
 
-			case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
-				now := time.Now().Unix()
-				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
-					rm_sheep.Baa( 1, "channel states: rm=%d rmlu=%d fq=%d net=%d agent=%d", len( rmgr_ch ), len( rmgrlu_ch ), len( fq_ch ), len( nw_ch ), len( am_ch ) )
-					rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
-					tmsg := ipc.Mk_chmsg( )
-					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr and trigger flow-mod push
-				}
-				last_qcheck = now
-
-			case REQ_PUSH:								// driven every few seconds to check for need to refresh because of switch max timeout setting
-				if hto_limit > 0 {						// if reservation flow-mods are capped with a hard timeout limit
-					now := time.Now().Unix()
-					if now > res_refresh {
-						rm_sheep.Baa( 2, "refreshing all reservations" )
-						inv.reset_push()							// reset pushed flag on all reservations to cause active ones to be pushed again
-						res_refresh = now + int64( rr_rate )		// push everything again in an hour
-
-						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// force a push of all
-					}
-				}
-
-
-			case REQ_PLEDGE_LIST:						// generate a list of pledges that are related to the given VM
-				msg.Response_data, msg.State = inv.pledge_list(  msg.Req_data.( *string ) )
-
-			case REQ_SETULCAP:							// user link capacity; expect array of two string pointers (name and value)
-				data := msg.Req_data.( []*string )
-				inv.add_ulcap( data[0], data[1] )
-				retry_chkpt, last_chkpt = inv.write_chkpt( last_chkpt )
-
-			// CAUTION: the requests below come back as asynch responses rather than as initial message
-			case REQ_IE_RESERVE:						// an IE reservation failed
-				msg.Response_ch = nil					// immediately disable to prevent loop
-				inv.failed_push( msg )					// suss out the pledge and mark it unpushed
-
-			case REQ_GEN_QMAP:							// response caries the queue map that now should be sent to fq-mgr to drive a queue update
-				fallthrough
-
-			case REQ_GEN_EPQMAP:
-				rm_sheep.Baa( 1, "received queue map from network manager" )
-
-				qlist := msg.Response_data.( []string )							// get the qulist map for our use first
-				send_meta_fmods( qlist, alt_table )								// push meta rules
-
-				msg.Response_ch = nil											// immediately disable to prevent loop
-				fq_data := make( []interface{}, 1 )
-				fq_data[FQ_QLIST] = msg.Response_data
-				tmsg := ipc.Mk_chmsg( )
-				tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
-
-				inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
-
-			case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
-				if msg.Response_ch != nil {
-					msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
-				}
-
-			/* deprecated -- moved to rm_lookup
-			case REQ_GET_MIRRORS:									// user initiated get list of mirrors
-				t := inv.Get_mirrorlist()
-				msg.Response_data = &t;
-			*/
-
-			default:
-				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )
-				msg.Response_data = nil
-				msg.State = fmt.Errorf( "res_mgr: unknown message (%d)", msg.Msg_type )
-				msg.Response_ch = nil				// we don't respond to these.
-		}
+		}		// end select
 
 		rm_sheep.Baa( 3, "processing message complete: %d", msg.Msg_type )
 		if msg.Response_ch != nil {			// if a response channel was provided

@@ -89,6 +89,7 @@
 				10 Jan 2016 - Corrected typo in printf statement.
 				27 Jan 2016 - Added ability to query user cap value.
 				25 Feb 2016 - Corrected missing nil pointer check in find_vlink()
+				07 Mar 2015 - Added the graph rebuild when adding a node.
 */
 
 package managers
@@ -98,6 +99,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/att/gopkgs/bleater"
 	"github.com/att/gopkgs/clike"
@@ -651,8 +653,13 @@ func (n Network) find_swvlink( sw1 string, sw2 string  ) ( l *gizmos.Link ) {
 	describing the physical network. The string is assumed to be a filename if it
 	does _not_ contain a ':'.
 
+	The skip_lupdate flag skips rebuilding the whole network graph which turns out 
+	is expensive when we get more than a few reservations. We will only rebuild the 
+	graph when we get  a tickle to do so. This dramatically speeds up the time to 
+	add a reservation, and thus the time to load a checkpoint file.
+
 */
-func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string ) (n *Network) {
+func build( old_net *Network, flhost *string, max_capacity int64, link_headroom int, link_alarm_thresh int, host_list *string, skip_lupdate bool ) (n *Network) {
 	var (
 		ssw		*gizmos.Switch
 		dsw		*gizmos.Switch
@@ -708,51 +715,55 @@ func build( old_net *Network, flhost *string, max_capacity int64, link_headroom 
 		return
 	}
 
-	for i := range links {								// parse all links returned from the controller (build our graph of switches and links)
-		if links[i].Capacity <= 0 {
-			links[i].Capacity = max_capacity			// default if it didn't come from the source
-		}
-
-		tokens := strings.SplitN( links[i].Src_switch, "@", 2 )	// if the 'id' is host@interface we need to drop interface so all are added to same switch
-		sswid := tokens[0]
-		tokens = strings.SplitN( links[i].Dst_switch, "@", 2 )
-		dswid := tokens[0]
-
-		ssw = n.switches[sswid]
-		if ssw == nil {
-			ssw = gizmos.Mk_switch( &sswid )
-			n.switches[sswid] = ssw
-		}
-
-		dsw = n.switches[dswid]
-		if dsw == nil {
-			dsw = gizmos.Mk_switch( &dswid )
-			n.switches[dswid] = dsw
-		}
-
-		// omitting the link (last parm) causes reuse of the link if it existed so that obligations are kept; links _are_ created with the interface name
-		lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )
-		lnk.Set_forward( dsw )
-		lnk.Set_backward( ssw )
-		lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
-		lnk.Set_port( 2, links[i].Dst_port )		// port on dest to src
-		ssw.Add_link( lnk )
-
-		if links[i].Direction == "bidirectional" { 			// add the backpath link
-			mlag_name = nil
-			if links[i].Mlag != nil {
-				mln := *links[i].Mlag + ".REV"				// differentiate the reverse links so we can adjust them with amount_in more easily
-				mlag_name = &mln
+	if ! skip_lupdate {										// if we must update the links -- expensive
+		for i := range links {								// parse all links returned from the controller (build our graph of switches and links)
+			if links[i].Capacity <= 0 {
+				links[i].Capacity = max_capacity			// default if it didn't come from the source
 			}
-			lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, mlag_name )
-			lnk.Set_forward( ssw )
-			lnk.Set_backward( dsw )
-			lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
-			lnk.Set_port( 2, links[i].Src_port )		// port on src to dest
-			dsw.Add_link( lnk )
-			net_sheep.Baa( 3, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
-			net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
+
+			tokens := strings.SplitN( links[i].Src_switch, "@", 2 )	// if the 'id' is host@interface we need to drop interface so all are added to same switch
+			sswid := tokens[0]
+			tokens = strings.SplitN( links[i].Dst_switch, "@", 2 )
+			dswid := tokens[0]
+
+			ssw = n.switches[sswid]
+			if ssw == nil {
+				ssw = gizmos.Mk_switch( &sswid )
+				n.switches[sswid] = ssw
+			}
+
+			dsw = n.switches[dswid]
+			if dsw == nil {
+				dsw = gizmos.Mk_switch( &dswid )
+				n.switches[dswid] = dsw
+			}
+
+			// omitting the link (last parm) causes reuse of the link if it existed so that obligations are kept; links _are_ created with the interface name
+			lnk = old_net.find_link( links[i].Src_switch, links[i].Dst_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, links[i].Mlag )
+			lnk.Set_forward( dsw )
+			lnk.Set_backward( ssw )
+			lnk.Set_port( 1, links[i].Src_port )		// port on src to dest
+			lnk.Set_port( 2, links[i].Dst_port )		// port on dest to src
+			ssw.Add_link( lnk )
+
+			if links[i].Direction == "bidirectional" { 			// add the backpath link
+				mlag_name = nil
+				if links[i].Mlag != nil {
+					mln := *links[i].Mlag + ".REV"				// differentiate the reverse links so we can adjust them with amount_in more easily
+					mlag_name = &mln
+				}
+				lnk = old_net.find_link( links[i].Dst_switch, links[i].Src_switch, (links[i].Capacity * hr_factor)/100, link_alarm_thresh, mlag_name )
+				lnk.Set_forward( ssw )
+				lnk.Set_backward( dsw )
+				lnk.Set_port( 1, links[i].Dst_port )		// port on dest to src
+				lnk.Set_port( 2, links[i].Src_port )		// port on src to dest
+				dsw.Add_link( lnk )
+				net_sheep.Baa( 3, "build: addlink: src [%d] %s %s", i, links[i].Src_switch, n.switches[sswid].To_json() )
+				net_sheep.Baa( 3, "build: addlink: dst [%d] %s %s", i, links[i].Dst_switch, n.switches[dswid].To_json() )
+			}
 		}
+	} else {
+		n.switches = old_net.switches			// if not updating, we must copy over the old switch list rather than rebuilding it
 	}
 
 	if len( old_net.gwmap ) > 0 {			// if we build after gateway map has size, then gateways are in host table and checkpoints can be processed
@@ -1028,7 +1039,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		discount 		int64 = 0					// bandwidth discount value (pct if between 1 and 100 inclusive; hard value otherwise
 		relaxed			bool = false				// set with relaxed = true in config
 		hlist			*string = &empty_str		// host list we'll give to build should we need to build a dummy star topo
-
+		next_netbuild	int64 = 0					// prevent rebuilds too closely spaced
 	)
 
 	if *sdn_host  == "" {
@@ -1124,9 +1135,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 	}
 
 														// enforce some sanity on config file settings
-	if refresh < 15 {
+	if refresh < 60 {			// refreshes are expensive when reservation counts are high; this is the new minimum.
 		net_sheep.Baa( 0, "refresh rate in config file (%ds) was too small; set to 15s", refresh )
-		refresh = 15
+		refresh = 60
 	}
 	if max_link_cap <= 0 {
 		max_link_cap = 1024 * 1024 * 1024 * 10							// if not in config file use 10Gbps
@@ -1134,7 +1145,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 
 	net_sheep.Baa( 1,  "network_mgr thread started: sdn_hpst=%s max_link_cap=%d refresh=%d", *sdn_host, max_link_cap, refresh )
 
-	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, &empty_str )
+	act_net = build( nil, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, &empty_str, false )
 	if act_net == nil {
 		net_sheep.Baa( 0, "ERR: initial build of network failed -- core dump likely to follow!  [TGUNET011]" )		// this is bad and WILL cause a core dump
 	} else {
@@ -1143,9 +1154,9 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 		act_net.Set_relaxed( relaxed )
 	}
 
-	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 						// tickle once, very soon after starting, to get a host list
+	tklr.Add_spot( 2, nch, REQ_CHOSTLIST, nil, 1 ) 		 							// tickle once, very soon after starting, to get a host list
 	tklr.Add_spot( int64( refresh * 2 ), nch, REQ_CHOSTLIST, nil, ipc.FOREVER )  	// get a host list from openstack now and again
-	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )		// add tickle spot to drive rebuild of network
+	tklr.Add_spot( int64( refresh ), nch, REQ_NETUPDATE, nil, ipc.FOREVER )			// add tickle spot to drive rebuild of network
 
 	for {
 		select {					// assume we might have multiple channels in future
@@ -1422,11 +1433,13 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									}
 							}
 
-							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
+							net_sheep.Baa( 2, "network graph build starts" )
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist, true )		// we allow a complete switch graph rebuild to be skipped
 							if new_net != nil {
 								new_net.xfer_maps( act_net )				// copy maps from old net to the new graph
 								act_net = new_net							// and finally use it
 							}
+							net_sheep.Baa( 2, "network graph build ends" )
 						}
 						
 					case REQ_VM2IP:								// a new vm name/vm ID to ip address map
@@ -1560,17 +1573,29 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 						req.State = nil;
 
 					case REQ_NETUPDATE:											// build a new network graph
-						net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
-						new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist )
-						if new_net != nil {
-							new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
-							act_net = new_net
+						then := time.Now().Unix()
+						if then >= next_netbuild {
+							net_sheep.Baa( 2, "rebuilding network graph" )			// less chatty with lazy changes
+							new_net := build( act_net, sdn_host, max_link_cap, link_headroom, link_alarm_thresh, hlist, false )		// must force a switch graph rebuild here (expensive and will block for some seconds)
+							if new_net != nil {
+								new_net.xfer_maps( act_net )						// copy maps from old net to the new graph
+								act_net = new_net
+	
+								net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
+							} else {
+								net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
+							}
+							now := time.Now().Unix()
 
-							net_sheep.Baa( 2, "network graph rebuild completed" )		// timing during debugging
+							if now - then > int64( refresh)  {
+								next_netbuild = now + int64( refresh ) + (now-then)
+								net_sheep.Baa( 1, "graph update took longer than refresh cycle; next refresh scheduled in %d seconds", int64( refresh ) + (now-then) )
+							} else {
+								next_netbuild = now + int64( refresh )		// ensure at least refresh seconds pass, but could be longer
+							}
 						} else {
-							net_sheep.Baa( 1, "unable to update network graph -- SDNC down?" )
+							net_sheep.Baa( 2, "network refresh skipped; too soon" )
 						}
-
 
 					case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
 																	// this is similar, yet different, than the code in fq_mgr (we don't need phost suffix here)
