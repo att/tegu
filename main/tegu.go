@@ -147,6 +147,7 @@
 				28 Feb 2016 : Correct bug preventing port masks from being recognised as valid on bandwidth reservations.
 				06 Mar 2016 : Correct issue with deadlock when there are both a large number of bandwidth reservations and 
 							mirrors in place.
+				07 Mar 2016 : Tweaked network manager in order to speed up checkpoint reloads.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -181,7 +182,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.8/13066"
+		version		string = "v3.1.8/13076"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

@@ -1343,6 +1343,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 
 									default:
 										state = "ERROR"
+										http_sheep.Baa( 0, "channel states: rm=%d rmlu=%d fq=%d net=%d agent=%d", len( rmgr_ch ), len( rmgrlu_ch ), len( fq_ch ), len( nw_ch ), len( am_ch ) )
 										http_sheep.Baa( 1, "unrecognised subsystem name given with verbose level: %s", tokens[2] )
 										jreason = fmt.Sprintf( `"unrecognised subsystem name given; must be one of: agent, osif, resmgr, http, fqmgr, or net"` )
 								}
@@ -1362,7 +1363,6 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 					}
 
 				default:
-					http_sheep.Baa( 0, "channel states: rm=%d rmlu=%d fq=%d net=%d agent=%d", len( rmgr_ch ), len( rmgrlu_ch ), len( fq_ch ), len( nw_ch ), len( am_ch ) )
 					reason = fmt.Sprintf( "unrecognised put and/or post action: request %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
 					http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
 			}
