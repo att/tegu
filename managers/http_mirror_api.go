@@ -44,6 +44,7 @@
 				16 Nov 2015 - Add tenant checks, HTTP logging, error reporting
 				24 Nov 2015 - Add options
 				09 Jan 2016 - Add more options
+				06 Mar 2016 - Switched some res mgr requests to special lookup channel to prevent deadlock
 */
 
 package managers
@@ -182,7 +183,7 @@ func lookupMirror(name string, cookie string) (mirror *gizmos.Pledge_mirror) {
 	req := ipc.Mk_chmsg( )
 	my_ch := make( chan *ipc.Chmsg )					// allocate channel for responses to our requests
 	defer close( my_ch )
-	req.Send_req( rmgr_ch, my_ch, REQ_GET, [] *string { &name, &cookie }, nil )
+	req.Send_req( rmgrlu_ch, my_ch, RMLU_GET, [] *string { &name, &cookie }, nil )
 	req = <- my_ch
 	if req.State == nil {
 		mi := req.Response_data.( *gizmos.Pledge )    // assert to iface pointer
@@ -198,7 +199,7 @@ func getMirrors() ([]string) {
 	req := ipc.Mk_chmsg( )
 	my_ch := make( chan *ipc.Chmsg )							// allocate channel for responses to our requests
 	defer close( my_ch )
-	req.Send_req( rmgr_ch, my_ch, REQ_GET_MIRRORS, nil, nil )	// push it into the reservation manager which will drive flow-mods etc
+	req.Send_req( rmgrlu_ch, my_ch, RMLU_GET_MIRRORS, nil, nil )	// push it into the reservation manager which will drive flow-mods etc
 	req = <- my_ch
 	if req.State == nil {
 		rv := string( *req.Response_data.(*string) )

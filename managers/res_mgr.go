@@ -100,6 +100,8 @@
 				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
 				08 Oct 2015 : Added !pushed check back to active reservation pushes.
 				27 Jan 2015 : Changes to support passthru reservations.
+				06 Mar 2016 : Added a second channel interface (rmgrlu_ch) to deal with lookup requests for 
+						mirrors since they need this from agent manager which was creating a deadlock.
 */
 
 package managers
@@ -178,8 +180,8 @@ func name2ip( name *string ) ( ip *string ) {
 	if msg.State == nil {					// success
 		ip = msg.Response_data.(*string)
 	} else {
-rm_sheep.Baa( 1, ">>>>> name didn't translate to ip: %s", name )
-}
+		rm_sheep.Baa( 2, "name didn't translate to ip: %s", name )
+	}
 
 	return
 }
@@ -906,6 +908,35 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 	return
 }
 
+/*
+	Wait and respond to RMLU_ requests received on the channel.
+	This interface is provided because agent manager wants to look up reservations
+	rather than queuing the data to be attached to a reservation onto the main 
+	repmgr queue. 
+*/
+func rm_lookup( my_chan chan *ipc.Chmsg, inv *Inventory ) {
+	for {
+		msg := <- my_chan					// wait for next message
+
+		switch msg.Msg_type {
+			case RMLU_GET_MIRRORS:									// user initiated get list of mirrors
+				t := inv.Get_mirrorlist()
+				msg.Response_data = &t;
+
+			case RMLU_GET:											// user initiated get -- requires cookie
+				data := msg.Req_data.( []*string )					// assume pointers to name and cookie
+				msg.Response_data, msg.State = inv.Get_res( data[0], data[1] )
+
+			default:
+				rm_sheep.Baa( 1, "invalid request received by rm_lookup: %d", msg.Msg_type )
+		}
+
+		if msg.Response_ch != nil {			// if a response channel was provided
+			msg.Response_ch <- msg			// send our result back to the requester
+		}
+	}
+}
+
 //---- res-mgr main goroutine -------------------------------------------------------------------------------
 
 /*
@@ -1010,6 +1041,8 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	tklr.Add_spot( 1, my_chan, REQ_SETQUEUES, nil, ipc.FOREVER )	// drives us to see if queues need to be adjusted
 	tklr.Add_spot( 5, my_chan, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
 
+	go rm_lookup( rmgrlu_ch, inv )
+
 	rm_sheep.Baa( 3, "res_mgr is running  %x", my_chan )
 	for {
 		msg = <- my_chan					// wait for next message
@@ -1088,6 +1121,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 			case REQ_SETQUEUES:							// driven about every second to reset the queues if a reservation state has changed
 				now := time.Now().Unix()
 				if now > last_qcheck  &&  inv.any_concluded( now - last_qcheck ) || inv.any_commencing( now - last_qcheck, 0 ) {
+					rm_sheep.Baa( 1, "channel states: rm=%d rmlu=%d fq=%d net=%d agent=%d", len( rmgr_ch ), len( rmgrlu_ch ), len( fq_ch ), len( nw_ch ), len( am_ch ) )
 					rm_sheep.Baa( 1, "reservation state change detected, requesting queue map from net-mgr" )
 					tmsg := ipc.Mk_chmsg( )
 					tmsg.Send_req( nw_ch, my_chan, queue_gen_type, time.Now().Unix(), nil )		// get a queue map; when it arrives we'll push to fqmgr and trigger flow-mod push
@@ -1142,9 +1176,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 					msg.Response_data, msg.State = inv.yank_res( msg.Req_data.( *string ) )
 				}
 
+			/* deprecated -- moved to rm_lookup
 			case REQ_GET_MIRRORS:									// user initiated get list of mirrors
 				t := inv.Get_mirrorlist()
 				msg.Response_data = &t;
+			*/
 
 			default:
 				rm_sheep.Baa( 0, "WRN: res_mgr: unknown message: %d [TGURMG001]", msg.Msg_type )

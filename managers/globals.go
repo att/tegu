@@ -44,6 +44,7 @@
 				31 Mar 2015 - Added REQ_GET_PROJ_HOSTS
 				21 Sep 2015 - Added REQ_GET_PHOST_FROM_PORTUUID
 				12 Nov 2015 - Pulled in httplogger from steering branch.
+				06 Mar 2016 - Added consts for new res mgr lookup channel
 */
 
 /*
@@ -77,6 +78,13 @@ import (
 	"github.com/att/gopkgs/ipc"
 
 	"github.com/att/tegu/gizmos"
+)
+
+const (				// resmgr lookup channel requests
+	RMLU_NOOP		int = -1	// no operation
+	_				int = iota	// skip 0
+	RMLU_GET					// Get a reservation (pledge) and return it
+	RMLU_GET_MIRRORS			// Get mirror pledge
 )
 
 const (
@@ -210,6 +218,7 @@ var (
 	*/
 	nw_ch		chan	*ipc.Chmsg		// network
 	rmgr_ch		chan	*ipc.Chmsg		// reservation manager
+	rmgrlu_ch	chan	*ipc.Chmsg		// reservation manager
 	osif_ch		chan	*ipc.Chmsg		// openstack interface
 	fq_ch		chan	*ipc.Chmsg		// flow and queue manager
 	am_ch		chan	*ipc.Chmsg		// agent manager channel
@@ -309,7 +318,7 @@ type Fq_req struct {
 	CAUTION:  this is not implemented as an init() function as we must pass information from the
 			main to here.
 */
-func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
+func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan *ipc.Chmsg, rmluch chan *ipc.Chmsg, osifch chan *ipc.Chmsg, fqch chan *ipc.Chmsg, amch chan *ipc.Chmsg ) (err error)  {
 	err = nil
 
 	def_log_dir := "."
@@ -317,6 +326,7 @@ func Initialise( cfg_fname *string, ver *string, nwch chan *ipc.Chmsg, rmch chan
 
 	nw_ch = nwch
 	rmgr_ch = rmch
+	rmgrlu_ch = rmluch
 	osif_ch = osifch
 	fq_ch = fqch
 	am_ch = amch

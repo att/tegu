@@ -1362,6 +1362,7 @@ func parse_post( out http.ResponseWriter, recs []string, sender string, xauth st
 					}
 
 				default:
+					http_sheep.Baa( 0, "channel states: rm=%d rmlu=%d fq=%d net=%d agent=%d", len( rmgr_ch ), len( rmgrlu_ch ), len( fq_ch ), len( nw_ch ), len( am_ch ) )
 					reason = fmt.Sprintf( "unrecognised put and/or post action: request %d, %s: whole req=(%s)", i, tokens[0], recs[i] )
 					http_sheep.Baa( 1, "unrecognised action: %s in %s", tokens[0], recs[i] )
 			}

@@ -33,6 +33,8 @@
 				18 Jun 2015 - Added oneway rate limiting support.
 				04 Feb 2015 - Allow single proto (udp or tcp) when specifically indicated on 
 						a reservation.
+				06 Mar 2016 - Don't send channel to fq-mgr as it only ever responded to requests
+						sent to skoogi.
 */
 
 package managers
@@ -162,7 +164,7 @@ func bw_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_limit
 					cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, *cfreq.Extip, expiry, cfreq.Expiry )
 
 				msg = ipc.Mk_chmsg()
-				msg.Send_req( fq_ch, ch, REQ_BW_RESERVE, cfreq, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
+				msg.Send_req( fq_ch, nil, REQ_BW_RESERVE, cfreq, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
 				
 	
 				// WARNING:  this is q-lite only -- there is no attempt to set up intermediate switches!
@@ -259,7 +261,7 @@ func bwow_push_res( gp *gizmos.Pledge, rname *string, ch chan *ipc.Chmsg, to_lim
 					cfreq.Espq.Switch, cfreq.Espq.Port, cfreq.Espq.Queuenum, expiry, cfreq.Expiry )
 
 				msg = ipc.Mk_chmsg()
-				msg.Send_req( fq_ch, ch, REQ_BWOW_RESERVE, cfreq, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
+				msg.Send_req( fq_ch, nil, REQ_BWOW_RESERVE, cfreq, nil )					// queue work with fq-manger to send cmds for bandwidth f-mod setup
 				
 			}
 		}

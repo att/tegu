@@ -145,6 +145,8 @@
 				03 Feb 2016 : Added individual protocol support for bw and bwow reservations.
 				25 Feb 2016 : Correct late binding bug in network. Correct bad json formatting in mirror pledge.
 				28 Feb 2016 : Correct bug preventing port masks from being recognised as valid on bandwidth reservations.
+				06 Mar 2016 : Correct issue with deadlock when there are both a large number of bandwidth reservations and 
+							mirrors in place.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -179,7 +181,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.7/12296a"
+		version		string = "v3.1.8/13066"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
@@ -191,6 +193,7 @@ func main() {
 		// various comm channels for threads -- we declare them here so they can be passed to managers that need them
 		nw_ch	chan *ipc.Chmsg		// network graph manager
 		rmgr_ch	chan *ipc.Chmsg		// reservation manager
+		rmgrlu_ch	chan *ipc.Chmsg		// reservation manager lookup channel
 		osif_ch chan *ipc.Chmsg		// openstack interface
 		fq_ch chan *ipc.Chmsg		// flow queue manager
 		am_ch chan *ipc.Chmsg		// agent manager channel
@@ -231,10 +234,11 @@ func main() {
 	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
 	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
 	am_ch = make( chan *ipc.Chmsg, 1024 )			// agent manager channel
-	rmgr_ch = make( chan *ipc.Chmsg, 1024 );			// buffered to allow fq to send errors; should be more than fq buffer size to prevent deadlock
+	rmgr_ch = make( chan *ipc.Chmsg, 2048 );		// resmgr main channel for most requests
+	rmgrlu_ch = make( chan *ipc.Chmsg, 1024 );		// special channel for reservation look-ups (RMLU_ requests)
 	osif_ch = make( chan *ipc.Chmsg, 1024 )
 
-	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
+	err := managers.Initialise( cfg_file, &version, nw_ch, rmgr_ch, rmgrlu_ch, osif_ch, fq_ch, am_ch )		// specific things that must be initialised with data from main so init() doesn't work
 	if err != nil {
 		sheep.Baa( 0, "ERR: unable to initialise: %s\n", err );
 		os.Exit( 1 )
