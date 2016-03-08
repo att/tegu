@@ -128,6 +128,7 @@
 #				31 Aug 2015 - Prevent setting iptables rules in name spaces other than routers.
 #				02 Sep 2015 - Extracted the iptables setup (now in ql_setup_ipt) and replaed with a call.
 #				12 Oct 2015 - Explicitly delete the br-rl setup if -I is not given.
+#				07 Mar 2016 - No longer add the p10 rule to an L3 node (node which has a qrouter).
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -593,16 +594,27 @@ if (( allow_reset ))		# write the f-mods that drop the DSCP values from traffic 
 then
 	send_ovs_fmod $noexec $rhost -T ${QL_M4_TABLE:-94} -t 0  --match --action -m 0x4/0x4  -N  add 0xbeef br-int			# cannot set meta before resub, so set in alternate table
 
-	if [[ ! -f /etc/tegu/no_dscp_reset ]]			# safety valve
+	if [[ ! -f /etc/tegu/no_dscp_reset ]]			# we set this if we deleted the rule to eliminate the (can be expensive) netns call each time 
 	then
-		# CAUTION:  the meta value match is a _hard_ value of zero, not a mask match so we don't turn off any packet that matched a reservation fmod or inbound traffic
-		if ! send_ovs_fmod $rhost $noexec -t 0 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N add 0xfeed br-int  # turn off dscp, submit for meta mark, then resubmit to 0
+		ip netns | grep -c "qrouter-" | read rcount
+		if (( rcount == 0 ))								# no routers, safe to set the p10 rule
 		then
-			logit "CRI: unable to set dscp reset rule for ${thost#* }   [FAIL] [QOSSOM006]"
-			rc=1
+			# CAUTION:  the meta value match is a _hard_ value of zero, not a mask match so we don't turn off any packet that matched a reservation fmod or inbound traffic
+			if ! send_ovs_fmod $rhost $noexec -t 0 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N add 0xfeed br-int  # turn off dscp, submit for meta mark, then resubmit to 0
+			then
+				logit "CRI: unable to set dscp reset rule for ${thost#* }   [FAIL] [QOSSOM006]"
+				rc=1
+			fi
+		else
+			touch /etc/tegu/no_dscp_reset					# prevent writing the rule out again
+			if ! send_ovs_fmod $rhost $noexec -t 2 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N del 0xfeed br-int  # ditch the fmod
+			then
+				logit "unable to unset the p10 fmod		[WRN]"
+				rc=1
+			fi
 		fi
 	else
-		logit "no dropping flow-mods written, /etc/tegu/no_dscp_drop existed"
+		logit "no dropping flow-mods written, /etc/tegu/no_dscp_reset existed"
 	fi
 else
 	logit "no dropping flow-mods written -D was set"
