@@ -750,7 +750,7 @@ func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error )
 		return
 	}
 
-	for _, r := range inv.cache {
+	for k, r := range inv.cache {
 		if !(*r).Is_expired()  && (*p).Equals( r ) {
 			rid = (*r).Get_id( )
 			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
@@ -893,7 +893,6 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 				pldg.Set_path_list( nil )							// no path list for this pledge
 
 				ch := make( chan *ipc.Chmsg )
-				defer close( ch )									// close it on return
 				req := ipc.Mk_chmsg( )
 				req.Send_req( nw_ch, ch, REQ_DEL, cp, nil )			// delete from the network point of view
 				req = <- ch											// wait for response from network
