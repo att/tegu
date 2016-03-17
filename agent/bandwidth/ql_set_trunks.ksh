@@ -32,6 +32,7 @@
 #
 #	Author:		E. Scott Daniels
 #	Date:		09 April 2015
+#				17 Feb 2016 : Convert over to ql_suss_ovsd and to ensure that vlan 1 always set.
 #
 #---------------------------------------------------------------------------------------------
 
@@ -54,7 +55,12 @@ do
 	shift
 done
 
-ovs_sp2uuid -a | awk '
+ql_suss_ovsd -a | awk '
+	BEGIN {
+		seen[1] = 1								# must force 1 in because vlan for rate limit bridges always set to 1
+		max = 1
+	}
+
 	/^switch:/ {
 		snarf = 0
 		if( $NF == "br-int" )
@@ -62,13 +68,13 @@ ovs_sp2uuid -a | awk '
 		next;
 	}
 
-	/^port:.*qosirl0/ {							# port id for the ovs-vsctl command
+	/^port:.*qosirl0[ \t]/ {					# port id for the ovs-vsctl command
 		irl_id = $2;
 		next;
 	}
 
-	/^port:/ && NF > 6 {						# this will work when sp2uuid starts to generate constant fields
-		if( $7 > 0 ) {
+	/^port:/ && NF > 6 {						# old versions didn't put out all fields, just be safe
+		if( $7+0 > 0 ) {
 			seen[$7] = 1
 			if( $7 > max )
 				max = $7

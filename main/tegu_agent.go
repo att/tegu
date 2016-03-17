@@ -60,6 +60,11 @@
 				16 Jul 2015 : Version bump to reflect link with ssh_broker library bug fix.
 				02 Sep 2015 : Pick up new agent script.
 				12 Nov 2015 : Updated to return stdout/stderr for do_mirrorwiz()
+				21 Jan 2016 : Updated rsync list.
+				11 Feb 2016 : Allow for rate limiting on multiple bridges. (2.4)
+				22 Feb 2016 : Now pick rsync files from /var/lib/tegu/bin so we don't have to list them
+					all as hard coded things here. Command line can still override them. We also abort
+					if there is nothing to rsync and the list is empty.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -73,8 +78,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/att/gopkgs/bleater"
@@ -86,7 +93,7 @@ import (
 
 // globals
 var (
-	version		string = "v2.3/1b165"
+	version		string = "v2.4/12226"
 	sheep *bleater.Bleater
 	shell_cmd	string = "/bin/ksh"
 
@@ -126,6 +133,37 @@ type agent_msg struct {
 	Vinfo	string			// agent version info for debugging
 	Rid		uint32			// original request id
 }
+
+//--- utility functions -----------------------------------------------------------------------------
+
+/*
+	Return a list of all regular files in the directory dname.
+	If fq is true, then a fully qualified name is returned, otherwise
+	just the basename is returned.
+*/
+func list_files( dname string, fq bool ) ( files []string, err error ) {
+	items, err := ioutil.ReadDir( dname )
+	if err == nil {
+		files = make( []string, len( items ) )	// won't need more than # items; we trim on return
+		i := 0
+		for _, f := range items {
+			if ! f.IsDir() 	 {
+				if fq {
+					files[i] = dname + "/" + f.Name()
+				} else {
+					files[i] = f.Name()
+				}
+
+				i++
+			}
+		}	
+
+		return files[:i], err
+	}
+
+	return nil, err
+}
+
 //--- generic message functions ---------------------------------------------------------------------
 
 /*
@@ -302,7 +340,8 @@ func (act *json_action ) do_bw_fmod( cmd_type string, broker *ssh_broker.Broker,
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
 																		// do NOT close the channel here; only senders should close
 
-	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// for now, there will only ever be one host for these commands
+	tokens := strings.Split( act.Hosts[0], "!" )						// split swtich off; we don't need as script will find proper bridge
+	err = broker.NBRun_cmd( tokens[0], cmd_str, 0, ssh_rch )
 	if err != nil {
 		sheep.Baa( 1, "WRN: error submitting bandwidth command  to %s: %s", act.Hosts[0], err )
 		jout, _ = json.Marshal( msg )
@@ -391,9 +430,11 @@ func (act *json_action ) do_bwow_fmod( cmd_type string, broker *ssh_broker.Broke
 
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )					// channel for ssh results
 																		// do NOT close the channel here; only senders should close
-	err = broker.NBRun_cmd( act.Hosts[0], cmd_str, 0, ssh_rch )			// oneway fmods are only ever applied to one host so [0] is ok
+
+	tokens := strings.Split( act.Hosts[0], "!" )						// oneway fmods are only ever applied to one host so [0] is ok
+	err = broker.NBRun_cmd( tokens[0], cmd_str, 0, ssh_rch )			// we don't need !switch, script will find the right bridge
 	if err != nil {
-		sheep.Baa( 1, "WRN: error submitting bwow command  to %s: %s", act.Hosts[0], err )
+		sheep.Baa( 1, "WRN: error submitting bwow command  to %s: %s", tokens[0], err )			
 		jout, _ = json.Marshal( msg )
 		return
 	}
@@ -581,6 +622,11 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 		endKat
 
 	We'll use the brokers 'send script for execution' feature rather to execute our script.
+
+	With the support of rate limiting on multiple bridges, we allow the host name to be host!bridge
+	and thus must split these so we can execute on the correct host, and ensure that we execute only
+	once per physical host.  The script will do all of the bridges listed in the file, so it need be
+	run only once per real host.
 */
 func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, timeout time.Duration ) {
     var (
@@ -611,18 +657,29 @@ func do_setqueues( req json_action, broker *ssh_broker.Broker, path *string, tim
         return
     }
 
+	done := make( map[string]bool, 128 )					// track phys host sent to (128 is only a hint, not a limit)
 	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
 															// do NOT close the channel here; only senders should close
 
 	wait4 := 0												// number of responses to wait for
 	for i := range req.Hosts {
-    	sheep.Baa( 1, "via broker on %s: create_ovs_queues embedded in %s", req.Hosts[i], fname )
+		h := req.Hosts[i]									// default to the host as is
+		tokens := strings.SplitN( req.Hosts[i], "!", 2 )
+		if len( tokens ) == 2  {
+			h = tokens[0]									// assume physhost!bridge; use physhost
+		}
 
-		err := broker.NBRun_on_host( req.Hosts[i], fname, "", wait4, ssh_rch )		// sends the file as input to be executed on the host
-		if err != nil {
-			msg_007( req.Hosts[i], "create_ovs_queues", err )
-		} else {
-			wait4++
+		if ! done[h] {										// only need to run once per physical host, so if we haven't....
+    		sheep.Baa( 1, "via broker on %s: create_ovs_queues embedded in %s", h, fname )
+
+			err := broker.NBRun_on_host( h, fname, "", wait4, ssh_rch )		// sends the file as input to be executed on the host
+			if err != nil {
+				msg_007( h, "create_ovs_queues", err )
+			} else {
+				wait4++
+			}
+
+			done[h] = true
 		}
 	}
 
@@ -871,26 +928,31 @@ func main() {
 	home := os.Getenv( "HOME" )
 	def_user := os.Getenv( "LOGNAME" )
 	def_rdir := "/tmp/tegu_b"					// rsync directory created on remote hosts
-	def_rlist := 								// list of scripts to copy to remote hosts for execution
-			"/usr/bin/create_ovs_queues " +
-			"/usr/bin/map_mac2phost " +
-			"/usr/bin/ovs_sp2uuid " +
-			"/usr/bin/purge_ovs_queues " +
-			"/usr/bin/ql_setup_irl " +
-			"/usr/bin/ql_setup_ipt " +
-			"/usr/bin/send_ovs_fmod " +
-			"/usr/bin/tegu_add_mirror " +
-			"/usr/bin/tegu_del_mirror " +
-			"/usr/bin/ql_bw_fmods " +
-			"/usr/bin/ql_bwow_fmods " +
-			"/usr/bin/ql_set_trunks " +
-			"/usr/bin/ql_filter_rtr " +
-			"/usr/bin/setup_ovs_intermed "
+
+	blist, err := list_files( "/var/lib/tegu/bin", true )	// get anything in this dir as the default rsync list
+	def_rlist := ""
+	if err == nil {											// not an error if it's not there, user could supply list on cmd line
+		def_rlist = strings.Join( blist, " " )				// bang them into a single string
+	}
+	_, err = os.Stat( "/etc/tegu/tegu_agent.cfg" )
+	if err == nil {
+		def_rlist += " /etc/tegu/tegu_agent.cfg "			// we'll put this in the mix if there
+	}
 
 	if home == "" {
-		home = "/home/tegu"					// probably bogus, but we'll have something
+		home = "/home/tegu"						// probably bogus, but we'll have something
 	}
-	def_key := home + "/.ssh/id_rsa," + home + "/.ssh/id_dsa"		// default ssh key to use
+	def_key := ""
+	key_str := home + "/.ssh/id_rsa"			// build a default key string to use if -k doesn't override
+	_, err = os.Stat( key_str )					// add only if they exist
+	if err == nil {
+		def_key = key_str
+	}
+	key_str = home + "/.ssh/id_dsa"
+	_, err = os.Stat( key_str )
+	if err == nil {
+		def_key += " " + key_str
+	}
 
 	needs_help := flag.Bool( "?", false, "show usage" )				// define recognised command line options
 	id := flag.Int( "i", 0, "id" )
@@ -963,8 +1025,13 @@ func main() {
 		os.Exit( 1 )
 	}
 	if ! *no_rsync {
-		sheep.Baa( 1, "will sync these files to remote hosts: %s", *rlist )
-		broker.Add_rsync( rlist, rdir )
+		if *rlist != "" {
+			sheep.Baa( 1, "will sync these files to remote hosts: %s", *rlist )
+			broker.Add_rsync( rlist, rdir )
+		} else {
+			sheep.Baa( 0, "abort:  nothing to rsync and '--no-rsync' was not specified on the command line" )
+			os.Exit( 1 )
+		}
 	}
 	sheep.Baa( 1, "successfully created ssh_broker for user: %s, command path: %s", *user, *rdir )
 	broker.Start_initiators( *parallel )

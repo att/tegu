@@ -42,6 +42,14 @@
 #
 
 
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
+
 function usage
 {
 	cat <<-endKat

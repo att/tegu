@@ -18,9 +18,9 @@
 # ---------------------------------------------------------------------------
 #
 
-#	Mnemonic:	map_gw2phost
-#	Abstract:	This script accepts a list of hosts and generates a mac to host for
-#				switches and ports.
+#	Mnemonic:	map_mac2phost
+#	Abstract:	This script generates a list of mac addresses which reside on some OVS bridge on the host.
+#				Output is the hostname mac pair, or prefix mac pair if the -p option is used.
 #				
 #	Author:		E. Scott Daniels
 #	Date: 		04 May 2014
@@ -34,6 +34,9 @@
 #					environment hostname returns o11r6 but the operational name is o11r6-ops.
 #				24 Apr 2015 - Doesn't use the grep return value as the final return value to prevent
 #					a bad return code if the resulting output is empty (normal if no VMs are on the host).
+#				22 Feb 2016 - Script now supports only local execution. The agent is responsible for executing
+#					it on various hosts if that is needed.  Now uses the new ql_suss_ovsd script to dig 
+#					information. 
 # ----------------------------------------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------------------------------------
@@ -55,14 +58,11 @@ function usage
 {
 	cat <<-endKat
 
-
-	version 1.0/18114
-	usage: $argv0 [-n] [-l log-file] [-p record-prefix] [-v] host1 [host2... hostn]
+	version 1.1/12226
+	usage: $argv0 [-l log-file] [-p record-prefix] [-v]
 
 	  If -p prefix is given, that prefix is applied to all output records, otherwise
-	  the host name is used.  The -p option is intended to be used when only one
-	  host (localhost) is given on the command line and the output of hostname doesn't
-	  match the operational name forcing the use of localhost.
+	  the unqualified host name is used.
 
 	endKat
 	
@@ -77,15 +77,12 @@ then
 	PATH="$PATH:${argv0%/*}"		# ensure the directory that contains us is in the path
 fi
 
-
-forreal=1
 verbose=0
 log_file=""
 
 while [[ $1 == -* ]]
 do
 	case $1 in
-		-n)	noexec="-n";;
 		-l)  log_file=$2; shift;;
 		-p)	prefix="$2"; shift;;
 		-v) verbose=1;;
@@ -107,22 +104,15 @@ then
 	exec >$log_file 2>&1
 fi
 
-if (( $(id -u) != 0 ))
+if [[ -z $prefix ]]
 then
-	sudo="sudo"					# must use sudo for the ovs-vsctl commands
+	prefix=$( hostname -s )
 fi
 
-# expected port data from ovs_sp2uuid:
-#port: 01f7f621-03ff-43e5-a183-c66151eae9d7 346 tap916a2d34-eb fa:de:ad:54:08:6b 916a2d34-ebdf-402e-bcb3-904b56011773 1
-
-for h in "$@"
-do
-	rp=${prefix:-$h}						# add user supplied prefix, or the hostname to the start of each output record
-	ovs_sp2uuid -a -h $h any | sed "s/^/$rp /"
-done | awk '
-	/port:/ && NF >= 6 {					# skip internal ports if they were listed
-		printf( "%s %s\n", $1, $6 )
+ql_suss_ovsd | awk -v prefix="$prefix" '
+	/port:/ && NF > 6 && $7 != "-1" {					# only write things that have a vlan id
+			printf( "%s %s\n", prefix, $5 )
 	}
-' | grep -v -- "-1\$"			# dont want entries that have no mac address
+' 
 exit 0
 

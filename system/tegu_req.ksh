@@ -75,6 +75,8 @@
 #					verification quicker.
 #				24 Nov 2015 - Add options to add-mirror
 #				16 Dec 2015 - Correct OS_REGION env reference to be correct (OS_REGION_NAME)
+#				05 Feb 2015 - Changed name to endpoint function to properly handle a host name
+#					list which has one tpea formatted host with a vm@IP-address host.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -220,7 +222,7 @@ function verbose
 # is an 'external' address (!//ip), then there is no call made for those.
 #
 # Using just a vm name (no ip address) is potentially disastrous (when the vm has more 
-# than one interface), but # for backward compatability, and convenience, we'll support that too.
+# than one interface), but for backward compatability, and convenience, we'll support that too.
 #
 # The string passed in better be of the form:  token/project/address|name. Output will be:
 # token/project/endpoint/address.
@@ -231,11 +233,6 @@ function verbose
 # generate !///ip which is what tegu expects.
 function name2epid
 {
-	if [[ ${1%%,*} == *"/"*"/"*"/"* ]]			# already in token/p/e/a format?
-	then
-		echo "$@"								# assume they all are, and just write them back
-		exit
-	fi
 
 	typeset i=0
 	typeset -A prefixes
@@ -246,45 +243,50 @@ function name2epid
 
 	while [[ -n $1 ]]
 	do
-		typeset prefix="${1%/*}"
-		typeset name="${1##*/}"
-
-		if [[ $name == *"@"* ]]			# if name@address given, we can make a quicker dig call in the loop
+		if [[ ${1%%,*} == *"/"*"/"*"/"* ]]			# already in token/p/e/a format?
 		then
-			limiter="-l ${name%%@*}"	# limit the dig to just this VM name (faster)
-			name="${name#*@}"			# vm name is _not_ kept
+			result="$result$1 "						# just add to the result and move on
 		else
-			limiter=""					# no vm name: we have to add this to the list that will be batched at the end
-		fi
+			typeset prefix="${1%/*}"
+			typeset name="${1##*/}"
 
-		case $name in 					# need to strip :port, and [/] if ipv6
-			\[*) 
-				typeset x="${name%%]*}"
-				this_lookup="${x#*\[}"
-				v6_flag="ipv6=true"		# needs to be supplied to tegu so flow-mods are marked for v6
-				;;	
-
-			*:*) this_lookup="${name%:*} " ;;
-
-			*)	 this_lookup="$name ";;
-		esac
-
-		this_lookup="${this_lookup%%\{*}"		# ditch any vlan specification that might trail the address
-
-		if [[ $prefix == "!"* ]]
-		then
-			result="$result${prefix}//${name} "
-		else
-			if [[ -z $limiter ]]			# could not limit this one, will have to do in batch later (slower)
+			if [[ $name == *"@"* ]]			# if name@address given, we can make a quicker dig call in the loop
 			then
-				prefixes[$i]="$prefix"
-				names[$i]="$name"
-	
-				(( i++ ))
-				lookup="$lookup$this_lookup "	# add to batch we'll need to do at the end
+				limiter="-l ${name%%@*}"	# limit the dig to just this VM name (faster)
+				name="${name#*@}"			# vm name is _not_ kept
 			else
-				x=$( tegu_osdig $limiter epid $this_lookup )
-				result="$result${prefix}/${x}/${name} "
+				limiter=""					# no vm name: we have to add this to the list that will be batched at the end
+			fi
+
+			case $name in 					# need to strip :port, and [/] if ipv6
+				\[*) 
+					typeset x="${name%%]*}"
+					this_lookup="${x#*\[}"
+					v6_flag="ipv6=true"		# needs to be supplied to tegu so flow-mods are marked for v6
+					;;	
+
+				*:*) this_lookup="${name%:*} " ;;
+
+				*)	 this_lookup="$name ";;
+			esac
+
+			this_lookup="${this_lookup%%\{*}"		# ditch any vlan specification that might trail the address
+
+			if [[ $prefix == "!"* ]]
+			then
+				result="$result${prefix}//${name} "
+			else
+				if [[ -z $limiter ]]			# could not limit this one, will have to do in batch later (slower)
+				then
+					prefixes[$i]="$prefix"
+					names[$i]="$name"
+		
+					(( i++ ))
+					lookup="$lookup$this_lookup "	# add to batch we'll need to do at the end
+				else
+					x=$( tegu_osdig $limiter epid $this_lookup )		# limited look up done now (faster, but not really speedy)
+					result="$result${prefix}/${x}/${name} "
+				fi
 			fi
 		fi
 

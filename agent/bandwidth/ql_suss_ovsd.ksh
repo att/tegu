@@ -49,7 +49,19 @@
 #	Author:		E. Scott Daniels
 #
 #	Mods:		13 Nov 2015 - removed some debugging.
+#				08 Feb 2016 - Picks up mac in use as an alternate; needed for non-openstack 
+#					endpoints as there will be no 'external' mac added.
+#				16 Feb 2016 - Corrected bug that allowed blank exif and/or ex mac to be blank in 
+#					the output.
 # -----------------------------------------------------------------------------------------------
+
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
 
 # executes the needed ovs commands which generate all the bits that we need to parse through.
 # tags each section with an eye-catcher.
@@ -139,12 +151,22 @@ awk \
 		{
 			if( split( $(i), a, "=" ) == 2 )
 			{
-				if( a[1] == "attached-mac" )
-					exmac[id] = a[2];
-				else
-				if( a[1] == "iface-id" )
-					exifaceid[id] = a[2];
+				if( a[2] != "" ) {
+					if( a[1] == "attached-mac" )
+							exmac[id] = a[2];
+					else
+					if( a[1] == "iface-id" )
+						exifaceid[id] = a[2];
+				}
 			}
+		}
+		next;
+	}
+
+	/^mac_in_use / {     						#non-ovs things seem to show this way
+		gsub( "\"", "" );
+		if( $NF != "" && $NF != "[]" ) {
+			alt_mac[id] = $NF;
 		}
 		next;
 	}
@@ -226,17 +248,25 @@ awk \
 			for( i = 0; i < nports[id]; i++ )
 			{
 				pid = ports[id,i];	
-				if( pid != ""  &&  ofport[iface[pid,0]] != "" )
+				if( pid != ""  &&  ofport[iface[pid,0]] != "" ) {				# valid port id and it xlates to an openflow port
+					mac = exmac[iface[pid,0]]
+					if(  mac == "." && alt_mac[iface[pid,0]] != "" ) {
+						mac = alt_mac[iface[pid,0]]
+					}
+
 					if( ! drop_if[iface[pid,0]] ) {
 						if( label )
-							printf( "port: uuid=%s of_portn=%s of_name=%s mac=%s neutron_uuid=%s vlan=%d br=%s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], exmac[iface[pid,0]], exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id] );
+							printf( "port: uuid=%s of_portn=%s of_name=%s mac=%s neutron_uuid=%s vlan=%d br=%s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], mac, exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id] );
 						else
-							printf( "port: %s %s %s %s %s %d %s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], exmac[iface[pid,0]], exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id]);
+							printf( "port: %s %s %s %s %s %d %s\n", pid, ofport[iface[pid,0]], ofname[iface[pid,0]], mac, exifaceid[iface[pid,0]], vlan_tag[pid], id2name[id]);
 					}
+				}
 			}
 		}
 	}
 
 ' $data | strip_routers
-exit $?
+rc=$?
+
+exit $rc
 

@@ -200,7 +200,7 @@ func validate_ep_proj( ep_uuid *string, proj *string ) ( bool ) {
 	We now support the suffix of {n} to indicate a VLAN id that is to be associated
 	with the host and port.  If not there -1 is returned.
 
-	If the resulting host names match (project/host[:port]) then we return an error
+	If the resulting host names don't match (project/host[:port]) then we return an error
 	as this isn't allowed.
 
 

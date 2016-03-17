@@ -94,7 +94,23 @@
 #				12 Oct 2015 - No longer test for br-rl presensnce since it has (at least temporarily)
 #								been removed as HTB queues were causing damage.
 #				30 Oct 2015 - Ensure that IP type is set when protocol is specified.
+#				25 Jan 2015 - To allow port on resub to be a  endpoint uuid in the same manner that -o can 
+#								accept a endpoint uuid. Offically deprecated the use of -h.
+#				02 Feb 2016 - Added -i action to allow the in-port to be forced to a specific value.
+#								Removed backlevel (pre 2.0) checking.
+#				15 Feb 2016 - Fixed warnings associated with setting the DSCP value which are caused by
+#								OVS not accepting protocol types on the command where the mod action is
+#								given. Added cleanup of tmp files. Removed -h option as we cannot support
+#								late binding via ssh invocation of ovs commands.
 # ---------------------------------------------------------------------------------------------------------
+
+trap "cleanup" EXIT
+
+# ensure all tmp files are gone on exit
+function cleanup
+{
+	rm -f /tmp/PID$$.*
+}
 
 function logit
 {
@@ -103,8 +119,8 @@ function logit
 
 function usage
 {
-	echo "$argv0 v1.3/15125"
-	echo "usage: $argv0 [-h host] [-I] [-n] [-p priority] [-t hard-timeout] [--match match-options] [--action action-options] {add|del} cookie[/mask] switch-name"
+	echo "$argv0 v1.4/12176"
+	echo "usage: $argv0 [-I] [-n] [-p priority] [-t hard-timeout] [--match match-options] [--action action-options] {add|del} cookie[/mask] switch-name"
 	echo ""
 }
 
@@ -115,14 +131,12 @@ function help
 	cat <<endKat
 
 	General Options
-		-b              (treat ovs as a backlevel, not all options may work successfully)
-		-B              (test ovs for verion and warn if options might conflict with the version)
-		-h host         (execute the ovs command(s) on the indicated host)
 		-I				(ignore requirement for ingress rate limiting to exist on br-int)
 		-n              (no execute mode)
 		-p pri          (larger values are higher priority, matched first)
 		-t seconds      (applies the hard timeout to the generated flow-mod when adding)
                         if set to 0, then no timeout is added to the flowmod.
+
 
 	Match Options:
 	Each match option is followed by a single token parameter
@@ -131,7 +145,7 @@ function help
 		-6 Match on IPv6 traffic            (implied if -S or -D is used to supply an IPv6 address)
 		-d data-layer-destination-address (mac)
 		-D network-layer-dest-address (ip)
-		-i input-switch-port                (late bindign applied if mac address or :ID is given)
+		-i input-switch-port                (match if packet from port; port may be uuid for late binding, or resource name e.g. br-int-qlirl0)
 		-m meta-value/mask                  (0x0/0x01 matches if low order bit is off)
 		-p transport-port-src               (specify as udp[4|6]:port or tcp[4|6]:port)
 		-P transport-port-dest              (specify as udp[4|6]:port or tcp[4|6]:port)
@@ -146,22 +160,24 @@ function help
 		-d data-layer-destination-address   (mac address)
 		-D network-layer-dest-address       (ip address)
 		-e port:queue                       (enqueue on p:q)
+		-i switch-port						(force in-port to be port; port should be a uuid)
 		-l action-string					(complicated match/action to be learned)
 		-m meta-value/mask                  (0x01/0x01 sets the low order bit)
 		-M meta-value       				(set metadata 'inline' mask NOT allowed)
 		-N                                  (no output action)
-		-o output on port                   (late binding applied if mac address given)
-		-p transport-port-src               (specify as port)
-		-P transport-port-dest              (specify as port)
+		-o port                             (output directly to port; port may be an endpoint UUID)
+		-p transport-port-src               (specify as {tcp|udp}[:port])
+		-P transport-port-dest              (specify as {tcp|udp}[:port])
 		-q qnum	                            (queue normal port, specific queue)
 		-r port	                            (resubmit with port)
-		-R ([port],[table])                 (resubmit with port table)
-		-s data-layer-src                   (mac)
+		-R [port],[table]                   (resubmit with port table; port may be an endpoint UUID)
+		-s data-layer-src                   (mac address)
 		-S network-layer-src                (ip)
 		-t tunnel-id
 		-T n                                (diffserv/type of service)
 		-v vlan
-		-V [mac]                            (strip vlan, if mac given, then strips only if mac is not a trunk
+		-V [uuid]                           (strip vlan, if UUID given, then strips only if the port associated with 
+                                            the UUID is not a trunk port)
 		-X 									(drop packet)
 
 											if mac not given, then it does a hard strip; user beware)
@@ -192,11 +208,13 @@ function help
     (-o) or enqueue (-e) should be supplied. The -n isn't needed above as this
     is the default.
 
-	If the version of OVS installed is backlevel (earlier than 1.10) some of the
-	options may not be accepted and will likely cause OVS to reject the attempt to
-	install the flow mod. A backlevel OVS will NOT be tested for automatically;
-	the -B option should be used to force a test, and the -b option used if it is
-	known that the version is old.
+	Backlevel versions of OVS (before 2.x) are NOT supported.  The -b and -B options
+	previously used to detect and use a backlevel OVS version are ignored.
+
+	Deprecated options
+		-h host         (execute the ovs command(s) on the indicated host) Deprecated because it
+                        is not capable of late binding in this mode which is now very important
+                        to endpoint processing.
 endKat
 
 }
@@ -219,7 +237,8 @@ function get_ovs_data
 {
 	if [[ ! -s $ovs_data ]]
 	then
-		ovs_sp2uuid -a $rhost any >$ovs_data
+		ql_suss_ovsd >$ovs_data
+		#ovs_sp2uuid -a $rhost any >$ovs_data		## deprecated
 	fi
 }
 
@@ -253,6 +272,8 @@ function suss_vid
 
 # check for the ingress rate limiting things. Returns good if both the rate limiting
 # brige (br-rl) with a qosirlM port and a br-int port qosirlN all exist.
+# DEPRECATED -- caller is now responsible for checking; this script should not worry
+# 				about 'policy' such that this is.
 function check_irl
 {
 	if (( ignore_irl ))		# safety valve for human operation and probably steering
@@ -321,38 +342,64 @@ function str2nwproto
 }
 
 
-# accept a port, mac or special id (e.g. :qosirl0) as $1. If $1 is a mac address, then we attempt to find it
-# in ovs_sp2uuid information and echo out the corresponding port. If a special ID is given, then that ID, without
-# the leading : is epected to be listed as a port on a switch.
-#	ovs_sp2uuid output we want has the form:
-#		switch: 000082e23ecd0e4d cd3ee281-ce07-4d0e-9350-f7faa43b6a91 br-int
-#		port: 01f7f621-03ff-43e5-a183-c66151eae9d7 346 tap916a2d34-eb fa:de:ad:54:08:6b 916a2d34-ebdf-402e-bcb3-904b56011773
-#		port: e3909c91-5d1a-4821-a12b-0130a62d456b 19 qosirl0   -1
+# Accept a uuid (or MAC for backwards compatability) and convert to a port/switch pair.
+# If the parameter is a port, then it is returned without a switch as it's not possible
+# to determine a unique switch from a port.  The first parm may also be a 'name' (e.g. 
+# qvoa2079bc1-3 from field 4).  We assume that if a port number is given it will NOT
+# exactly match the UUID, MAC, or name values. If a MAC address is given we match the 
+# first one found and that might not be correct. Caller of this script is strongly
+# encouraged to use endpoint uuids and nothing else.
+#
 function late_binding
 {
 	get_ovs_data
 
-	if [[ $1 == *":"* ]]
-	then
-		typeset port=""
-	
-		awk -v mac=${1/#:/} ' 							# strip lead : from mac if it is :id
-			/^switch:/ { sw = $4; next; }
-			/^port:/ {
-				if( $5 == mac || $4 == mac )			# match mac or port name (ID)
-				 {
-					print sw, $3;
-					exit( 0 )
-				}
-			}
-		'  $ovs_data | read lbswitch port				# CAUTION: lbswitch is global
+	typeset port=""
+	typeset switch=""
 
-		echo $port $lbswitch
+	awk -v target=${1/#:/} ' 							# strip lead : from target (back compat allowing :name to match outside and be passed here)
+		/^port:/ {
+			if( $2 == target || $6 == target || $5 == target || $4 == target )	# match uuid(2), mac(5) or port name(4)
+			 {
+				print $8, $3;						# $8 is the bridge (switch)
+				exit( 0 )
+			}
+		}
+	'  $ovs_data | read switch port
+
+	if [[ -n $port ]]
+	then
+		echo $port $switch
 	else
-		echo $1
+		echo $1 ""						# nothing matched, assume port given, so just echo it
 	fi
 }
 
+#
+# Given a uuid or mac address, suss out the associated vlan
+function late_binding_vlan
+{
+	get_ovs_data
+
+	typeset vlan=""
+
+	awk -v id=${1/#:/} ' 							# strip lead : from mac if it is :id
+		/^port:/ {
+			if( $2 == id ||  $5 == id  )			# match uuid or mac
+			 {
+				print $7;							#vlan is 7th field
+				exit( 0 )
+			}
+		}
+	'  $ovs_data | read vlan
+
+	if [[ -n $vlan ]] 			# found it, echo it
+	then
+		echo $vlan
+	else
+		echo $1					# probably wasn't an id/mac, send it back as is
+	fi
+}
 
 # -------------------------------------------------------------------------------------------
 
@@ -362,23 +409,22 @@ ovs_data=/tmp/PID$$.lbdata 	# spot to dump ovs output into
 
 ip6_type="dl_type=0x86dd"
 ip4_type="dl_type=0x0800"
-arp_type="dl_type=0x8000"
+arp_type="dl_type=0x0806"
 
-check_level=0				# -B sets to force a check for backlevel version
-backlevel_ovs=0				# -b sets to indicate backlevel (w/o test)
-of_protolist="OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13"
+lbswitch=""					# set by late binding -i or -o uuid|mac and overrides bridge name on command line if set
+of_protolist="OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13"		# default openflow protos; some options require different combinations
 of_shortprotolist="OpenFlow10,OpenFlow12,OpenFlow13"			# OpenFlow11 not suported on v1.10
+of_limitedprotolist="OpenFlow10" 								# some options need the proto list to be very limited when they are present
 of_protoopt="-O"
-backlevel_ovs=0
+limit_openflow=0												# when set of_proto list will be set to the limited option from the get go
+
 type=""						# no specific type to match (unless -S or -D given) -4, -6 or -a can be used if -S/D is not needed.
 mode="options"
 output="normal"
 match=""
-ignore_irl=1				# -I will set to 0 and we'll require br-rl and veth to set fmods on br-int
 rhost=""					# parm for commands like ovs_sp2uuid that need to know; default to this host
 thost="$(hostname)"
 priority=200
-ssh_host=""					# if -h given set to the ssh command needed to execute on the remote host
 ssh_opts="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o PreferredAuthentications=publickey"	# we tollerate a bit more connect time wait here
 hto="hard_timeout=60," 		# must have comma so we can ommit it if -t 0 on command line
 if (( $( id -u ) ))
@@ -397,24 +443,16 @@ do
 	case $mode in
 		options)
 			case $1 in
-				-B)	check_level=1;;
-				-b)	
-					backlevel_ovs=1
-					of_protolist="" 								# turn off OVS 1.10+ support for backlevel openflow
-					of_protoopt=""
+				-B)	;;					# ingored as we make no effort to support a backlevel version (pre 2.x) of OVS
+				-b) ;;	
+
+				-h)						# this is deprecated.  The script should be available on all hosts via ssh broker and run 
+										# locally in order to support late binding.  Error if -h given
+					logit "ERROR:  use of the -h option is deprecated	[FAIL]"
+					exit 1
 					;;
 
-
-				-h)	
-					if [[ $2 != $thost &&  $2 != "localhost" ]]		# if a different host set up to run the command there
-					then
-						rhost="-h $2" 							# simple rhost for ovs_sp2uuid calls
-						ssh_host="ssh -n $ssh_opts $2" 		# CAUTION: this MUST have -n since we don't redirect stdin to ssh
-					fi
-					shift
-					;;
-
-				-I)	ignore_irl=1;;
+				-I)	ignore_irl=1;;						# DEPRECATED -- here for back compat
 				-n)	sudo="echo noexec mode: ";;
 				-p)	priority=$2; shift;;
 				-t)	
@@ -461,12 +499,18 @@ do
 					;;
 
 				-i)	late_binding $2 |read p s			# if mac or ID given, suss out the port/switch else get just port
+					if [[ -n $lbswitch ]]  &&  [[ $lbswitch != $s ]]
+					then
+						logit "-i (match) and -o (action) reference endpoints which are not on the same bridge ($s != $lbswitch)   [FAIL]"
+						rm -f /tmp/PID$$.*
+						exit 1
+					fi
 					lbswitch=$s
 					match+="in_port=$p "
 					shift
 					;;
 
-				-m)	warn=1; match+="metadata=$2 "; shift;;
+				-m)	match+="metadata=$2 "; shift;;
 				-p)	match+="nw_proto=$( str2nwproto ${2%%:*} ) " 		# get protocol:port for src
 					if [[ ${2##*:} != "0"  && ${2##*:} != "" ]]			# assume udp:  is same as udp:0
 					then
@@ -501,9 +545,18 @@ do
 
 				-t)	match+="tun_id=$2 "; shift;;		# id[/mask]
 				-T) match+="nw_tos=$2 "; shift;;
-				-v)	match+="dl_vlan=${2} "; shift;; 			# tci_vlan[/mask]
+				-v)	tvl=$( late_binding_vlan ${2} )
+					if [[ $tvl != *"/"* ]]  &&  (( tvl < 0 || tvl > 0xffff ))
+					then
+						echo "invalid vlan set with -v ($tvl) using $2	[FAIL]"
+						exit 1
+					fi
+					match+="dl_vlan=$tvl "				# tci_vlan[/mask] (allow uuid/mac and suss from ovs data)
+					shift
+					;;
 
 				*)	echo "unrecognised match option: $1  [FAIL]"
+					rm -f /tmp/PID$$.*
 					exit 1
 					;;
 			esac
@@ -515,14 +568,34 @@ do
 				-b) output="in_port";;						# bounce back on the port that the packet was recevied
 				-d)	action+="mod_dl_dst:$2 "; shift;;		# ethernet mac change of dest
 				-D)	action+="mod_nw_dst:$2 "; shift;;		# network (ip) address change of dest
-				-e)	action+="enqueue:$2 "; shift;;		# port:queue
-				-g)	warn=1; goto="goto_table:$2 "; shift;;
+				-e)	action+="enqueue:$2 "; shift;;			# port:queue
+				-g)	goto="goto_table:$2 "; shift;;
+
+				-i)	
+					late_binding $2 |read ap as				# if mac or uuid given, suss out the port/switch else get just port
+					if [[ -n $lbswitch ]]  &&  [[ $lbswitch != $as ]]
+					then
+						logit "-i (action) and -o (action) or -i (match)  reference endpoints which are not on the same bridge ($as != $lbswitch)   [FAIL]"
+						rm -f /tmp/PID$$.*
+						exit 1
+					fi
+					lbswitch=$as
+					action+="set_field:${ap}->in_port " 	# make it look like packet arrived from the enpoint given
+					shift
+					;;
+
 				-l)	action+="learn($2)"; shift;;			# add a prebuilt learn action
-				-m)	warn=1; meta+="write_metadata:$2 "; shift;;		# set a meta value/mask, cannot be done before resub
+				-m)	meta+="write_metadata:$2 "; shift;;		# set a meta value/mask, cannot be done before resub
 				-M) action+="set_field:$2->metadata "; shift;;		# set a metadata value or value/mask without resub
 				-n) output="normal ";;
 				-N)	output="";;							# no output action
-				-o)	late_binding $2 | read p s			# if mac given, suss out the port/swtich, else pick up the port
+				-o)	late_binding $2 | read p s			# if endpt uuid (mac for backlevel systems) given, suss out the port/swtich, else pick up the port
+					if [[ -n $lbswitch ]]  &&  [[ $lbswitch != $s ]]
+					then
+						logit "-i (match) and -o (action) reference endpoints which are not on the same bridge ($s != $lbswitch)   [FAIL]"
+						rm -f /tmp/PID$$.*
+						exit 1
+					fi
 					lbswitch=$s
 					output="output:$p "
 					shift
@@ -532,23 +605,37 @@ do
 				-P) action+="mod_tp_dst:$2 "; shift;;	# mod the transport (udp/tcp) port
 				-q)	action+="set_queue:$2 "; shift;;	# special ovs set queue
 				-r) action+="resubmit $2 "; shift;;
-				-R) 									# $2 should be table,port or ,port or table
-					if [[ -z $ssh_host ]]
+				-R) 										# $2 should be [port],table where port can be a uuid if running locally
+					if [[ $2 == *","* ]]				# break so we can allow an endpoint uuid to translate late into a port number
 					then
-						action+="resubmit($2) ";
+						p="${2%%,*}"
+						t="${2##*,}"
+						if [[ -n $p ]]					# uuid given, xlate it to the port (if port,table was given the original port comes back)
+						then
+							late_binding $p | read p junk
+						fi
 					else
-						action+="resubmit'($2)' "; 		# must quote if sending via ssh
+						p=""
+						t=$2
 					fi
+
+					action+="resubmit($p,$t) ";
 					shift
 					;;			
 
 				-s)	action+="mod_dl_src:$2 "; shift;;
 				-S)	action+="mod_nw_src:$2 "; shift;;
 				-t)	action+="set_tunnel:$2 "; shift;;
-				-T) action+="mod_nw_tos:$2 "; shift;;
+				-T) 									
+					limit_openflow=1					# ovs seems unable to accept this with OpenFlow* where * is not 10.
+					action+="mod_nw_tos:$2 " 
+					shift
+					;;
+
 				-v)	
 					vid="${2%%/*}"						# strip off if id/priority given
 					vpri="${2##*/}"						# snag the priority if there
+
 					if [[ $vid == *":"* ]]				# a mac address for us to look up in ovs and dig the assigned vlan tag
 					then
 						vid=$( suss_vid $vid )
@@ -603,6 +690,7 @@ do
 				-x)	action+="$2 "; shift;;				# externally supplied action
 		
 				*)	echo "unrecognised action option: $1  [FAIL]"
+					rm -f /tmp/PID$$.*
 					exit 1
 					;;
 			esac
@@ -611,36 +699,22 @@ do
 	shift
 done
 
-
-if (( check_level ))
+if (( limit_openflow ))
 then
-	timeout 10 $ssh_host $sudo ovs-ofctl --version | awk '/Open vSwitch/ { split( $NF, a, "." ); if( a[1] > 2 || (a[0] == 1 && a[2] > 9) ) print "new"; else print "old" }' | read x
-	if [[ $x == "old" ]]
-	then
-		backlevel_ovs=1
-		of_protolist=""
-		of_protoopt=""
-	fi
+	logit "limited openflow options must be used; setting limited options"
+	of_protolist="$of_limitedprotolist"
 fi
-
-if (( backlevel_ovs )) && (( warn ))
-then
-	echo "WARNING: selected options may not be compatible with the version of OVS that is installed"
-fi
-
 
 # remaining parameters should be {add|del} cookie switch; switch can be omitted in the case of
 # late binding as it will be set by the ovs_sp2uuid search.
 
 case $1 in
 	add)				# $2 is cookie, and we use $3 only if we didn't get a latebinding port
-		if [[ ${lbswitch:-$3} == "br-int" ]]		# must ensure that ingress rate limiting is on for br-int fmods
+		if [[ -z ${lbswitch:-$3} ]]
 		then
-			if ! check_irl
-			then
-				rm -f /tmp/PID$$.*
-				exit 1		# error msg written in function, so just exit bad here
-			fi
+			echo "set_ovs_fmod: no bridge on command line, or late binding resulted in nil string.	[FAIL]"
+			rm -f /tmp/PID$$.*
+			exit 1
 		fi
 
 		if [[ -n $match ]]
@@ -651,21 +725,18 @@ case $1 in
 		action="${action}${meta}${goto}$output"		# bang them all into one (goto/meta must be last)
 		action="${action% }"						# remove trailing blank
 
-		if (( !backlevel_ovs ))
+		timeout 20 $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_protolist 2>/dev/null		# ignore errors; we retry after 1st error and retry will spill guts if needed
+		if (( $? != 0 ))
 		then
-			timeout 20 $ssh_host $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_protolist 2>/dev/null		# ignore errors; we retry after 1st error and retry will spill guts if needed
+			sleep 1
+			timeout 20  $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_shortprotolist
 			if (( $? != 0 ))
 			then
-				sleep 1
-				timeout 20  $ssh_host $sudo ovs-vsctl set bridge ${lbswitch:-$3} protocols=$of_shortprotolist
-				if (( $? != 0 ))
-				then
-					echo "unable to set protocols for brige: ${lbswitch:-$3} on ${thost#* }" >&2
-					rm -f /tmp/PID$$.*
-					exit 1
-				else
-					echo "retried protocol with shorter list: $of_shortprotolist on ${thost#* }  [OK]"
-				fi
+				echo "unable to set protocols for brige: ${lbswitch:-$3} on ${thost#* }" >&2
+				rm -f /tmp/PID$$.*
+				exit 1
+			else
+				echo "retried protocol with shorter list: $of_shortprotolist on ${thost#* }  [OK]"
 			fi
 		fi
 
@@ -674,7 +745,7 @@ case $1 in
 		rc=1
 		while (( tries > 0 )) &&  (( rc != 0 ))
 		do
-			timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist add-flow ${lbswitch:-$3} "$fmod"
+			timeout 15 $sudo ovs-ofctl $of_protoopt $of_protolist add-flow ${lbswitch:-$3} "$fmod"
 			rc=$?
 			(( tries-- ))
 
@@ -708,23 +779,9 @@ case $1 in
 			cookie="$2"						# assume caller added a mask
 		fi
 
-		ver=$( timeout 15 $ssh_host $sudo ovs-ofctl --version |head -1 )
-		ver="${ver##* }"
-		case $ver in
-			1.[0-7].*)	backlevel_ovs=1; of_protoopt=""; of_protolist="";;
-			1.[8-9].*)	backlevel_ovs=0; of_protoopt=""; of_protolist="";;
-			1.1[0-1].*)	backlevel_ovs=0;;
-			2.*)		backlevel_ovs=0;;
-		esac
+		fmod="cookie=$cookie,${type}${match// /,}"
 
-		if (( backlevel_ovs ))
-		then
-			fmod="${type}${match// /,}"		# old ovs cannot handle cookie on delete
-		else
-			fmod="cookie=$cookie,${type}${match// /,}"
-		fi
-
-		timeout 15 $ssh_host $sudo ovs-ofctl $of_protoopt $of_protolist del-flows ${lbswitch:-$3} "$fmod"
+		timeout 15 $sudo ovs-ofctl $of_protoopt $of_protolist del-flows ${lbswitch:-$3} "$fmod"
 		if (( $? != 0 ))
 		then
 			logit "unable to delete flow mod on ${thost#* }: $fmod		[FAIL]"
