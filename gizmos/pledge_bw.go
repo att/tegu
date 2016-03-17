@@ -340,8 +340,8 @@ func (p *Pledge_bw) Clone( name string ) ( *Pledge_bw ) {
 */
 func (p *Pledge_bw) Equals( op *Pledge ) ( state bool ) {
 
-	if p == nil {
-		return
+	if p == nil || op == nil {
+		return false
 	}
 
 	obw, ok := (*op).( *Pledge_bw )			// convert from generic type to specific
