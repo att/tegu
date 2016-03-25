@@ -356,8 +356,8 @@ function suss_url
 # parse the output from keystone/openstack version2 token generation
 function v2_suss_token {
 	awk '{ print $0 "},"} ' RS="," | awk '1' RS="{" | awk '
-		/"access":/ { snarf = 1; next }				# we want the id that is a part of the access struct
-		/"id":/ && snarf == 1  {					# so only chase id if we have seen access tag
+		/"access" *:/ { snarf = 1; next }				# we want the id that is a part of the access struct
+		/"id" *:/ && snarf == 1  {					# so only chase id if we have seen access tag
 			gsub( "\"", "", $0 );					# drop annoying bits of json
 			gsub( "}", "", $0 );
 			gsub( ",", "", $0 );
