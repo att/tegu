@@ -105,15 +105,19 @@
 				07 Mar 2016 : Special tickle channel introduced.  It allows only 5 tickels to be queued; tickle will
 						drop and not block if full.  This prevents the main queue from being overrun with tickles
 						if a request takes a while (chkpt load).
+				08 Apr 2016 : Added retry cache to the inventory. Cache will track pledges which were loaded from
+						the datacache (checkpoint) and we've not been able to vet.  They should be retried 
+						assuming that vetting failed because of a network graph issue (unknown path etc) and that
+						later attempt will be successful.
 */
 
 package managers
 
 import (
-	"bufio"
+	//"bufio"
 	"bytes"
 	"fmt"
-	"io"
+	//"io"
 	"os"
 	"strings"
 	"time"
@@ -134,6 +138,7 @@ import (
 */
 type Inventory struct {
 	cache		map[string]*gizmos.Pledge		// cache of pledges
+	retry		map[string]*gizmos.Pledge		// pledges loaded from datacache that have not vetted
 	ulcap_cache	map[string]int					// cache of user link capacity values (max value)
 	chkpt		*chkpt.Chkpt
 }
@@ -452,7 +457,19 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 	for key, p := range i.cache {
 		s := (*p).To_chkpt()
 		if s != "expired" {
-			fmt.Fprintf( i.chkpt, "%s\n", s ) 					// we'll check the overall error state on close
+			fmt.Fprintf( i.chkpt, "%s\n", s )		 					// we'll check the overall error state on close
+		} else {
+			if (*p).Is_extinct( 120 ) && (*p).Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
+				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
+				delete( i.cache, key )
+			}
+		}
+	}
+
+	for key, p := range i.retry {
+		s := (*p).To_chkpt()
+		if s != "expired" {
+			fmt.Fprintf( i.chkpt, "%s\n", s )		 					// we'll check the overall error state on close
 		} else {
 			if (*p).Is_extinct( 120 ) && (*p).Is_pushed( ) {			// if really old and extension was pushed, safe to clean it out
 				rm_sheep.Baa( 1, "extinct reservation purged: %s", key )
@@ -469,141 +486,6 @@ func (i *Inventory) write_chkpt( last int64 ) ( retry bool, timestamp int64 ) {
 	}
 
 	return false, time.Now().Unix()				// not queued, and send back the new chkpt time
-}
-
-/*
-	Opens the filename passed in and reads the reservation data from it. The assumption is
-	that records in the file were saved via the write_chkpt() function and are JSON pledges
-	or other serializable objects.  We will drop any pledges that expired while 'sitting'
-	in the file.
-*/
-func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
-	var (
-		rec		string
-		nrecs	int = 0
-		p		*gizmos.Pledge
-		my_ch	chan	*ipc.Chmsg
-		req		*ipc.Chmsg
-	)
-
-	err = nil
-	my_ch = make( chan *ipc.Chmsg )
-	defer close( my_ch )									// close it on return
-
-	f, err := os.Open( *fname )
-	if err != nil {
-		return
-	}
-	defer f.Close( )
-
-	br := bufio.NewReader( f )
-	for ; err == nil ; {
-		rec, err = br.ReadString( '\n' )
-		if err == nil  {
-			nrecs++
-
-			switch rec[0:5] {
-				case "ucap:":
-					toks := strings.Split( rec, " " )
-					if len( toks ) == 3 {
-						i.add_ulcap( &toks[1], &toks[2] )
-					}
-
-				default:
-					p, err = gizmos.Json2pledge( &rec )			// convert any type of json pledge to Pledge
-
-					if err == nil {
-						if  (*p).Is_expired() {
-							rm_sheep.Baa( 1, "resmgr: ckpt_load: ignored expired pledge: %s", (*p).String() )
-						} else {
-							switch sp := (*p).(type) {									// work on specific pledge type, but pass the Pledge interface to add()
-								case *gizmos.Pledge_mirror:
-									err = i.Add_res( p )								// assume we can just add it back in as is
-
-								case *gizmos.Pledge_steer:
-									rm_sheep.Baa( 0, "did not restore steering reservation from checkpoint; not implemented" )
-
-								case *gizmos.Pledge_bwow:
-									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
-									push_block := h2 == nil
-									update_graph( h1, push_block, push_block )			// dig h1 info; push to netmgr if h2 isn't known and block on response
-									if h2 != nil {
-										update_graph( h2, true, true )					// dig h2 data and push to netmgr blocking for a netmgr response
-									}
-
-									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to validate the oneway pledge
-									req.Send_req( nw_ch, my_ch, REQ_BWOW_RESERVE, sp, nil )
-									req = <- my_ch										// should be OK, but the underlying network could have changed
-
-									if req.Response_data != nil {
-										gate := req.Response_data.( *gizmos.Gate )		// expect that network sent us a gate
-										sp.Set_gate( gate )
-										rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
-										err = i.Add_res( p )
-									} else {
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
-									}
-
-								case *gizmos.Pledge_bw:
-									h1, h2 := sp.Get_hosts( )							// get the host names, fetch ostack data and update graph
-									update_graph( h1, false, false )					// don't need to block on this one, nor update fqmgr
-									update_graph( h2, true, true )						// wait for netmgr to update graph and then push related data to fqmgr
-
-									req = ipc.Mk_chmsg( )								// now safe to ask netmgr to find a path for the pledge
-									rm_sheep.Baa( 2, "reserving path starts" )
-									req.Send_req( nw_ch, my_ch, REQ_BW_RESERVE, sp, nil )
-									req = <- my_ch										// should be OK, but the underlying network could have changed
-
-									if req.Response_data != nil {
-									rm_sheep.Baa( 2, "reserving path finished" )
-										path_list := req.Response_data.( []*gizmos.Path )			// path(s) that were found to be suitable for the reservation
-										sp.Set_path_list( path_list )
-										rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
-										err = i.Add_res( p )
-									} else {
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
-									}
-
-								case *gizmos.Pledge_pass:
-									host, _ := sp.Get_hosts()
-									update_graph( host, true, true )
-									req.Send_req( nw_ch, my_ch, REQ_GETPHOST, host, nil )		// need to find the current phost for the vm
-									req = <- my_ch
-
-									if req.Response_data != nil {
-										phost := req.Response_data.( *string  )
-										sp.Set_phost( phost )
-										rm_sheep.Baa( 1, "passthrou phost found  for chkptd reservation: %s %s %s", *(sp.Get_id()), *host, *phost )
-										err = i.Add_res( p )
-									} else {
-										s := fmt.Errorf( "unknown reason" )
-										if req.State != nil {
-											s = req.State
-										}
-										rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to find phost for passthru pledge: %s	[TGURMG000]", s )
-										rm_sheep.Baa( 0, "erroring passthru pledge: %s", (*p).To_str() )
-									}
-									
-
-								default:
-									rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )
-
-							}						// end switch on specific pledge type
-						}
-					} else {
-						rm_sheep.Baa( 0, "CRI: %s", err )
-						return			// quickk escape
-					}
-			}				// outer switch
-		}
-	}
-
-	if err == io.EOF {
-		err = nil
-	}
-
-	rm_sheep.Baa( 1, "read %d records from checkpoint file: %s", nrecs, *fname )
-	return
 }
 
 /*
@@ -666,7 +548,8 @@ func Mk_inventory( ) (inv *Inventory) {
 
 	inv = &Inventory { }
 
-	inv.cache = make( map[string]*gizmos.Pledge, 2048 )		// initial size is not a limit
+	inv.cache = make( map[string]*gizmos.Pledge, 4096 )		// initial size is not a limit but a hint
+	inv.retry = make( map[string]*gizmos.Pledge, 2048 )
 	inv.ulcap_cache = make( map[string]int, 64 )
 
 	return
@@ -714,7 +597,8 @@ func (inv *Inventory) Add_res( pi interface{} ) (err error) {
 	Return the reservation that matches the name passed in provided that the cookie supplied
 	matches the cookie on the reservation as well.  The cookie may be either the cookie that
 	the user supplied when the reservation was created, or may be the 'super cookie' admin
-	'root' as you will, which allows access to all reservations.
+	'root' as you will, which allows access to all reservations. The return will be nil,nil
+	if it's not found; nil,state indicates an error.
 */
 func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge, state error) {
 
@@ -737,6 +621,30 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 }
 
 /*
+	Search the retry cache for the reservation and return if it is found and the given 
+	cookie matches, or the super cookie is given.
+*/
+func (inv *Inventory) Get_retry_res( name *string, cookie *string ) (p *gizmos.Pledge, state error) {
+
+	state = nil
+	p = inv.retry[*name]
+	if p == nil {
+		state = fmt.Errorf( "cannot find reservation in retry cache: %s", *name )
+		return
+	}
+
+	if ! (*p).Is_valid_cookie( cookie ) &&  *cookie != *super_cookie {
+		rm_sheep.Baa( 2, "resgmgr: denied fetch of reservation: cookie supplied (%s) didn't match that on pledge %s", *cookie, *name )
+		p = nil
+		state = fmt.Errorf( "not authorised to access or delete reservation: %s", *name )
+		return
+	}
+
+	rm_sheep.Baa( 2, "resgmgr:: fetched reservation from retry cache: %s", (*p).To_str() )
+	return
+}
+
+/*
 	Accept a reservation (pledge) and see if it matches any existing reservation in
 	the inventory. If it does, return the reservation id as data, set error if
 	we encounter problems.
@@ -754,6 +662,14 @@ func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error )
 		if !(*r).Is_expired()  && (*p).Equals( r ) {
 			rid = (*r).Get_id( )
 			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
+			return
+		}
+	}
+
+	for _, r := range inv.retry {							// not in main cache, check the retry cache
+		if !(*r).Is_expired()  && (*p).Equals( r ) {
+			rid = (*r).Get_id( )
+			rm_sheep.Baa( 2, "duplicate detected in retry queue: %s", *r )
 			return
 		}
 	}
@@ -793,6 +709,7 @@ func (inv *Inventory) Get_mirrorlist() ( string ) {
 func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 
 	gp, state := inv.Get_res( name, cookie )
+
 	if gp != nil {
 		rm_sheep.Baa( 2, "resgmgr: deleted reservation: %s", (*gp).To_str() )
 		state = nil
@@ -816,7 +733,19 @@ func (inv *Inventory) Del_res( name *string, cookie *string ) (state error) {
 				(*gp).Reset_pushed()								// force push of flow-mods that reset the expiry
 		}
 	} else {
-		rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
+		if state == nil {
+			gp, state = inv.Get_retry_res( name, cookie )		// see if it's in the retry cache and cookie was valid for it
+			if gp != nil {
+				// FIXME????
+				// do we need to mark and continue to retry this and after it passes vetting then let it delete by pusshing out
+				// short term flow-mods?   this would cover the case where the flow-mods were pushed, but when tegu restarted ostack
+				// didn't have enough info to vet the pledge, and thus the existing flow-mods do need to be reset on the phyisical
+				// host.
+				delete( inv.retry, *name )						// for pledges on the retry cache, they can just be deleted since no flow-mods exist etc
+			}
+		} else {
+			rm_sheep.Baa( 2, "resgmgr: unable to delete reservation: not found: %s", *name )
+		}
 	}
 
 	return
@@ -893,7 +822,6 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 				pldg.Set_path_list( nil )							// no path list for this pledge
 
 				ch := make( chan *ipc.Chmsg )
-				defer close( ch )									// close it on return
 				req := ipc.Mk_chmsg( )
 				req.Send_req( nw_ch, ch, REQ_DEL, cp, nil )			// delete from the network point of view
 				req = <- ch											// wait for response from network
@@ -1047,6 +975,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 	tklr.Add_spot( 2, tkl_ch, REQ_PUSH, nil, ipc.FOREVER )				// push reservations to agent just before they go live
 	tklr.Add_spot( 1, tkl_ch, REQ_SETQUEUES, nil, ipc.FOREVER )			// drives us to see if queues need to be adjusted
 	tklr.Add_spot( 5, tkl_ch, REQ_RTRY_CHKPT, nil, ipc.FOREVER )		// ensures that we retried any missed checkpoints
+	tklr.Add_spot( 60, tkl_ch, REQ_VET_RETRY, nil, ipc.FOREVER )		// run the retry queue if it has size
 
 	go rm_lookup( rmgrlu_ch, inv )
 
@@ -1181,6 +1110,11 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 						tmsg.Send_req( fq_ch, nil, REQ_SETQUEUES, fq_data, nil )		// send the queue list to fq manager to deal with
 
 						inv.push_reservations( my_chan, alt_table, int64( hto_limit ), favour_v6 )			// now safe to push reservations if any activated
+
+					case REQ_VET_RETRY:
+						if inv != nil && len( inv.retry ) > 0 {
+							inv.vet_retries( )
+						}
 
 					case REQ_YANK_RES:										// yank a reservation from the inventory returning the pledge and allowing flow-mods to purge
 						if msg.Response_ch != nil {
