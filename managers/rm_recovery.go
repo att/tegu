@@ -48,7 +48,7 @@ import (
 	retry queue. Returns a diposition state:
 		DS_ADD 		- Add pledge to reservation cache
 		DS_RETRY	- Add to retry queue (recoverable error)
-		DS_DROP		- Discard it; error but not recoverable
+		DS_DISCARD	- Discard it; error but not recoverable
 */
 func vet_pledge( p *gizmos.Pledge ) ( disposition int ) {
 	var (
@@ -90,7 +90,7 @@ func vet_pledge( p *gizmos.Pledge ) ( disposition int ) {
 					rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
 					//err = i.Add_res( p )
 				} else {
-					rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
+					rm_sheep.Baa( 0, "WRN: pledge_vet: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
 					return  DS_RETRY
 				}
 
@@ -112,7 +112,7 @@ func vet_pledge( p *gizmos.Pledge ) ( disposition int ) {
 					rm_sheep.Baa( 1, "path allocated for chkptd reservation: %s %s %s; path length= %d", *(sp.Get_id()), *h1, *h2, len( path_list ) )
 					//err = i.Add_res( p )
 				} else {
-					rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
+					rm_sheep.Baa( 0, "WRN: pledge_vet: unable to reserve for pledge: %s	[TGURMG000]", (*p).To_str() )
 					return  DS_RETRY
 				}
 
@@ -135,14 +135,14 @@ func vet_pledge( p *gizmos.Pledge ) ( disposition int ) {
 					if req.State != nil {
 						s = req.State
 					}
-					rm_sheep.Baa( 0, "ERR: resmgr: ckpt_laod: unable to find phost for passthru pledge: %s	[TGURMG000]", s )
+					rm_sheep.Baa( 0, "WRN: pledge_vet: unable to find phost for passthru pledge: %s	[TGURMG000]", s )
 					rm_sheep.Baa( 0, "erroring passthru pledge: %s", (*p).To_str() )
 					return  DS_RETRY
 				}
 				
 
 			default:
-				rm_sheep.Baa( 0, "rmgr/load_ckpt: unrecognised pledge type" )
+				rm_sheep.Baa( 0, "rmgr/vet_pledge: unrecognised pledge type" )
 				return DS_DISCARD
 
 		}						// end switch on specific pledge type
@@ -152,28 +152,70 @@ func vet_pledge( p *gizmos.Pledge ) ( disposition int ) {
 }
 
 /*
+	Stuff the pledge into the retry cache erroring if the pledge already exists.
+	Expect either a Pledge, or a pointer to a pledge.
+*/
+func (inv *Inventory) Add_retry( pi interface{} ) (err error) {
+	var (
+		p *gizmos.Pledge
+	)
+
+	err = nil
+
+	px, ok := pi.( gizmos.Pledge )
+	if ok {
+		p = &px
+	} else {
+		py, ok := pi.( *gizmos.Pledge )
+		if ok {
+			p = py
+		} else {
+			err = fmt.Errorf( "internal mishap in Add_res: expected Pledge or *Pledge, got neither" )
+			rm_sheep.Baa( 1, "%s", err )
+			return
+		}
+	}
+
+	id := (*p).Get_id()
+	if inv.retry[*id] != nil {
+		rm_sheep.Baa( 2, "reservation not added to retry cache, already exists: %s", *id )
+		err = fmt.Errorf( "reservation already exists in retry cache: %s", *id )
+		return
+	}
+
+	inv.retry[*id] = p
+
+	rm_sheep.Baa( 1, "resgmgr: added reservation to retry cache: %s", (*p).To_chkpt() )
+	return
+}
+
+/*
 	Opens the filename passed in and reads the reservation data from it. The assumption is
 	that records in the file were saved via the write_chkpt() function and are JSON pledges
 	or other serializable objects.  We will drop any pledges that expired while 'sitting'
 	in the file.
 */
-func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
+func (inv *Inventory) load_chkpt( fname *string ) ( err error ) {
 	var (
 		rec		string
 		nrecs	int = 0
 		p		*gizmos.Pledge
-		//my_ch	chan	*ipc.Chmsg
-		//req		*ipc.Chmsg
 	)
 
 	err = nil
-	//my_ch = make( chan *ipc.Chmsg )
 
 	f, err := os.Open( *fname )
 	if err != nil {
+		rm_sheep.Baa( 1, "checkpoint open failed for %s: %s", *fname, err )
 		return
 	}
 	defer f.Close( )
+
+	rm_sheep.Baa( 1, "loading from checkpoint: %s", *fname )
+
+	added := 0			// counters for end bleat
+	queued := 0
+	failed := 0
 
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
@@ -185,7 +227,7 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 				case "ucap:":
 					toks := strings.Split( rec, " " )
 					if len( toks ) == 3 {
-						i.add_ulcap( &toks[1], &toks[2] )
+						inv.add_ulcap( &toks[1], &toks[2] )
 					}
 
 				default:
@@ -193,14 +235,18 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 					if err == nil {
 						switch vet_pledge( p ) {
 							case DS_ADD:
-								err = i.Add_res( p )				// vet ok, add to reservation cache
+								rm_sheep.Baa( 2, "reservaton vetted; added to the cache: %s", (*p).Get_id() )
+								err = inv.Add_res( p )				// vet ok, add to reservation cache
+								added++
 
 							case DS_RETRY:
-								rm_sheep.Baa( 2, "reservaton had recoverable errors; added to retry list: %s",(*p).Get_id() )
-// TODO -- ad to fail list if error
+								rm_sheep.Baa( 2, "reservaton had recoverable errors; added to retry list: %s", *((*p).Get_id()) )
+								inv.Add_retry( p )
+								queued++
 
 							default:
-								rm_sheep.Baa( 2, "reservaton had unrecoverable errors; discarded: %s", p )
+								rm_sheep.Baa( 2, "reservaton expired or had unrecoverable errors; discarded: %s", p )
+								failed++
 						}
 					} else {
 						rm_sheep.Baa( 0, "CRI: %s", err )
@@ -214,6 +260,41 @@ func (i *Inventory) load_chkpt( fname *string ) ( err error ) {
 		err = nil
 	}
 
-	rm_sheep.Baa( 1, "read %d records from checkpoint file: %s", nrecs, *fname )
+	rm_sheep.Baa( 1, "read %d records from checkpoint file: %s:  %d adds; %d queued for retry; %d dropped", nrecs, *fname, added, queued, failed )
 	return
+}
+
+/*
+	Driven now and again to attempt to push any reservations in the retry cash back into 
+	the real world. 
+*/
+func( inv *Inventory ) vet_retries( ) {
+	moved := 0
+	tried := 0
+
+	for k, v := range inv.retry {
+		tried++
+
+		switch vet_pledge( v ) {
+			case DS_ADD:						// pledge can now be supported
+				err := inv.Add_res( v )
+				if err == nil {
+					moved++
+					delete( inv.retry, k )			// drop from retry queue
+				} else {
+					rm_sheep.Baa( 1, "pledge vetted, but unable to add to cache: %s: %s", k, err )
+				}
+
+			case DS_DISCARD:					// something didn't work in a non-recoverable way, drop the reserbation
+				rm_sheep.Baa( 1, "pledge vetting failed in a non-recoverable way, dropped" )
+				delete( inv.retry, k )			// drop from retry queue
+
+			default:							// let it ride
+				rm_sheep.Baa( 2, "reservaton had recoverable errors; kept on the retry list: %s", k )
+		}
+	}
+
+	if tried > 0 {
+		rm_sheep.Baa( 1, "attempted to move %d pledges from retry queue, %d successfully moved", tried, moved )
+	}
 }

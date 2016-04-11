@@ -148,6 +148,8 @@
 				06 Mar 2016 : Correct issue with deadlock when there are both a large number of bandwidth reservations and 
 							mirrors in place.
 				07 Mar 2016 : Tweaked network manager in order to speed up checkpoint reloads.
+				11 Apr 2016 : Resmgr now supports a retry cache in the inventory to allowed previously accepted reservations
+							to be retried at restart.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -182,7 +184,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.8/13076"
+		version		string = "v3.1.9/14116"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
