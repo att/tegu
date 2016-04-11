@@ -164,6 +164,7 @@ const (
 	REQ_SWITCHINFO				// request switch info from all hosts
 	REQ_GENPLAN					// (re)generate a steering plan for a new/modified chain request
 	REQ_PT_RESERVE				// passthru reservation
+	REQ_VET_RETRY				// run the reservation retry queue if it has size
 )
 
 const (
@@ -173,6 +174,14 @@ const (
 	DEF_ALT_TABLE	int = 90	// alternate table in OVS for metadata marking
 )
 
+
+// res_mgr disposition state constants
+const (
+	
+		DS_ADD 	int = iota		// pledge vetted, add to cache
+		DS_RETRY				// unable to vet pledge, retry later
+		DS_DISCARD				// hard failure vetting pledge, drop from cache
+)
 
 // fq_mgr constants	(resets iota)
 const (
