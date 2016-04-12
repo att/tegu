@@ -147,6 +147,18 @@ func (h *Host) Get_switch_port( i int ) ( s *Switch, p int ) {
 }
 
 /*
+	Return the switch ID of the ith connected switch.
+*/
+func( h *Host) Get_switch_id( i int ) ( *string ) {
+	if h == nil ||  i >= len( h.conns ) {
+		return nil 
+	}
+
+	
+	return h.conns[i].Get_id()
+}
+
+/*
 	Returns the port the host is 'attached to' for the given switch.
 	In a disjoint network attached might not be true, but it's the
 	port that the switch should write traffic on destined for the host.
