@@ -37,6 +37,7 @@
 				31 Mar 2015 - Changes to provide a force load of all VMs into the network graph.
 				01 Apr 2015 - Added ipv6 support for finding gateway/routers.
 				16 Jun 2015 - Turned down some of the bleat messages.
+				12 Apr 2016 - Changed bleat message to make it more useful.
 */
 
 package managers
@@ -548,7 +549,7 @@ func get_os_hostinfo( msg	*ipc.Chmsg, os_refs map[string]*ostack.Ostack, os_proj
 	}
 
 	if tokens[0] == "!" { 					// !//ipaddress was given; we've got nothing, so bail now
-		osif_sheep.Baa( 1, "get hostinfo: unable to map to a project: %s lone bang",  *(msg.Req_data.( *string )) )
+		osif_sheep.Baa( 1, "get hostinfo: external (bang) name, can't dig host info: %s",  *(msg.Req_data.( *string )) )
 		msg.Response_ch <- msg
 		return
 	}
