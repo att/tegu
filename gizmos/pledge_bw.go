@@ -43,6 +43,7 @@
 				16 Aug 2015 - Move common code into Pledge_base
 				04 Feb 2016 - Added protocol to chkpt, and string functions.
 				11 Apr 2016 - Correct bad % on String() output.
+				12 Apr 2016 - Duplicate refresh support.
 */
 
 package gizmos
@@ -480,6 +481,71 @@ func (p *Pledge_bw) Set_matchv6( state bool ) {
 	p.match_v6 = state
 }
 
+func (p *Pledge_bw) Get_path_count( ) (int) {
+	if p == nil {
+		return 0
+	}
+
+	return len( p.path_list )
+}
+
+/*
+	Looks at our path list and returns true if there is a matching path.
+*/
+func (p *Pledge_bw) Has_path( pth *Path ) ( bool ) {
+	if p == nil || pth == nil {
+		return false
+	}
+
+	for _, mpth := range p.path_list {
+		if mpth.Same_anchors( pth ) {			// match?
+			return true
+		}
+	}
+
+	return false
+}
+
+/*
+	Looks at the path list for this pledge and the other pledge given and returns
+	true if all paths are between the same anchors (end point switches).
+*/
+func (p *Pledge_bw) Same_paths( op *Pledge_bw ) ( bool ) {
+	if p == nil || op == nil { 
+		return true
+	}
+
+	if op.Get_path_count() != len( p.path_list ) {		// cant be the same if paths are not equal in number
+		return false 
+	}
+	
+	for _, pth := range p.path_list {					// order may not be the same so we must run an exhaustive search
+		if ! op.Has_path( pth ) {						// first bad apple spoils the bunch
+			return false
+		}
+	}
+
+	return true
+}
+
+/*
+	Accept two physical host names and return true if the path 
+	associated with the pledge seems to be anchored by the pair. 
+*/
+func( p *Pledge_bw ) Same_anchors( a1 *string, a2 *string ) ( bool ) {
+	if p == nil {
+		return false
+	}
+
+fmt.Printf( ">>>>> go there\n\n" )
+	for _, pth := range p.path_list {				// list could be either order
+		if pth.Has_anchors( a1, a2 ) {
+			return true
+		}
+	}
+
+	return false
+}
 
 /*
 	Accepts a host name and returns true if it matches either of the names associated with

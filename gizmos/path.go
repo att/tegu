@@ -61,6 +61,7 @@
 				29 Jul 2014 - Mlag support
 				19 Oct 2014 - Support setting queues only on outbound direction of path.
 				29 Oct 2014 - Added Get_nlinks() function.
+				12 Apr 2016 - Added ability to compare paths based on 'anchors' (dup refresh support).
 */
 
 package gizmos
@@ -448,6 +449,15 @@ func (p *Path) Get_h2( ) ( *Host ) {
 }
 
 /*
+	Return pointer to both hosts.
+*/
+func (p *Path) Get_hosts( ) ( h1 *Host, h2 *Host ) {
+	return p.h1, p.h2
+}
+
+
+
+/*
 	Return the forward link information (switch/port/queue-num) associated with the first (ingress) switch
 	in the path.  This is the port and queue number used on the first switch in the path to send data _out_
 	from h1.  The data is based on queue ID and the timestamp given (queue numbers can vary over time).
@@ -658,6 +668,54 @@ func (p *Path) Invert( ) ( ip *Path ) {
 
 	ip.is_reverse = !p.is_reverse
 	return
+}
+
+/*
+	Accept a second path and return true if the anchors are the same. The 
+	anchors are considered to be the switch ID for each of the two hosts 
+	in the path. If a host is connected to multiple switches, we use the 
+	first in the list for now.
+*/
+func (p *Path) Same_anchors( op *Path ) ( bool ) {
+	var (
+		s2  *string = nil
+		os2 *string = nil
+	)
+
+	if p == nil || op == nil {
+		return false
+	}
+
+	s1 := p.h1.Get_switch_id( 0 )
+
+	if p.h2 != nil {
+		s2 = p.h2.Get_switch_id( 0 )
+	}
+
+	oh1, oh2  := op.Get_hosts( )
+	os1 := oh1.Get_switch_id( 0 )
+
+	if  oh2 != nil {
+		os2 = oh2.Get_switch_id( 0 )
+	}
+
+	return s1 == os1 && s2 == os2
+}
+
+/*
+	Lools at the switches at either end of the path (anchors) and if the
+	IDs match a1, and a2 then return true. 
+*/
+func (p *Path) Has_anchors( a1 *string, a2 *string ) ( bool ) {
+	if p == nil {
+		return false
+	}
+
+	if a2 != nil {
+		return *(p.h1.Get_switch_id( 0 )) == *a1  && *(p.h2.Get_switch_id( 0 )) == *a2
+	} else {
+		return *(p.h1.Get_switch_id( 0 )) == *a1
+	}
 }
 
 // ------------------------ string/json/human output functions ------------------------------------

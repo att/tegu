@@ -27,7 +27,7 @@
 	Date:		26 Jan 2016
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		12 Apr 2016 : Changes to support duplicate refresh.
 */
 
 package gizmos
@@ -252,6 +252,24 @@ func (p *Pledge_pass) Set_proto( proto *string ) {
 	if p != nil {
 		p.protocol = proto
 	}
+}
+
+/*
+	Accept two physical host names and return true if the path 
+	associated with the pledge seems to be anchored by the pair. 
+	For passthrough only a1 matters, but the interface supports all
+	bandwidht types so two must be accepted.
+*/
+func( p *Pledge_pass ) Same_anchors( a1 *string, a2 *string ) ( bool ) {
+	if p == nil || a1 == nil {
+		return false
+	}
+
+	if p.phost != nil {
+		return *a1 == *p.phost
+	}
+
+	return false
 }
 
 // --------------- interface functions (required) ------------------------------------------------------

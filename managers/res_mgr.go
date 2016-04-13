@@ -100,24 +100,24 @@
 				08 Sep 2015 : Prevent checkpoint files from being written in the same second (gh#22).
 				08 Oct 2015 : Added !pushed check back to active reservation pushes.
 				27 Jan 2015 : Changes to support passthru reservations.
-				06 Mar 2016 : Added a second channel interface (rmgrlu_ch) to deal with lookup requests for 
+				06 Mar 2016 : Added a second channel interface (rmgrlu_ch) to deal with lookup requests for
 						mirrors since they need this from agent manager which was creating a deadlock.
 				07 Mar 2016 : Special tickle channel introduced.  It allows only 5 tickels to be queued; tickle will
 						drop and not block if full.  This prevents the main queue from being overrun with tickles
 						if a request takes a while (chkpt load).
 				08 Apr 2016 : Added retry cache to the inventory. Cache will track pledges which were loaded from
-						the datacache (checkpoint) and we've not been able to vet.  They should be retried 
+						the datacache (checkpoint) and we've not been able to vet.  They should be retried
 						assuming that vetting failed because of a network graph issue (unknown path etc) and that
 						later attempt will be successful.
+				12 Apr 2016 : Added support to detect when a duplicate reservaiton should be allowed, and the previous
+						one cancelled, due to a host move.	
 */
 
 package managers
 
 import (
-	//"bufio"
 	"bytes"
 	"fmt"
-	//"io"
 	"os"
 	"strings"
 	"time"
@@ -621,7 +621,7 @@ func (inv *Inventory) Get_res( name *string, cookie *string ) (p *gizmos.Pledge,
 }
 
 /*
-	Search the retry cache for the reservation and return if it is found and the given 
+	Search the retry cache for the reservation and return if it is found and the given
 	cookie matches, or the super cookie is given.
 */
 func (inv *Inventory) Get_retry_res( name *string, cookie *string ) (p *gizmos.Pledge, state error) {
@@ -645,6 +645,83 @@ func (inv *Inventory) Get_retry_res( name *string, cookie *string ) (p *gizmos.P
 }
 
 /*
+	Check the two pledges (old, new) to see if the related physical hosts have moved.
+	Returns true if the physical hosts have changed. We get the current physical location
+	for the hosts from the network based on the new pledge, and look at the path of the
+	old pledge to see if they are the same as what was captured in the original path.
+	We return true if they are different.
+*/
+func phosts_changed( old *gizmos.Pledge, new *gizmos.Pledge ) ( bool ) {
+
+	var (
+		p2 *string = nil	
+	)
+
+	a1, a2 := (*new).Get_hosts( )							// get hosts from the new pledge
+	ch := make( chan *ipc.Chmsg )						// do not close -- senders close channels
+	req := ipc.Mk_chmsg( )
+	req.Send_req( nw_ch, ch, REQ_GETPHOST, a1, nil )	// xlate hostnames to physical host location
+	req = <- ch											// wait for response from network
+	p1 := req.Response_data.( *string )
+
+	if a2 != nil {
+		if len( *a2) > 1  &&  (*a2)[0:1] != "!" {				// !// names aren't known, don't map
+			req.Send_req( nw_ch, ch, REQ_GETPHOST, a2, nil )
+			req = <- ch									
+			if req.Response_data != nil {					// for an external address this will be unknown
+				p2 = req.Response_data.( *string )
+			}
+		}
+	}
+
+	return (*old).Same_anchors( p1, p2 )
+}
+
+/*
+	Search the given cache for a duplicate of the target pledge.  Return the reservation ID
+	if a dup.  If a duplicate, and a bandwidth reservation, then test to see if the physical
+	hosts have changed.  If they have, then we expire the old reservation, and allow this
+	to go in by returning a nil string.
+*/
+func dup_in_cache( cache map[string]*gizmos.Pledge, target *gizmos.Pledge ) ( rid *string ) {
+
+	isbw := false
+	switch (*target).( type ) {
+		case *gizmos.Pledge_bw:
+			isbw = true
+
+		case *gizmos.Pledge_bwow:
+			isbw = true
+
+		case *gizmos.Pledge_pass:
+			isbw = true
+
+		default:
+	}
+
+	rid = nil
+	for _, r := range cache {
+		if !(*r).Is_expired()  && (*target).Equals( r ) {			// duplicates; if a bandwidth pledge, see if anchor has shifted
+			rid := (*r).Get_id( )								// duplicate id to send back if not a bw or no change to phost
+
+			if isbw {											// if passed pledge is a bandwidth, check paths
+				if ! phosts_changed( r, target ) {			// if they aren't on the same places, then we should refresh
+					(*r).Reset_pushed( )							// we'll force this out
+					(*r).Set_expiry( time.Now().Unix() + 15 )		// force expiry of old
+					rm_sheep.Baa( 1, "duplicate with different anchors will be refreshed: %s", *r )
+					return nil
+				}
+			}
+
+			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
+			return rid
+		}
+	}
+
+	return rid
+}
+
+/*
 	Accept a reservation (pledge) and see if it matches any existing reservation in
 	the inventory. If it does, return the reservation id as data, set error if
 	we encounter problems.
@@ -658,23 +735,62 @@ func (inv *Inventory) dup_check( p *gizmos.Pledge ) ( rid *string, state error )
 		return
 	}
 
+	rid = dup_in_cache( inv.cache, p )
+	if rid != nil {
+		return rid, nil
+	}
+
+	rid = dup_in_cache( inv.retry, p )
+	if rid != nil {
+		return rid, nil
+	}
+
+/*
+	bwr2, isbw  := (*p).( *gizmos.Pledge_bw )
 	for _, r := range inv.cache {
-		if !(*r).Is_expired()  && (*p).Equals( r ) {
-			rid = (*r).Get_id( )
+		if !(*r).Is_expired()  && (*p).Equals( r ) {			// duplicates; if a bandwidth pledge, see if anchor has shifted
+			rid := (*r).Get_id( )								// duplicate id to send back if not a bw or no change to phost
+
+			if isbw {											// if passed pledge is a bandwidth, check paths
+				bwr1, ok  := (*r).( *gizmos.Pledge_bw )			// should be, but be paranoid
+				if ok {
+					if ! phosts_changed( bw1, bw2 ) {			// if they aren't on the same places, then we should refresh
+						(*r).Reset_pushed( )						// we'll force this out
+						(*r).Set_expiry( time.Now().Unix() + 15 )	// force expiry of old
+						rm_sheep.Baa( 1, "duplicate with different anchors will be refreshed: %s", *r )
+						return nil, nil
+					}
+				}
+			}
+
 			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
-			return
+			return rid, nil
 		}
 	}
 
 	for _, r := range inv.retry {							// not in main cache, check the retry cache
 		if !(*r).Is_expired()  && (*p).Equals( r ) {
-			rid = (*r).Get_id( )
-			rm_sheep.Baa( 2, "duplicate detected in retry queue: %s", *r )
-			return
+			rid := (*r).Get_id( )								// duplicate id to send back if not
+
+			if isbw {											// if passed pledge is a bandwidth, check paths
+				bwr1, ok  := (*r).( *gizmos.Pledge_bw )				// should be, but be paranoid
+				if ok {
+					if ! bwr1.Same_paths( bwr2 ) {				// different paths; something changed so trash the existing and let the new come in
+						(*r).Reset_pushed( )						// we'll force this out
+						(*r).Set_expiry( time.Now().Unix() + 15 )	// force expiry of old
+						rm_sheep.Baa( 1, "duplicate with different anchors will be refreshed: %s", *r )
+						return nil, nil
+					}
+				}
+			}
+
+			rm_sheep.Baa( 2, "duplicate detected: %s", *r )
+			return rid, nil
 		}
 	}
+*/
 
-	return
+	return nil, nil
 }
 
 
@@ -844,8 +960,8 @@ func (inv *Inventory) yank_res( name *string ) ( p *gizmos.Pledge, state error) 
 /*
 	Wait and respond to RMLU_ requests received on the channel.
 	This interface is provided because agent manager wants to look up reservations
-	rather than queuing the data to be attached to a reservation onto the main 
-	repmgr queue. 
+	rather than queuing the data to be attached to a reservation onto the main
+	repmgr queue.
 */
 func rm_lookup( my_chan chan *ipc.Chmsg, inv *Inventory ) {
 	for {
