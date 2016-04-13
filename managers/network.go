@@ -90,6 +90,7 @@
 				27 Jan 2016 - Added ability to query user cap value.
 				25 Feb 2016 - Corrected missing nil pointer check in find_vlink()
 				07 Mar 2015 - Added the graph rebuild when adding a node.
+				12 Apr 2016 - Additional error checking in PHOST processing to prevent stack dump.
 */
 
 package managers
@@ -1539,7 +1540,11 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 							s := req.Req_data.( *string )
 							ip, req.State = act_net.name2ip( s )
 							if req.State == nil {
-								req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
+								if ip != nil && act_net.ip2mac[*ip] != nil {
+									req.Response_data = act_net.mac2phost[*act_net.ip2mac[*ip]]
+								} else {
+									req.Response_data = nil
+								}
 								if req.Response_data == nil {
 									req.State = fmt.Errorf( "cannot translate IP to physical host: %s", *ip )
 								}	
