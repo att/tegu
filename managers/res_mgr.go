@@ -109,15 +109,15 @@
 						the datacache (checkpoint) and we've not been able to vet.  They should be retried
 						assuming that vetting failed because of a network graph issue (unknown path etc) and that
 						later attempt will be successful.
+				12 Apr 2016 : Added support to detect when a duplicate reservaiton should be allowed, and the previous
+						one cancelled, due to a host move.	
 */
 
 package managers
 
 import (
-	//"bufio"
 	"bytes"
 	"fmt"
-	//"io"
 	"os"
 	"strings"
 	"time"
@@ -665,7 +665,7 @@ func phosts_changed( old *gizmos.Pledge, new *gizmos.Pledge ) ( bool ) {
 	p1 := req.Response_data.( *string )
 
 	if a2 != nil {
-		if (*a2)[0:1] != "!" {								// !// names aren't known, don't map
+		if len( *a2) > 1  &&  (*a2)[0:1] != "!" {				// !// names aren't known, don't map
 			req.Send_req( nw_ch, ch, REQ_GETPHOST, a2, nil )
 			req = <- ch									
 			if req.Response_data != nil {					// for an external address this will be unknown
@@ -691,6 +691,9 @@ func dup_in_cache( cache map[string]*gizmos.Pledge, target *gizmos.Pledge ) ( ri
 			isbw = true
 
 		case *gizmos.Pledge_bwow:
+			isbw = true
+
+		case *gizmos.Pledge_pass:
 			isbw = true
 
 		default:
