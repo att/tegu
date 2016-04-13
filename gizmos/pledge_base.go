@@ -33,6 +33,8 @@
 
 	Date:		16 Aug 2015
 	Author:		E. Scott Daniels / Robert Eby
+
+	Mods:		12 Apr 2016 - Duplicate refresh support.
 */
 
 package gizmos
@@ -224,4 +226,11 @@ func (p *Pledge_base) Reset_pushed( ) {
 	if p != nil {
 		p.pushed = false
 	}
+}
+
+/*
+	
+*/
+func (p *Pledge_base) Same_anchors( a1 *string, a2 *string ) (bool ) {
+	return false;
 }
