@@ -36,6 +36,7 @@
 				29 Jun 2015 : Corrected bug in Equals().
 				16 Aug 2015 : Move common code into Pledge_base
 				04 Feb 2016 : Add proto to chkpt and string output.
+				12 Apr 2016 : Correct bug in String() output.
 */
 
 package gizmos
@@ -423,6 +424,26 @@ func (p *Pledge_bwow) Get_gate( ) ( *Gate ) {
 }
 
 
+/*
+	Accept two physical host names and return true if the path 
+	associated with the pledge seems to be anchored by the pair. 
+*/
+func( p *Pledge_bwow ) Same_anchors( a1 *string, a2 *string ) ( bool ) {
+	if p == nil || a1 == nil {
+		return false
+	}
+
+	if p.phost != nil {				// this seems not to be used, but if it is it wins
+		return *a1 == *p.phost
+	}
+
+	if p.epoint == nil {
+		return false
+	}
+
+	return *a1 == *p.epoint.Get_sw_name()
+}
+
 // --- functions required by the interface ------------------------------
 /*
 	Set match v6 flag based on user input.
@@ -464,7 +485,7 @@ func (p *Pledge_bwow) String( ) ( s string ) {
 
 	//NEVER put the usrkey into the string!
 	s = fmt.Sprintf( "%s: togo=%ds %s h1=%s:%s%s h2=%s:%s id=%s qid=%s st=%d ex=%d bwo=%d push=%v dscp=%d proto=%s ptype=bw_oneway", state, diff, caption,
-		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.id, *p.qid, commence, expiry, p.bandw_out, p.pushed, *p.protocol, p.dscp )
+		*p.src, *p.dest_tpport, v1, *p.dest, *p.dest_tpport,  *p.id, *p.qid, commence, expiry, p.bandw_out, p.pushed, p.dscp, *p.protocol )
 	return
 }
 

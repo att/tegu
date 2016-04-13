@@ -37,6 +37,7 @@
 	Author:		E. Scott Daniels
 
 	Mods:		16 Aug 2015 - listed funcs provided by Pledge_base, and those that must be written per Pledge type
+				12 Apr 2016 - Support for duplicate refresh capability.
 */
 
 package gizmos
@@ -67,6 +68,7 @@ type Pledge interface {
 	Pause( bool )
 	Reset_pushed( )
 	Resume( bool )
+	Same_anchors( *string, *string ) ( bool )
 	Set_expiry( expiry int64 )
 	Set_pushed()
 

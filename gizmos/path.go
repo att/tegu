@@ -61,7 +61,7 @@
 				29 Jul 2014 - Mlag support
 				19 Oct 2014 - Support setting queues only on outbound direction of path.
 				29 Oct 2014 - Added Get_nlinks() function.
-				12 Apr 2016 - Added ability to compare paths based on 'anchors'
+				12 Apr 2016 - Added ability to compare paths based on 'anchors' (dup refresh support).
 */
 
 package gizmos
@@ -711,7 +711,11 @@ func (p *Path) Has_anchors( a1 *string, a2 *string ) ( bool ) {
 		return false
 	}
 
-	return *(p.h1.Get_switch_id( 0 )) == *a1  && *(p.h2.Get_switch_id( 0 )) == *a2
+	if a2 != nil {
+		return *(p.h1.Get_switch_id( 0 )) == *a1  && *(p.h2.Get_switch_id( 0 )) == *a2
+	} else {
+		return *(p.h1.Get_switch_id( 0 )) == *a1
+	}
 }
 
 // ------------------------ string/json/human output functions ------------------------------------

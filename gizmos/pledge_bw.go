@@ -43,6 +43,7 @@
 				16 Aug 2015 - Move common code into Pledge_base
 				04 Feb 2016 - Added protocol to chkpt, and string functions.
 				11 Apr 2016 - Correct bad % on String() output.
+				12 Apr 2016 - Duplicate refresh support.
 */
 
 package gizmos
@@ -536,6 +537,7 @@ func( p *Pledge_bw ) Same_anchors( a1 *string, a2 *string ) ( bool ) {
 		return false
 	}
 
+fmt.Printf( ">>>>> go there\n\n" )
 	for _, pth := range p.path_list {				// list could be either order
 		if pth.Has_anchors( a1, a2 ) {
 			return true
