@@ -441,7 +441,7 @@ func finalise_bw_res( res *gizmos.Pledge_bw, res_paused bool ) ( reason string, 
 	req.Send_req( rmgr_ch, my_ch, REQ_DUPCHECK, &gp, nil )	// see if we have a duplicate in the cache
 	req = <- my_ch											// get response from the network thread
 	if req.Response_data != nil {							// response is a pointer to string, if the pointer isn't nil it's a dup
-		rp := req.Response_data.( *string )
+		rp := req.Response_data.( *string )					// id of the duplicated ID comes back
 		if rp != nil {
 			nerrors = 1
 			reason = fmt.Sprintf( "reservation duplicates existing reservation: %s",  *rp )
