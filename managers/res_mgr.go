@@ -1079,6 +1079,7 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 		}
 	}
 
+	send_meta_counter := 200;										// send meta f-mods only now and again
 	rm_sheep.Baa( 1, "ovs table number %d used for metadata marking", alt_table )
 
 	res_refresh = time.Now().Unix() + int64( rr_rate )				// set first refresh in an hour (ignored if hto_limit not set
@@ -1217,7 +1218,12 @@ func Res_manager( my_chan chan *ipc.Chmsg, cookie *string ) {
 						rm_sheep.Baa( 1, "received queue map from network manager" )
 
 						qlist := msg.Response_data.( []string )							// get the qulist map for our use first
-						send_meta_fmods( qlist, alt_table )								// push meta rules
+						if send_meta_counter >= 200 {
+							send_meta_fmods( qlist, alt_table )								// push meta rules
+							send_meta_counter = 0
+						} else {
+							send_meta_counter++
+						}
 
 						msg.Response_ch = nil											// immediately disable to prevent loop
 						fq_data := make( []interface{}, 1 )
