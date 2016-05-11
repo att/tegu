@@ -150,6 +150,7 @@
 				07 Mar 2016 : Tweaked network manager in order to speed up checkpoint reloads.
 				11 Apr 2016 : Resmgr now supports a retry cache in the inventory to allowed previously accepted reservations
 							to be retried at restart.
+				11 May 2016 : Bump agent and fq channel buffer sizes to 4k.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -235,9 +236,9 @@ func main() {
 	}
 
 	nw_ch = make( chan *ipc.Chmsg, 128 )					// create the channels that the threads will listen to
-	fq_ch = make( chan *ipc.Chmsg, 1024 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
-	am_ch = make( chan *ipc.Chmsg, 1024 )			// agent manager channel
-	rmgr_ch = make( chan *ipc.Chmsg, 2048 );		// resmgr main channel for most requests
+	fq_ch = make( chan *ipc.Chmsg, 4096 )			// reqmgr will spew requests expecting a response (asynch) only if there is an error, so channel must be buffered
+	am_ch = make( chan *ipc.Chmsg, 4096 )			// agent manager channel
+	rmgr_ch = make( chan *ipc.Chmsg, 4096 );		// resmgr main channel for most requests
 	rmgrlu_ch = make( chan *ipc.Chmsg, 1024 );		// special channel for reservation look-ups (RMLU_ requests)
 	osif_ch = make( chan *ipc.Chmsg, 1024 )
 
