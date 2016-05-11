@@ -634,6 +634,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		send_all	bool = false			// send all flow-mods; false means send just ingress/egress and not intermediate switch f-mods
 		alt_table	int = DEF_ALT_TABLE		// meta data marking table
 		phost_suffix *string = nil			// physical host suffix added to each host name in the list from openstack (config)
+		set_queues	bool = false			// queues need to be set only when using HTB
 
 		//max_link_used	int64 = 0			// the current maximum link utilisation
 	)
@@ -665,6 +666,7 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 		if dp := cfg_data["fqmgr"]["ssq_cmd"]; dp != nil {		// set switch queue command
 			ssq_cmd = dp
 		}
+
 	
 /*
 		if p := cfg_data["fqmgr"]["default_dscp"]; p != nil {		// this is a single value and should not be confused with the dscp list in the default section of the config
@@ -678,6 +680,11 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				qcheck_freq = 5
 			}
 		}
+
+		if p := cfg_data["fqmgr"]["set_queues"]; p != nil {
+			set_queues = *p == "true"
+		}
+
 	
 		if p := cfg_data["fqmgr"]["host_check"]; p != nil {		// frequency of checking for new _real_ hosts from openstack
 			hcheck_freq = clike.Atoi64( *p )
@@ -832,11 +839,13 @@ func Fq_mgr( my_chan chan *ipc.Chmsg, sdn_host *string ) {
 				}
 
 			case REQ_SETQUEUES:								// request from reservation manager which indicates something changed and queues need to be reset
-				qlist := msg.Req_data.( []interface{} )[0].( []string )
-				if ssq_cmd != nil {
-					adjust_queues( qlist, ssq_cmd, host_list ) 					// if writing to a file and driving a local script
-				} else {
-					adjust_queues_agent( qlist, host_list, phost_suffix )		// if sending json to an agent
+				if set_queues {
+					qlist := msg.Req_data.( []interface{} )[0].( []string )
+					if ssq_cmd != nil {
+						adjust_queues( qlist, ssq_cmd, host_list ) 					// if writing to a file and driving a local script
+					} else {
+						adjust_queues_agent( qlist, host_list, phost_suffix )		// if sending json to an agent
+					}
 				}
 
 			case REQ_CHOSTLIST:								// this is tricky as it comes from tickler as a request, and from osifmgr as a response, be careful!
