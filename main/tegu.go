@@ -151,6 +151,7 @@
 				11 Apr 2016 : Resmgr now supports a retry cache in the inventory to allowed previously accepted reservations
 							to be retried at restart.
 				11 May 2016 : Bump agent and fq channel buffer sizes to 4k.
+				12 May 2016 : Correct core dump in gizmos.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -185,7 +186,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.11/15126"
+		version		string = "v3.1.11/15126a"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

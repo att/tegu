@@ -537,7 +537,10 @@ func( p *Pledge_bw ) Same_anchors( a1 *string, a2 *string ) ( bool ) {
 		return false
 	}
 
-fmt.Printf( ">>>>> go there\n\n" )
+	if a1 == nil {
+		return false
+	}
+
 	for _, pth := range p.path_list {				// list could be either order
 		if pth.Has_anchors( a1, a2 ) {
 			return true
