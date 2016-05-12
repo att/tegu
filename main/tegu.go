@@ -185,7 +185,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.10/15116"
+		version		string = "v3.1.11/15126"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool
