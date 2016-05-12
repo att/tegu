@@ -62,6 +62,7 @@
 				19 Oct 2014 - Support setting queues only on outbound direction of path.
 				29 Oct 2014 - Added Get_nlinks() function.
 				12 Apr 2016 - Added ability to compare paths based on 'anchors' (dup refresh support).
+				12 May 2016 - Correct potential for segfault in has_anchors.
 */
 
 package gizmos
@@ -703,7 +704,7 @@ func (p *Path) Same_anchors( op *Path ) ( bool ) {
 }
 
 /*
-	Lools at the switches at either end of the path (anchors) and if the
+	Looks at the switches at either end of the path (anchors) and if the
 	IDs match a1, and a2 then return true. 
 */
 func (p *Path) Has_anchors( a1 *string, a2 *string ) ( bool ) {
@@ -711,7 +712,14 @@ func (p *Path) Has_anchors( a1 *string, a2 *string ) ( bool ) {
 		return false
 	}
 
+	if p.h1 == nil {
+		return false 
+	}
+
 	if a2 != nil {
+		if p.h2 == nil {
+			return false
+		}
 		return *(p.h1.Get_switch_id( 0 )) == *a1  && *(p.h2.Get_switch_id( 0 )) == *a2
 	} else {
 		return *(p.h1.Get_switch_id( 0 )) == *a1

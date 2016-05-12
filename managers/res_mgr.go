@@ -657,6 +657,10 @@ func phosts_changed( old *gizmos.Pledge, new *gizmos.Pledge ) ( bool ) {
 		p2 *string = nil	
 	)
 
+	if old == nil || new == nil {
+		return false
+	}
+
 	a1, a2 := (*new).Get_hosts( )							// get hosts from the new pledge
 	ch := make( chan *ipc.Chmsg )						// do not close -- senders close channels
 	req := ipc.Mk_chmsg( )
