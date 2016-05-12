@@ -712,6 +712,10 @@ func (p *Path) Has_anchors( a1 *string, a2 *string ) ( bool ) {
 		return false
 	}
 
+	if a1 == nil {
+		return false 
+	}
+
 	if p.h1 == nil {
 		return false 
 	}
