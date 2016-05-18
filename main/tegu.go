@@ -152,6 +152,7 @@
 							to be retried at restart.
 				11 May 2016 : Bump agent and fq channel buffer sizes to 4k.
 				12 May 2016 : Correct core dump in gizmos.
+				18 May 2016 : Prevent possible core dump in net_path if one VM is on a host unknown to tegu.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -186,7 +187,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.11/15126a"
+		version		string = "v3.1.11/15186"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

@@ -306,6 +306,10 @@ func (n *Network) find_relaxed_path( sw1 *gizmos.Switch, h1 *gizmos.Host, sw2 *g
 
 	net_sheep.Baa( 1, "find_lax: creating relaxed path between %s and %s", *(h1.Get_mac()), *(h2.Get_mac()) )
 
+	if sw1 == nil || sw2 == nil {
+		return nil, fmt.Errorf( "one endpoint switch was unknown; cannot create a virtual (relaxed) path" )
+	}
+
 	path = gizmos.Mk_path( h1, h2 )
 	path.Set_bandwidth( 0 )
 	path.Add_switch( sw1 )
