@@ -153,12 +153,11 @@
 				11 May 2016 : Bump agent and fq channel buffer sizes to 4k.
 				12 May 2016 : Correct core dump in gizmos.
 				18 May 2016 : Prevent possible core dump in net_path if one VM is on a host unknown to tegu.
-<<<<<<< HEAD
 				20 May 2016 : Added discvount support to one-way reservations.
 				23 May 2016 : Made ingress rate check consistent for both regular and one-way reservations in relaxed mode.
-=======
 				20 May 1026 : Added discvount support to one-way reservations.
->>>>>>> Add discount support to one-way bandwidth reservations.
+				20 May 2016 : Added discvount support to one-way reservations.
+				23 May 2016 : Made ingress rate check consistent for both regular and one-way reservations in relaxed mode.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
