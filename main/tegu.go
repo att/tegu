@@ -145,7 +145,7 @@
 				03 Feb 2016 : Added individual protocol support for bw and bwow reservations.
 				25 Feb 2016 : Correct late binding bug in network. Correct bad json formatting in mirror pledge.
 				28 Feb 2016 : Correct bug preventing port masks from being recognised as valid on bandwidth reservations.
-				06 Mar 2016 : Correct issue with deadlock when there are both a large number of bandwidth reservations and
+				06 Mar 2016 : Correct issue with deadlock when there are both a large number of bandwidth reservations and 
 							mirrors in place.
 				07 Mar 2016 : Tweaked network manager in order to speed up checkpoint reloads.
 				11 Apr 2016 : Resmgr now supports a retry cache in the inventory to allowed previously accepted reservations
@@ -153,12 +153,8 @@
 				11 May 2016 : Bump agent and fq channel buffer sizes to 4k.
 				12 May 2016 : Correct core dump in gizmos.
 				18 May 2016 : Prevent possible core dump in net_path if one VM is on a host unknown to tegu.
-<<<<<<< HEAD
 				20 May 2016 : Added discvount support to one-way reservations.
 				23 May 2016 : Made ingress rate check consistent for both regular and one-way reservations in relaxed mode.
-=======
-				20 May 1026 : Added discvount support to one-way reservations.
->>>>>>> Add discount support to one-way bandwidth reservations.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
