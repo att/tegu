@@ -328,7 +328,7 @@ func (g *Gate) Has_capacity( commence int64, conclude int64, delta int64, usr *s
 		return false
 	}
 
-	return g.gsw.Has_capacity_out( commence, conclude, delta, usr, usr_max )
+	return g.gsw.Has_capacity_out( commence, conclude, g.bandw, usr, usr_max )
 }
 
 // ------------------------ string/json/human output functions ------------------------------------

@@ -91,7 +91,6 @@
 				25 Feb 2016 - Corrected missing nil pointer check in find_vlink()
 				07 Mar 2015 - Added the graph rebuild when adding a node.
 				12 Apr 2016 - Additional error checking in PHOST processing to prevent stack dump.
-				20 May 2016 - Added discount support to one-way reservations.
 */
 
 package managers
@@ -1259,25 +1258,7 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 									if fence != nil {
 										max = fence.Get_limit_max()
 									}
-
-									bw := p.Get_bandwidth()
-									suffix := "bps"							// suffix for bleat
-									if discount > 0 {
-										if discount < 101 {					// reduce by percentage of request
-											bw -=  ((bw * discount)/100)
-											suffix = "%"
-										} else {
-											bw -= discount					// reduce by a hard amount
-										}
-
-										if bw < 10 {						// add some sanity, and keep it from going too low
-											bw = 10
-										}
-										
-										net_sheep.Baa( 1, "owbandwidth was reduced by a discount of %d%s: bw=%d", discount, suffix, bw )
-									}
-
-									if gate.Has_capacity( c, e, bw, &usr, max ) {						// finally, verify that there is room and let it go if there is
+									if gate.Has_capacity( c, e, p.Get_bandwidth(), &usr, max ) {		// verify that there is room
 										qid := p.Get_id()												// for now, the queue id is just the reservation id, so fetch
 										p.Set_qid( qid ) 												// and add the queue id to the pledge
 
@@ -1289,8 +1270,8 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 											req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
 										}
 									} else {
-										net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %d (disc=%d)", bw, discount  )
-										req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), *gate.Get_sw_name() )
+										net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %s", p.Get_bandwidth() )
+										req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), gate.Get_sw_name() )
 									}
 								} else {
 									net_sheep.Baa( 1, "cant map %s to ip: %s", src )
