@@ -43,7 +43,6 @@
 					oneway bandwidth reserations with a function that checks outbound capacity
 					on all switch links.
 				10 Sep 2015 - Allow finding attached 'hosts' based on uuid.
-				23 May 2016 - Add link error when capacity rejecting.
 */
 
 package gizmos
@@ -441,7 +440,7 @@ func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, i
 			// TODO:  Add tenant based check
 			_, err := v.Has_capacity( commence, conclude, inc_amt, usr, usr_max )
 			if err != nil {
-				err = fmt.Errorf( "no capacity found between switch (%s) and target (%s): %s", *s.id, *target, err )
+				err = fmt.Errorf( "no capacity found between switch (%s) and target (%s)", *s.id, *target )
 				obj_sheep.Baa( 2, "all_paths: no capacity on link: %s", err )
 				links = nil
 				break
@@ -452,7 +451,7 @@ func (s *Switch) All_paths_to( target *string, commence int64, conclude int64, i
 			i++
 		}
 	} else {
-		err = fmt.Errorf( "no paths found bwtween switch (%s) and target (%s): no links from switch", *s.id, *target )
+		err = fmt.Errorf( "no paths found bwtween switch (%s) and target (%s)", *s.id, *target )
 	}
 
 	return

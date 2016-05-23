@@ -58,7 +58,6 @@
 				05 Sep 2014 - Pick up late binding port info if port is <0 rather than 0.
 				19 Oct 2014 - Comment change
 				18 Jun 2015 - Added nil pointer check.
-				23 May 2016 - Add link name to capacity error message.
 */
 
 package gizmos
@@ -487,10 +486,6 @@ func (l *Link) Inc_queue( qid *string, commence int64, conclude int64, amt int64
 
 	if r {
 		l.allotment.Inc_queue( qid, amt, commence, conclude, usr )
-	} else {
-		if err != nil {
-			err = fmt.Errorf( "link=%s %s", l.id, err )
-		}
 	}
 
 	return r, err
