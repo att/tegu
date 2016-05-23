@@ -27,7 +27,8 @@
 	Date:		09 June 2015 (broken out of main-line network.go)
 	Author:		E. Scott Daniels
 
-	Mods:
+	Mods:		23 May 2016 - Make ingress rate check in relaxed mode consistent between 
+					regular and one-way reservations.
 */
 
 package managers
@@ -428,9 +429,10 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 				lnk = n.find_vlink( *(ssw.Get_id()), p1, p2, m1, m2 )
 				has_room := true									// always room if relaxed mode, so start this way
-				if ! n.relaxed {
-					has_room, err = lnk.Has_capacity( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) 	// admission control if not in relaxed mode
+				if n.relaxed {
+					has_room = ssw.Has_capacity_out( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() )		// ensure cap on all outbound links from switch
 				}
+
 				if has_room {										// room for the reservation
 					lnk.Add_lbp( *h1nm )
 					net_sheep.Baa( 1, "path[%d]: found target on same switch, different ports: %s  %d, %d", plidx, ssw.To_str( ), h1.Get_port( ssw ), h2.Get_port( ssw ) )
@@ -444,11 +446,7 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 					plidx++
 				} else {
 					lcap_trip = true
-					if err != nil {
-						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d: %s", plidx, inc_cap, err )
-					} else {
-						net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", plidx, inc_cap )
-					}
+					net_sheep.Baa( 1, "path[%d]: hosts on same switch, virtual link cannot support bandwidth increase of %d", plidx, inc_cap )
 				}
 			}  else {					// debugging only
 				net_sheep.Baa( 2,  "find-path: path[%d]: found target (%s) on same switch with same port: %s  %d, %d", plidx, *h2nm, ssw.To_str( ), p1, p2 )
@@ -466,8 +464,15 @@ func (n *Network) find_paths( h1nm *string, h2nm *string, usr *string, commence 
 
 			
 			if n.relaxed {				
-				dsw, _ := h2.Get_switch_port( swidx )					// need the switch associated with the second host (dest switch)
-				path, err = n.find_relaxed_path( ssw, h1, dsw, h2 )		// no admissions control we fake a link between the two
+				if ! ssw.Has_capacity_out( commence, conclude, inc_cap, fence.Name, fence.Get_limit_max() ) {			// we do enforce capacity on ingress switch
+					err = fmt.Errorf( "ingress switch cannot support additional bandwidth (%d) or user max reached (%d)", inc_cap, fence.Get_limit_max() )
+					net_sheep.Baa( 1, "%s", err )
+					lcap_trip = true
+				} else {
+					dsw, _ := h2.Get_switch_port( swidx )					// need the switch associated with the second host (dest switch)
+					path, err = n.find_relaxed_path( ssw, h1, dsw, h2 )
+				}
+
 				if err != nil {
 					net_sheep.Baa( 1, "find_paths: find_relaxed failed: %s", err )
 				}
