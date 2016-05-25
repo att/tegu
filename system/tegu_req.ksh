@@ -75,6 +75,9 @@
 #				24 Nov 2015 - Add options to add-mirror
 #				16 Dec 2015 - Correct OS_REGION env reference to be correct (OS_REGION_NAME)
 #				27 Jan 2016 - Added support for passthru
+#				25 May 2016 - Convert cancel reservation into a POST since some bloody proxy
+#					was altering the DELETE request being passed through it. Bloody rest 
+#					interface is for the birds.
 # ----------------------------------------------------------------------------------------
 
 function usage {
@@ -624,7 +627,8 @@ case $1 in
 				;;
 		esac
 
-		rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto$host/$bandwidth"
+		#rjprt $opts -m DELETE -D "reservation $1 $2" -t "$proto$host/$bandwidth"	# bloody hell - some proxies drop a body on DELETE so everything now is a POST.
+		rjprt $opts -m POST -D "cancelres $1 $2" -t "$proto$host/$bandwidth"
 		;;
 
 	passthru|passthrough)
