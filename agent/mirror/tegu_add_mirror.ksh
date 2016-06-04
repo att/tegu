@@ -1,5 +1,5 @@
 #!/bin/ksh
-# vi: sw=4 ts=4:
+# vi: sw=4 ts=4 noexpandtab:
 #
 # ---------------------------------------------------------------------------
 #   Copyright (c) 2013-2015 AT&T Intellectual Property
@@ -62,7 +62,44 @@
 #                  09 Jan 2016 - Handle VLAN=-1 case in -oflowmod option processing.
 #                                Allow df_default=(true|false) and df_inherit=(true|false) in options
 #                  18 Jan 2016 - Fix flowmod mirrors so they resubmit (in case vlans need to be rewritten)
+#					03 Jun 2016 - Map vlans when setting up flow-mod based mirrors.
 #
+
+# --------------------------------------------------------------------------------------------------------------
+
+#	Looks at the flow-mods on the indicated bridge and creates a map from external vlan id to the
+#	internal id.  We make the following assumptions:
+#		1) neutron flow-mods all have cookie 0x0 and ours do not
+#		2) the flow-mod output from ovs lists the match criteria first
+#		   followed by the action information.
+#
+#	As an example:
+#		If a VM shows vlan 2 from an ovs_sp2uuid perspective, but
+#		neutron has set up vlan 3200 for that traffic to go out of br-int on, then
+#		looking up vlan id 2 will result in 3200.
+function map_ib_vlans
+{
+	sudo ovs-ofctl dump-flows ${1:-br-int} | grep cookie=0x0,.*mod_vlan |sed 's/.*dl_vlan=//; s/ .*mod_vlan_vid:/ /; s/,.*//' | while read to from junk
+	do
+		ib_vlan_map[$to]=$from
+	done
+}
+
+#	Given the VM's local vlan ID, map it to the vlan id that will be used
+#	outside of this environment (the vlan id that we expect packets to be
+#	marked with upon arrival. If there is no translation (this is an environment
+#	where vlan translation isn't done) then the same vlan id passed in is
+#	returned
+function xlate_vlan
+{
+	typeset xvid=${ib_vlan_map[${1:--1}]}
+	if [[ -n $xvid ]]
+	then
+		echo $xvid
+	fi
+
+	echo $1
+}
 
 function valid_ip4
 {
@@ -134,6 +171,7 @@ function usage
 
 # Preliminaries
 PATH=$PATH:/sbin:/usr/bin:/bin		# must pick up agent augmented path
+typeset -a ib_vlan_map				# maps local vlans to the inbound vlan id that needs to appear on the flowmod
 echo=:
 options=
 while [[ "$1" == -* ]]
@@ -217,6 +255,8 @@ do
 	esac
 done
 realports=`echo $realports | sed 's/^,//'`
+
+map_ib_vlans $bridgename			# build a vlan translation map of inbound vlan ids to local vlan ids
 
 # Check output type
 case "$output" in
@@ -317,6 +357,8 @@ gre)
 			MIRRORPORT=$(grep $port < /tmp/tam.$$ | cut -d' ' -f3)
 			MIRRORVLAN=$(grep $port < /tmp/tam.$$ | cut -d' ' -f7)
 			 MIRRORMAC=$(grep $port < /tmp/tam.$$ | cut -d' ' -f5)
+
+			MIRRORVLAN=$( xlate_vlan $MIRRORVLAN )						# translate to external vlan id if vlan translation is in effect
 			if [ "$MIRRORVLAN" -gt 0 -a "$MIRRORVLAN" -lt 4095 ]
 			then
 				RULES="dl_vlan=$MIRRORVLAN,dl_dst=$MIRRORMAC"
