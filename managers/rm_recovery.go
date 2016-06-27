@@ -27,7 +27,9 @@
 	Author:		E. Scott Daniels
 
 
-	Mods:
+	Mods:		27 Jun 2016 - 
+						Corrected bad bleat message.
+						Correct potential nil ptr exeeption in vet.
 */
 
 package managers
@@ -87,7 +89,17 @@ func vet_pledge( p *gizmos.Pledge ) ( disposition int ) {
 				if req.Response_data != nil {
 					gate := req.Response_data.( *gizmos.Gate )		// expect that network sent us a gate
 					sp.Set_gate( gate )
-					rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s %s %s %s", *(sp.Get_id()), *h1, *h2, *(gate.Get_extip()) )
+
+					gate_ip := "nil"
+					gipp := gate.Get_extip()
+					if gipp != nil {
+						gate_ip = *gipp
+					}
+					h2s := "nil"
+					if h2 != nil {
+						h2s = *h2
+					}
+					rm_sheep.Baa( 1, "gate allocated for oneway reservation: %s h1=%s h2=%s gate_ip=%s", *(sp.Get_id()), *h1, h2s, gate_ip )
 					//err = i.Add_res( p )
 				} else {
 					rm_sheep.Baa( 0, "WRN: pledge_vet: unable to reserve for oneway pledge: %s	[TGURMG000]", (*p).To_str() )
@@ -235,7 +247,7 @@ func (inv *Inventory) load_chkpt( fname *string ) ( err error ) {
 					if err == nil {
 						switch vet_pledge( p ) {
 							case DS_ADD:
-								rm_sheep.Baa( 2, "reservaton vetted; added to the cache: %s", (*p).Get_id() )
+								rm_sheep.Baa( 2, "reservaton vetted; added to the cache: %s", *((*p).Get_id()) )
 								err = inv.Add_res( p )				// vet ok, add to reservation cache
 								added++
 
