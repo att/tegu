@@ -63,6 +63,7 @@
 #                                Allow df_default=(true|false) and df_inherit=(true|false) in options
 #                  18 Jan 2016 - Fix flowmod mirrors so they resubmit (in case vlans need to be rewritten)
 #					03 Jun 2016 - Map vlans when setting up flow-mod based mirrors.
+#					01 Jul 2016 - Fix the map to go both directions.
 #
 
 # --------------------------------------------------------------------------------------------------------------
@@ -79,9 +80,10 @@
 #		looking up vlan id 2 will result in 3200.
 function map_ib_vlans
 {
-	sudo ovs-ofctl dump-flows ${1:-br-int} | grep cookie=0x0,.*mod_vlan |sed 's/.*dl_vlan=//; s/ .*mod_vlan_vid:/ /; s/,.*//' | while read to from junk
+	sudo ovs-ofctl dump-flows ${1:-br-int} | grep cookie=0x0,.*mod_vlan |sed 's/.*dl_vlan=//; s/ .*mod_vlan_vid:/ /; s/,.*//' | while read from to junk
 	do
 		ib_vlan_map[$to]=$from
+		ib_vlan_map[$from]=$to
 	done
 }
 
