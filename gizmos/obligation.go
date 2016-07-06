@@ -57,6 +57,7 @@
 				18 Jun 2015 : Corrected cause of potential core dump if queue ID passed in is
 					empty. Some cleanup of commented lines.
 				22 Jun 2015 : Corrected cause of core dump when updating utilisation on mlag.
+				05 Jul 2016 : Changed the max date to 2026/01/01 00:00:00
 */
 
 package gizmos
@@ -67,7 +68,7 @@ import (
 )
 
 const (
-	DEF_END_TS = 1735707600		// jan 1, 2025 -- it we're still being used then I'll be surprised!
+	DEF_END_TS = 1767243600		// jan 1, 2026 -- it we're still being used then I'll be surprised!
 )
 
 type Obligation struct {
