@@ -64,6 +64,7 @@
 #                  18 Jan 2016 - Fix flowmod mirrors so they resubmit (in case vlans need to be rewritten)
 #					03 Jun 2016 - Map vlans when setting up flow-mod based mirrors.
 #					01 Jul 2016 - Fix the map to go both directions.
+#					15 Jul 2016 - Correct missing return in vlan-id translation funciton.
 #
 
 # --------------------------------------------------------------------------------------------------------------
@@ -98,6 +99,7 @@ function xlate_vlan
 	if [[ -n $xvid ]]
 	then
 		echo $xvid
+		return
 	fi
 
 	echo $1
