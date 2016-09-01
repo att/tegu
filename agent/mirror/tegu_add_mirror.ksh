@@ -65,6 +65,7 @@
 #					03 Jun 2016 - Map vlans when setting up flow-mod based mirrors.
 #					01 Jul 2016 - Fix the map to go both directions.
 #					15 Jul 2016 - Correct missing return in vlan-id translation funciton.
+#					01 Sep 2016 - Correct the declaration of the inbound vlan map array
 #
 
 # --------------------------------------------------------------------------------------------------------------
@@ -95,6 +96,12 @@ function map_ib_vlans
 #	returned
 function xlate_vlan
 {
+	if (( $1 < 1 ))			# prevent accidents if array is not associative
+	then
+		echo $1
+		return
+	fi
+
 	typeset xvid=${ib_vlan_map[${1:--1}]}
 	if [[ -n $xvid ]]
 	then
@@ -175,7 +182,7 @@ function usage
 
 # Preliminaries
 PATH=$PATH:/sbin:/usr/bin:/bin		# must pick up agent augmented path
-typeset -a ib_vlan_map				# maps local vlans to the inbound vlan id that needs to appear on the flowmod
+typeset -A ib_vlan_map				# maps local vlans to the inbound vlan id that needs to appear on the flowmod
 echo=:
 options=
 while [[ "$1" == -* ]]
