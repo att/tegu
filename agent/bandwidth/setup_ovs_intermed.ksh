@@ -129,6 +129,7 @@
 #				02 Sep 2015 - Extracted the iptables setup (now in ql_setup_ipt) and replaed with a call.
 #				12 Oct 2015 - Explicitly delete the br-rl setup if -I is not given.
 #				07 Mar 2016 - No longer add the p10 rule to an L3 node (node which has a qrouter).
+#				16 Jan 2017 - Correct bug with respect to dropping p10 rule on L3 nodes.
 # ----------------------------------------------------------------------------------------------------------
 #
 #  Some OVS QoS and Queue notes....
@@ -590,11 +591,12 @@ else
 	fi
 fi
 
+no_dscp_reset_file=/tmp/tegu_ndscpr				# file that prevents further attempts to undo the rule
 if (( allow_reset ))		# write the f-mods that drop the DSCP values from traffic that have tegu dscp markings and were not set by a tegu f-mod (meta & 0x02 == 0)
 then
 	send_ovs_fmod $noexec $rhost -T ${QL_M4_TABLE:-94} -t 0  --match --action -m 0x4/0x4  -N  add 0xbeef br-int			# cannot set meta before resub, so set in alternate table
 
-	if [[ ! -f /etc/tegu/no_dscp_reset ]]			# we set this if we deleted the rule to eliminate the (can be expensive) netns call each time 
+	if [[ ! -f $no_dscp_reset_file ]]			# we set this if we deleted the rule to eliminate the (can be expensive) netns call each time 
 	then
 		ip netns | grep -c "qrouter-" | read rcount
 		if (( rcount == 0 ))								# no routers, safe to set the p10 rule
@@ -606,7 +608,7 @@ then
 				rc=1
 			fi
 		else
-			touch /etc/tegu/no_dscp_reset					# prevent writing the rule out again
+			touch $no_dscp_reset_file					# prevent writing the rule out again
 			if ! send_ovs_fmod $rhost $noexec -t 2 -p 10 --match  -m 0x00 --action -T 0  -R ",${QL_M4_TABLE:-94}" -R ",0" -N del 0xfeed br-int  # ditch the fmod
 			then
 				logit "unable to unset the p10 fmod		[WRN]"
@@ -614,10 +616,10 @@ then
 			fi
 		fi
 	else
-		logit "no dropping flow-mods written, /etc/tegu/no_dscp_reset existed"
+		logit "p10 fmod(s) not written, $no_dscp_reset_file existed"
 	fi
 else
-	logit "no dropping flow-mods written -D was set"
+	logit "-D option prevented writing p10 dropping flow-mod(s)"
 fi
 
 logit "waiting for asynch commands to complete"
