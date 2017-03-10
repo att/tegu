@@ -395,9 +395,9 @@ func Agent_mgr( ach chan *ipc.Chmsg ) {
 		}
 		if p := cfg_data["agent"]["iqrefresh"]; p != nil {
 			iqrefresh = int64( clike.Atoi( *p ) )
-			if iqrefresh < 90 {
-				am_sheep.Baa( 1, "iqrefresh in configuration file is too small, set to 90 seconds" )
-				iqrefresh = 90
+			if iqrefresh < 1800 {
+				am_sheep.Baa( 1, "iqrefresh in configuration file is too small, set to 1800 seconds" )
+				iqrefresh = 1800
 			}
 		}
 	}

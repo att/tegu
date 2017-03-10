@@ -61,6 +61,7 @@
 				02 Sep 2015 : Pick up new agent script.
 				12 Nov 2015 : Updated to return stdout/stderr for do_mirrorwiz()
 				26 Jan 2016 : Added support for passthrough reservations (bandwidth)
+				10 Mar 2017	: Prevent map_mac2phost from running if a setup intermed is in progress.
 
 	NOTE:		There are three types of generic error/warning messages which have
 				the same message IDs (007, 008, 009) and thus are generated through
@@ -539,8 +540,8 @@ func do_map_mac2phost( req json_action, broker *ssh_broker.Broker, path *string,
 
 	startt := time.Now().Unix()
 
-	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
-															// do NOT close this channel, only senders should close
+	ssh_rch := make( chan *ssh_broker.Broker_msg, len( req.Hosts ) )		// channel for ssh results (be able to buffer each response)
+																			// do NOT close this channel, only senders should close
 
 	wait4 := 0											// number of responses to wait for
 	for k, v := range req.Hosts {						// submit them all out non-blocking
@@ -610,10 +611,10 @@ func do_intermedq( req json_action, broker *ssh_broker.Broker, path *string, tim
 	running_sim = true										// prevent queuing another of these
 	sheep.Baa( 1, "running intermediate switch queue/fmod setup on all hosts (broker)" )
 
-	ssh_rch := make( chan *ssh_broker.Broker_msg, 256 )		// channel for ssh results
-															// do NOT close the channel here; only senders should close
+	ssh_rch := make( chan *ssh_broker.Broker_msg, len( req.Hosts ) )		// channel for ssh results; with the potential to buffer all responses
+																			// do NOT close the channel here; only senders should close
 
-	wait4 := 0												// number of responses to wait for
+	wait4 := 0																// number of responses to wait for
 	for i := range req.Hosts {
 		cmd_str := fmt.Sprintf( `PATH=%s:$PATH setup_ovs_intermed -d "%s"`, *path, req.Dscps )
     	sheep.Baa( 1, "via broker on %s: %s", req.Hosts[i], cmd_str )
@@ -895,10 +896,14 @@ func handle_blob( jblob []byte, broker *ssh_broker.Broker, path *string ) ( resp
 					do_fmod( req.Actions[i], broker, path, 30 )
 
 			case "map_mac2phost":							// run script to generate mac to physical host mappings
-					p, err := do_map_mac2phost( req.Actions[i], broker, path, 15 )
-					if err == nil {
-						resp[ridx] = p
-						ridx++
+					if ! running_sim {												// it's not good to start overlapping setup scripts
+						p, err := do_map_mac2phost( req.Actions[i], broker, path, 30 )
+						if err == nil {
+							resp[ridx] = p
+							ridx++
+						}
+					} else {
+						sheep.Baa( 1, "handle blob: mac2phost periodic run blocked: setqueues still running" )
 					}
 
 			case "intermed_queues":													// setup intermediate queues
