@@ -92,6 +92,7 @@
 				07 Mar 2015 - Added the graph rebuild when adding a node.
 				12 Apr 2016 - Additional error checking in PHOST processing to prevent stack dump.
 				20 May 2016 - Added discount support to one-way reservations.
+				20 Apr 2017 - Correct possible nil pointer reference.
 */
 
 package managers
@@ -1289,8 +1290,16 @@ func Network_mgr( nch chan *ipc.Chmsg, sdn_host *string ) {
 											req.State = fmt.Errorf( "unable to create oneway reservation: unable to setup queue" )
 										}
 									} else {
+										var name string
+
 										net_sheep.Baa( 1, "owreserve: switch does not have enough capacity for a oneway reservation of %d (disc=%d)", bw, discount  )
-										req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), *gate.Get_sw_name() )
+										namep := gate.Get_sw_name()
+										if namep == nil {
+											name = "unknown (nil)"
+										} else {
+											name = *namep
+										}
+										req.State = fmt.Errorf( "unable to create oneway reservation for %d: no capacity on (v)switch: %s", p.Get_bandwidth(), name ) 
 									}
 								} else {
 									net_sheep.Baa( 1, "cant map %s to ip: %s", src )
