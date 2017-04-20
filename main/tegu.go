@@ -153,7 +153,7 @@
 				11 May 2016 : Bump agent and fq channel buffer sizes to 4k.
 				12 May 2016 : Correct core dump in gizmos.
 				18 May 2016 : Prevent possible core dump in net_path if one VM is on a host unknown to tegu.
-				20 Apr 2017 : Prevent possible nil pointer use in network.go.
+				20 Apr 2017 : Prevent possible nil pointer use in network.go. Correct inability to handle blank line in ckpt file.
 
 	Version number "logic":
 				3.0		- QoS-Lite version of Tegu
@@ -188,7 +188,7 @@ func usage( version string ) {
 
 func main() {
 	var (
-		version		string = "v3.1.12/14207"
+		version		string = "v3.1.12/14207a"
 		cfg_file	*string  = nil
 		api_port	*string						// command line option vars must be pointers
 		verbose 	*bool

@@ -30,6 +30,7 @@
 	Mods:		27 Jun 2016 - 
 						Corrected bad bleat message.
 						Correct potential nil ptr exeeption in vet.
+				20 Apr 2017 - Prevent core dump if chkpt file has blank line.
 */
 
 package managers
@@ -232,7 +233,7 @@ func (inv *Inventory) load_chkpt( fname *string ) ( err error ) {
 	br := bufio.NewReader( f )
 	for ; err == nil ; {
 		rec, err = br.ReadString( '\n' )
-		if err == nil  {
+		if err == nil && len( rec ) > 5  {
 			nrecs++
 
 			switch rec[0:5] {
